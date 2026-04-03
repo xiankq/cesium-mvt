@@ -11,6 +11,9 @@ importers:
       '@mapbox/vector-tile':
         specifier: ^2.0.4
         version: 2.0.4
+      '@maplibre/maplibre-gl-style-spec':
+        specifier: ^24.8.0
+        version: 24.8.0
       cesium:
         specifier: ^1.140.0
         version: 1.140.0
@@ -101,11 +104,22 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@mapbox/jsonlint-lines-primitives@2.0.2':
+    resolution: {integrity: sha512-rY0o9A5ECsTQRVhv7tL/OyDpGAoUB4tTvLiW1DSzQGq4bvTPhNw1VpSNjDJc5GFZ2XuyOtSWSVN05qOtcD71qQ==}
+    engines: {node: '>= 0.6'}
+
   '@mapbox/point-geometry@1.1.0':
     resolution: {integrity: sha512-YGcBz1cg4ATXDCM/71L9xveh4dynfGmcLDqufR+nQQy3fKwsAZsWd/x4621/6uJaeB9mwOHE6hPeDgXz9uViUQ==}
 
+  '@mapbox/unitbezier@0.0.1':
+    resolution: {integrity: sha512-nMkuDXFv60aBr9soUG5q+GvZYL+2KZHVvsqFCzqnkGEf46U2fvmytHaEVc1/YZbiLn8X+eR3QzX1+dwDO1lxlw==}
+
   '@mapbox/vector-tile@2.0.4':
     resolution: {integrity: sha512-AkOLcbgGTdXScosBWwmmD7cDlvOjkg/DetGva26pIRiZPdeJYjYKarIlb4uxVzi6bwHO6EWH82eZ5Nuv4T5DUg==}
+
+  '@maplibre/maplibre-gl-style-spec@24.8.0':
+    resolution: {integrity: sha512-jDdUAW2rZXq+WZgRfMuhplNw166xf4zymK0cxr9qlYlef7CLQz3cb8Nn47DOgKmxlwv/UCHHieVdgg+dSuW3gg==}
+    hasBin: true
 
   '@napi-rs/wasm-runtime@1.1.2':
     resolution: {integrity: sha512-sNXv5oLJ7ob93xkZ1XnxisYhGYXfaG9f65/ZgYuAu3qt7b3NadcOEhLvx28hv31PgX8SZJRYrAIPQilQmFpLVw==}
@@ -489,6 +503,9 @@ packages:
     resolution: {integrity: sha512-B7qPcEVE3NVkmSJbaYxvv4cHkVW7DQsZz13pUMrfS8z8Q/BuShN+gcTXrUlPiGqM2/t/EEaI030bpxMqY8gMlw==}
     engines: {node: '>= 10.16.0'}
 
+  json-stringify-pretty-compact@4.0.0:
+    resolution: {integrity: sha512-3CNZ2DnrpByG9Nqj6Xo8vqbjT4F6N+tb4Gb28ESAZjYZ5yqvmc56J+/kuIwkaAMOyblTQhUW7PxMkUb8Q36N3Q==}
+
   jsonfile@6.2.0:
     resolution: {integrity: sha512-FGuPw30AdOIUTRMC2OMRtQV+jkVj2cfPqSeWXv1NEAJ1qZ5zb1X6z1mFhbfOB/iy3ssJCD+3KuZ8r8C3uVFlAg==}
 
@@ -603,6 +620,9 @@ packages:
     resolution: {integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==}
     engines: {node: '>=18'}
 
+  minimist@1.2.8:
+    resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
+
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
@@ -685,6 +705,9 @@ packages:
   run-parallel@1.2.0:
     resolution: {integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==}
 
+  rw@1.3.3:
+    resolution: {integrity: sha512-PdhdWy89SiZogBLaw42zdeqtRJ//zFd2PgQavcICDUgJT5oW10QCRKbJ6bg4r0/UY2M6BWd5tkxuGFRvCkgfHQ==}
+
   send@1.2.1:
     resolution: {integrity: sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==}
     engines: {node: '>= 18'}
@@ -707,6 +730,9 @@ packages:
   tinyglobby@0.2.15:
     resolution: {integrity: sha512-j2Zq4NyQYG5XMST4cbs02Ak8iJUdxRM0XI5QyxXuZOzKOINmWurp3smXu3y5wDcJrptwpSjgXHzIQxR0omXljQ==}
     engines: {node: '>=12.0.0'}
+
+  tinyqueue@3.0.0:
+    resolution: {integrity: sha512-gRa9gwYU3ECmQYv3lslts5hxuIa90veaEcxDYuu3QGOIAEM2mOZkVHp48ANJuu1CURtRdHKUBY5Lm1tHV+sD4g==}
 
   to-regex-range@5.0.1:
     resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
@@ -944,13 +970,27 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  '@mapbox/jsonlint-lines-primitives@2.0.2': {}
+
   '@mapbox/point-geometry@1.1.0': {}
+
+  '@mapbox/unitbezier@0.0.1': {}
 
   '@mapbox/vector-tile@2.0.4':
     dependencies:
       '@mapbox/point-geometry': 1.1.0
       '@types/geojson': 7946.0.16
       pbf: 4.0.1
+
+  '@maplibre/maplibre-gl-style-spec@24.8.0':
+    dependencies:
+      '@mapbox/jsonlint-lines-primitives': 2.0.2
+      '@mapbox/unitbezier': 0.0.1
+      json-stringify-pretty-compact: 4.0.0
+      minimist: 1.2.8
+      quickselect: 3.0.0
+      rw: 1.3.3
+      tinyqueue: 3.0.0
 
   '@napi-rs/wasm-runtime@1.1.2(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)':
     dependencies:
@@ -1276,6 +1316,8 @@ snapshots:
 
   jsep@1.4.0: {}
 
+  json-stringify-pretty-compact@4.0.0: {}
+
   jsonfile@6.2.0:
     dependencies:
       universalify: 2.0.1
@@ -1359,6 +1401,8 @@ snapshots:
   mime-types@3.0.2:
     dependencies:
       mime-db: 1.54.0
+
+  minimist@1.2.8: {}
 
   ms@2.1.3: {}
 
@@ -1455,6 +1499,8 @@ snapshots:
     dependencies:
       queue-microtask: 1.2.3
 
+  rw@1.3.3: {}
+
   send@1.2.1:
     dependencies:
       debug: 4.4.3
@@ -1490,6 +1536,8 @@ snapshots:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.4)
       picomatch: 4.0.4
+
+  tinyqueue@3.0.0: {}
 
   to-regex-range@5.0.1:
     dependencies:

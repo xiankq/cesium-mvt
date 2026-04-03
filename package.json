@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@mapbox/vector-tile": "^2.0.4",
+    "@maplibre/maplibre-gl-style-spec": "^24.8.0",
     "cesium": "^1.140.0",
     "earcut": "^3.0.2",
     "pbf": "^4.0.1",

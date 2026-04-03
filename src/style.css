@@ -144,6 +144,49 @@ select {
   color: #eaf4ff;
 }
 
+.runtime-status {
+  margin-top: 18px;
+  padding: 14px 14px 12px;
+  border: 1px solid rgba(103, 215, 255, 0.16);
+  border-radius: 18px;
+  background: rgba(2, 8, 16, 0.42);
+}
+
+.runtime-status__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-status__label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.runtime-status__value {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.runtime-status__summary {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.runtime-status__meta {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
 .actions {
   display: flex;
   gap: 12px;
