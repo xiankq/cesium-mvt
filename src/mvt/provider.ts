@@ -76,14 +76,15 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
       maxConcurrentRequests,
       cacheSize,
     )
+    this.imageryLayer = viewer.scene.imageryLayers.addImageryProvider(this)
 
     this.sourceCache = new CesiumMvtSourceCache({
       scene: viewer.scene,
       scheduler: this.scheduler,
       tilingScheme: this.tilingScheme,
       source,
+      imageryLayer: this.imageryLayer,
     })
-    this.imageryLayer = viewer.scene.imageryLayers.addImageryProvider(this)
 
     try {
       if (style) {

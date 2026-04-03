@@ -7,6 +7,11 @@ const container = shallowRef<HTMLDivElement | null>(null)
 const viewerRef = shallowRef<Viewer>()
 let animationFrameHandle: number | undefined
 let renderErrorCleanup: (() => void) | undefined
+let resizeObserver: ResizeObserver | undefined
+let createRetryHandle: ReturnType<typeof setTimeout> | undefined
+let viewerCreating = false
+
+const VIEWER_CREATE_RETRY_DELAY_MS = 1000
 
 provide(ViewerKey, viewerRef)
 
@@ -34,7 +39,23 @@ function renderViewerFrame() {
   viewer.render()
 }
 
+function clearCreateRetryTimer() {
+  if (createRetryHandle !== undefined) {
+    clearTimeout(createRetryHandle)
+    createRetryHandle = undefined
+  }
+}
+
+function destroyViewer() {
+  renderErrorCleanup?.()
+  renderErrorCleanup = undefined
+  viewerRef.value?.destroy()
+  viewerRef.value = undefined
+}
+
 function createViewer(target: HTMLDivElement) {
+  target.replaceChildren()
+
   const viewer = new Viewer(target, {
     animation: false,
     baseLayerPicker: false,
@@ -73,22 +94,48 @@ function createViewer(target: HTMLDivElement) {
 
 function ensureViewer() {
   const target = container.value
-  if (!target || !hasUsableSize(target)) {
+  if (!target || !hasUsableSize(target) || viewerRef.value || viewerCreating) {
     return
   }
 
-  if (!viewerRef.value) {
+  viewerCreating = true
+
+  try {
     createViewer(target)
+  } catch (error) {
+    target.replaceChildren()
+    console.error('Failed to create Cesium viewer.', error)
+
+    clearCreateRetryTimer()
+    createRetryHandle = setTimeout(() => {
+      createRetryHandle = undefined
+      ensureViewer()
+    }, VIEWER_CREATE_RETRY_DELAY_MS)
+  } finally {
+    viewerCreating = false
   }
 }
 
 function tick() {
-  ensureViewer()
   renderViewerFrame()
   animationFrameHandle = requestAnimationFrame(tick)
 }
 
 onMounted(() => {
+  if (container.value) {
+    resizeObserver = new ResizeObserver(() => {
+      ensureViewer()
+      if (!viewerRef.value || !hasUsableSize(container.value)) {
+        return
+      }
+
+      viewerRef.value.resize()
+      viewerRef.value.scene.requestRender()
+    })
+    resizeObserver.observe(container.value)
+  }
+
+  ensureViewer()
   animationFrameHandle = requestAnimationFrame(tick)
 })
 
@@ -97,10 +144,10 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(animationFrameHandle)
     animationFrameHandle = undefined
   }
-  renderErrorCleanup?.()
-  renderErrorCleanup = undefined
-  viewerRef.value?.destroy()
-  viewerRef.value = undefined
+  resizeObserver?.disconnect()
+  resizeObserver = undefined
+  clearCreateRetryTimer()
+  destroyViewer()
 })
 </script>
 

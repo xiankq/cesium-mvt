@@ -18,13 +18,18 @@ type QueuedTileJob = {
   sequence: number
 }
 
+type PendingTileJob = {
+  job: TileDecodeJob
+  token: number
+}
+
 function compareQueuedTileJobs(left: QueuedTileJob, right: QueuedTileJob): number {
   const priorityDelta = right.priority - left.priority
   if (priorityDelta !== 0) {
     return priorityDelta
   }
 
-  return left.sequence - right.sequence
+  return right.sequence - left.sequence
 }
 
 export class TileScheduler {
@@ -32,6 +37,7 @@ export class TileScheduler {
   private readonly cache: TileCache<string, DecodedTileRecord>
   private readonly queue = new TinyQueue<QueuedTileJob>([], compareQueuedTileJobs)
   private readonly queuedIds = new Set<string>()
+  private readonly pendingJobs = new Map<string, PendingTileJob>()
   private readonly requestTokens = new Map<string, number>()
   private readonly inflight = new Map<string, Promise<void>>()
   private readonly pinned = new Map<string, number>()
@@ -63,7 +69,7 @@ export class TileScheduler {
   getSnapshot(): MvtSchedulerSnapshot {
     return {
       ...this.state,
-      queued: this.queuedIds.size,
+      queued: this.queuedIds.size + this.pendingJobs.size,
       inFlight: this.inflight.size,
       cached: this.cache.size,
     }
@@ -119,19 +125,21 @@ export class TileScheduler {
   }
 
   schedule(job: TileDecodeJob): void {
-    if (this.cache.has(job.id) || this.inflight.has(job.id) || this.queuedIds.has(job.id)) {
+    if (this.cache.has(job.id)) {
+      this.touch(job.id)
       return
     }
 
-    const token = (this.requestTokens.get(job.id) ?? 0) + 1
-    this.requestTokens.set(job.id, token)
-    this.queue.push({
-      job,
-      token,
-      priority: job.coord.level,
-      sequence: this.sequence += 1,
-    })
-    this.queuedIds.add(job.id)
+    const token = this.bumpToken(job.id)
+    if (this.inflight.has(job.id)) {
+      this.pendingJobs.set(job.id, {
+        job,
+        token,
+      })
+    } else {
+      this.enqueue(job, token)
+    }
+
     this.state.requested += 1
     this.state.lastTileId = job.id
     this.emit()
@@ -139,12 +147,20 @@ export class TileScheduler {
   }
 
   cancel(tileId: string): boolean {
-    if (!this.queuedIds.has(tileId)) {
+    const hadQueued = this.queuedIds.delete(tileId)
+    const hadInFlight = this.inflight.has(tileId)
+    const hadPending = this.pendingJobs.delete(tileId) !== undefined
+    const hadKnownJob =
+      hadQueued ||
+      hadInFlight ||
+      hadPending ||
+      this.requestTokens.has(tileId)
+
+    if (!hadKnownJob) {
       return false
     }
 
-    this.queuedIds.delete(tileId)
-    this.requestTokens.set(tileId, (this.requestTokens.get(tileId) ?? 0) + 1)
+    this.bumpToken(tileId)
     this.state.lastTileId = tileId
     this.emit()
     return true
@@ -155,6 +171,7 @@ export class TileScheduler {
       this.queue.pop()
     }
     this.queuedIds.clear()
+    this.pendingJobs.clear()
     this.requestTokens.clear()
     this.inflight.clear()
     this.pinned.clear()
@@ -216,9 +233,42 @@ export class TileScheduler {
       this.state.lastError = error instanceof Error ? error.message : String(error)
     } finally {
       this.inflight.delete(job.id)
+      this.flushPendingJob(job.id)
       this.emit()
       void this.pump()
     }
+  }
+
+  private enqueue(job: TileDecodeJob, token: number): void {
+    this.queue.push({
+      job,
+      token,
+      priority: job.coord.level,
+      sequence: this.sequence += 1,
+    })
+    this.queuedIds.add(job.id)
+  }
+
+  private bumpToken(tileId: string): number {
+    const nextToken = (this.requestTokens.get(tileId) ?? 0) + 1
+    this.requestTokens.set(tileId, nextToken)
+    return nextToken
+  }
+
+  private flushPendingJob(tileId: string): void {
+    const pending = this.pendingJobs.get(tileId)
+    if (!pending) {
+      return
+    }
+
+    this.pendingJobs.delete(tileId)
+
+    const currentToken = this.requestTokens.get(tileId)
+    if (currentToken !== pending.token || this.cache.has(tileId)) {
+      return
+    }
+
+    this.enqueue(pending.job, pending.token)
   }
 
   private trimCache(): void {

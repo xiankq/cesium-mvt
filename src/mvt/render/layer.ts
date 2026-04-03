@@ -384,6 +384,7 @@ export class CesiumMvtPrimitiveLayer {
   private handleViewportEvent = (snapshot: MvtViewportSnapshot): void => {
     const previousZoom = this.currentZoom
     this.currentZoom = snapshot.zoom
+    const zoomChanged = previousZoom !== this.currentZoom
 
     let tileSetChanged = false
 
@@ -414,7 +415,12 @@ export class CesiumMvtPrimitiveLayer {
       tileSetChanged = true
     }
 
-    if (tileSetChanged || previousZoom !== this.currentZoom) {
+    if (zoomChanged && this.styleRenderer) {
+      this.rebuildVisibleTiles()
+      return
+    }
+
+    if (tileSetChanged || zoomChanged) {
       this.scheduleSymbolRebuild()
     }
   }

@@ -1,6 +1,7 @@
 import {
+  convertFilter,
+  createExpression,
   createPropertyExpression,
-  featureFilter,
   isExpression,
   Formatted,
   type Feature as MapLibreFeature,
@@ -24,6 +25,25 @@ export type ResolvedFormattedText = {
 }
 
 type StyleFeature = MapLibreFeature
+const warnedStyleEvaluationFailures = new Set<string>()
+const filterExpressionSpec = {
+  type: 'boolean',
+  default: false,
+} as StylePropertySpecification
+
+function warnStyleEvaluationFailure(scope: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  const warningKey = `${scope}:${message}`
+  if (warnedStyleEvaluationFailures.has(warningKey)) {
+    return
+  }
+
+  warnedStyleEvaluationFailures.add(warningKey)
+  console.warn(
+    `[cesium-mvt] Failed to evaluate style ${scope}; using fallback.`,
+    error,
+  )
+}
 
 function toMapLibreFeature(feature: DecodedFeatureRecord): StyleFeature {
   return {
@@ -136,6 +156,12 @@ export function compilePropertyExpression<T>(
     Array.isArray(input) && !isExpression(input)
       ? ['literal', input]
       : input
+  const fallbackInput =
+    fallback !== undefined
+      ? fallback
+      : spec.default !== undefined
+        ? spec.default
+        : undefined
 
   if (normalizedInput === undefined) {
     return undefined
@@ -148,12 +174,19 @@ export function compilePropertyExpression<T>(
 
   return {
     evaluate(feature: DecodedFeatureRecord, zoom: number): T {
-      const evaluated = compiled.value.evaluate(
-        { zoom },
-        toMapLibreFeature(feature),
-        {},
-      )
-      return transform ? transform(evaluated) : (evaluated as T)
+      try {
+        const evaluated = compiled.value.evaluate(
+          { zoom },
+          toMapLibreFeature(feature),
+          {},
+        )
+        return transform ? transform(evaluated) : (evaluated as T)
+      } catch (error) {
+        warnStyleEvaluationFailure('expression', error)
+        return transform
+          ? transform(fallbackInput)
+          : (fallbackInput as T)
+      }
     },
   }
 }
@@ -318,10 +351,33 @@ export function compileTextJustifyExpression(
 export function buildStyleFeatureFilter(layer: {
   filter?: unknown
 }) {
-  const compiledFilter = featureFilter(layer.filter as never)
+  if (layer.filter === null || layer.filter === undefined) {
+    return () => true
+  }
 
-  return (feature: DecodedFeatureRecord, zoom: number): boolean =>
-    compiledFilter.filter({ zoom }, toMapLibreFeature(feature), undefined)
+  const normalizedFilter = convertFilter(layer.filter as never)
+  const compiledFilter = createExpression(
+    normalizedFilter,
+    filterExpressionSpec,
+  )
+  if (compiledFilter.result === 'error') {
+    throw new Error(compiledFilter.value.map((issue) => issue.message).join('; '))
+  }
+
+  return (feature: DecodedFeatureRecord, zoom: number): boolean => {
+    try {
+      return Boolean(
+        compiledFilter.value.evaluateWithoutErrorHandling(
+          { zoom },
+          toMapLibreFeature(feature),
+          undefined,
+          undefined,
+        ),
+      )
+    } catch (error) {
+      return false
+    }
+  }
 }
 
 export function buildStyleLayerVisibility(layer: {
