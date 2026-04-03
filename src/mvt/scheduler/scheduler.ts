@@ -229,8 +229,16 @@ export class TileScheduler {
         })
       }
     } catch (error) {
+      const message = formatTileDecodeFailure(job, error)
       this.state.failed += 1
-      this.state.lastError = error instanceof Error ? error.message : String(error)
+      this.state.lastError = message
+      console.error('[cesium-mvt] Tile decode failed.', {
+        tileId: job.id,
+        coord: job.coord,
+        url: job.url,
+        sourceId: job.sourceId,
+        error: message,
+      })
     } finally {
       this.inflight.delete(job.id)
       this.flushPendingJob(job.id)
@@ -293,4 +301,9 @@ export class TileScheduler {
       listener(event)
     }
   }
+}
+
+function formatTileDecodeFailure(job: TileDecodeJob, error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error)
+  return `${job.id} (${job.coord.level}/${job.coord.x}/${job.coord.y}) ${detail}`
 }

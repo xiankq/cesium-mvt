@@ -84,9 +84,22 @@ function createViewer(target: HTMLDivElement) {
     console.error('Cesium render error.', error)
   }
 
+  const handleContextLost = (event: Event) => {
+    event.preventDefault()
+    console.error('Cesium WebGL context lost. Recreating viewer.')
+    destroyViewer()
+    clearCreateRetryTimer()
+    createRetryHandle = setTimeout(() => {
+      createRetryHandle = undefined
+      ensureViewer()
+    }, VIEWER_CREATE_RETRY_DELAY_MS)
+  }
+
   viewer.scene.renderError.addEventListener(handleRenderError)
+  viewer.scene.canvas.addEventListener('webglcontextlost', handleContextLost)
   renderErrorCleanup = () => {
     viewer.scene.renderError.removeEventListener(handleRenderError)
+    viewer.scene.canvas.removeEventListener('webglcontextlost', handleContextLost)
   }
 
   viewerRef.value = viewer

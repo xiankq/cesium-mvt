@@ -32,6 +32,7 @@ export { resolveFormattedText } from './expressions'
 export type { CompiledStyleExpression, ResolvedFormattedText } from './expressions'
 
 type SupportedStyleLayerType = 'fill' | 'line' | 'circle' | 'symbol'
+export type CompiledStyleRefreshMode = 'none' | 'symbols' | 'full'
 type SupportedLayerSpecification = LayerSpecification & {
   type: SupportedStyleLayerType
   filter?: unknown
@@ -126,6 +127,7 @@ type CompiledStyleLayerBase<TType extends SupportedStyleLayerType> = {
   minzoom?: number
   maxzoom?: number
   visible: boolean
+  zoomRefreshMode: CompiledStyleRefreshMode
   filter: (feature: DecodedFeatureRecord, zoom: number) => boolean
   matches: (
     layer: DecodedLayerRecord,
@@ -201,9 +203,55 @@ function createCompiledLayerBase<TType extends SupportedStyleLayerType>(
     minzoom: layer.minzoom,
     maxzoom: layer.maxzoom,
     visible,
+    zoomRefreshMode: 'none',
     filter,
     matches: (decodedLayer, tile, zoom) => visible && matches(decodedLayer, tile, zoom),
   }
+}
+
+function styleValueUsesZoom(value: unknown): boolean {
+  if (value === 'zoom') {
+    return true
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => styleValueUsesZoom(entry))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some((entry) => styleValueUsesZoom(entry))
+  }
+
+  return false
+}
+
+function expressionsUseZoom(
+  ...expressions: Array<CompiledStyleExpression<unknown> | undefined>
+): boolean {
+  return expressions.some((expression) => expression?.zoomDependent === true)
+}
+
+function layerUsesZoom(
+  layer: SupportedLayerSpecification,
+  ...expressions: Array<CompiledStyleExpression<unknown> | undefined>
+): boolean {
+  return (
+    layer.minzoom !== undefined ||
+    layer.maxzoom !== undefined ||
+    styleValueUsesZoom(layer.filter) ||
+    expressionsUseZoom(...expressions)
+  )
+}
+
+function resolveZoomRefreshMode(
+  layerType: SupportedStyleLayerType,
+  zoomDependent: boolean,
+): CompiledStyleRefreshMode {
+  if (!zoomDependent) {
+    return 'none'
+  }
+
+  return layerType === 'symbol' ? 'symbols' : 'full'
 }
 
 function compileFillStyle(
@@ -584,30 +632,113 @@ function createCompiledLayer(
   switch (layer.type) {
     case 'fill': {
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'fill' }
+      const base = createCompiledLayerBase(supportedLayer, order)
+      const fill = compileFillStyle(supportedLayer)
+      const zoomDependent = layerUsesZoom(
+        supportedLayer,
+        fill.color,
+        fill.opacity,
+        fill.outlineColor,
+        fill.antialias,
+        fill.sortKey,
+      )
       return {
-        ...createCompiledLayerBase(supportedLayer, order),
-        fill: compileFillStyle(supportedLayer),
+        ...base,
+        zoomRefreshMode: resolveZoomRefreshMode('fill', zoomDependent),
+        fill,
       }
     }
     case 'line': {
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'line' }
+      const base = createCompiledLayerBase(supportedLayer, order)
+      const line = compileLineStyle(supportedLayer)
+      const zoomDependent = layerUsesZoom(
+        supportedLayer,
+        line.color,
+        line.width,
+        line.opacity,
+        line.sortKey,
+      )
       return {
-        ...createCompiledLayerBase(supportedLayer, order),
-        line: compileLineStyle(supportedLayer),
+        ...base,
+        zoomRefreshMode: resolveZoomRefreshMode('line', zoomDependent),
+        line,
       }
     }
     case 'circle': {
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'circle' }
+      const base = createCompiledLayerBase(supportedLayer, order)
+      const circle = compileCircleStyle(supportedLayer)
+      const zoomDependent = layerUsesZoom(
+        supportedLayer,
+        circle.radius,
+        circle.color,
+        circle.strokeWidth,
+        circle.strokeColor,
+        circle.opacity,
+        circle.strokeOpacity,
+        circle.sortKey,
+      )
       return {
-        ...createCompiledLayerBase(supportedLayer, order),
-        circle: compileCircleStyle(supportedLayer),
+        ...base,
+        zoomRefreshMode: resolveZoomRefreshMode('circle', zoomDependent),
+        circle,
       }
     }
     case 'symbol': {
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'symbol' }
+      const base = createCompiledLayerBase(supportedLayer, order)
+      const symbol = compileSymbolStyle(supportedLayer)
+      const zoomDependent = layerUsesZoom(
+        supportedLayer,
+        symbol.textField,
+        symbol.textSize,
+        symbol.textMaxWidth,
+        symbol.textLineHeight,
+        symbol.textJustify,
+        symbol.textTransform,
+        symbol.textLetterSpacing,
+        symbol.textColor,
+        symbol.textHaloColor,
+        symbol.textHaloWidth,
+        symbol.textHaloBlur,
+        symbol.textOpacity,
+        symbol.textFont,
+        symbol.textAnchor,
+        symbol.textOffset,
+        symbol.textTranslate,
+        symbol.textRadialOffset,
+        symbol.textAllowOverlap,
+        symbol.textOverlap,
+        symbol.textIgnorePlacement,
+        symbol.textPadding,
+        symbol.textOptional,
+        symbol.textVariableAnchor,
+        symbol.symbolSortKey,
+        symbol.symbolZOrder,
+        symbol.iconAnchor,
+        symbol.iconOffset,
+        symbol.iconRotate,
+        symbol.iconTranslate,
+        symbol.iconAllowOverlap,
+        symbol.iconOverlap,
+        symbol.iconIgnorePlacement,
+        symbol.iconOptional,
+        symbol.iconPadding,
+        symbol.iconTextFitPadding,
+        symbol.iconImage,
+        symbol.iconColor,
+        symbol.iconOpacity,
+        symbol.iconHaloColor,
+        symbol.iconHaloWidth,
+        symbol.iconHaloBlur,
+        symbol.iconSize,
+        symbol.iconTextFit,
+      )
       return {
-        ...createCompiledLayerBase(supportedLayer, order),
-        symbol: compileSymbolStyle(supportedLayer),
+        ...base,
+        zoomRefreshMode: resolveZoomRefreshMode('symbol', zoomDependent),
+        symbol,
       }
     }
     default:

@@ -22,6 +22,8 @@ import type { MapLibreStyleDocument } from '../style/document'
 import { MapLibreSpriteAtlas } from './sprite'
 import {
   compileMapLibreStyleRenderer,
+  type CompiledStyleLayer,
+  type CompiledStyleRefreshMode,
   type CompiledMapLibreStyleRenderer,
 } from '../style/renderer'
 import {
@@ -72,6 +74,8 @@ type ResolvedCesiumMvtPrimitiveLayerOptions = Omit<
 }
 
 type TilePrimitiveGroup = {
+  mode: 'generic' | 'styled'
+  refreshMode: CompiledStyleRefreshMode
   pointCount: number
   lineCount: number
   polygonCount: number
@@ -81,12 +85,33 @@ type TilePrimitiveGroup = {
   destroy: () => void
 }
 
+type StyledFeatureEntry = {
+  feature: DecodedFeatureRecord
+  featureIndex: number
+  sortKey: number
+}
+
 const DEFAULT_POINT_COLOR = Color.fromCssColorString('#67d7ff')
 const DEFAULT_LINE_COLOR = Color.fromCssColorString('#8c9eff')
 const DEFAULT_POLYGON_FILL_COLOR = Color.fromCssColorString('#173b78')
 DEFAULT_POLYGON_FILL_COLOR.alpha = 0.28
 const DEFAULT_POLYGON_OUTLINE_COLOR = Color.fromCssColorString('#7c5cff')
 const DEFAULT_POINT_OUTLINE_COLOR = Color.fromCssColorString('#06131f')
+
+function mergeRefreshMode(
+  left: CompiledStyleRefreshMode,
+  right: CompiledStyleRefreshMode,
+): CompiledStyleRefreshMode {
+  if (left === 'full' || right === 'full') {
+    return 'full'
+  }
+
+  if (left === 'symbols' || right === 'symbols') {
+    return 'symbols'
+  }
+
+  return 'none'
+}
 
 export class CesiumMvtPrimitiveLayer {
   private readonly scene: Scene
@@ -135,9 +160,17 @@ export class CesiumMvtPrimitiveLayer {
   private readonly suspendLabelsDuringLoading: boolean
   private readonly labelResumeDelayMs: number
   private readonly symbolRebuildDelayMs = 160
+  private readonly visibleTileRefreshDelayMs = 120
+  private readonly movingViewportUpdateDelayMs = 80
   private symbolRebuildTimer?: ReturnType<typeof setTimeout>
+  private visibleTileRefreshTimer?: ReturnType<typeof setTimeout>
+  private viewportUpdateTimer?: ReturnType<typeof setTimeout>
   private symbolLayoutDirty = false
   private symbolLayoutDirtyWhileHidden = false
+  private cameraMoving = false
+  private suppressedTileEventsDuringCameraMove = false
+  private pendingViewportSnapshot?: MvtViewportSnapshot
+  private pendingViewportRequiresTileRefresh = false
 
   constructor(
     scene: Scene,
@@ -204,12 +237,12 @@ export class CesiumMvtPrimitiveLayer {
         })
     }
 
-    if (this.options.showLabels && this.suspendLabelsDuringCameraMove) {
+    if (this.sourceCache || (this.options.showLabels && this.suspendLabelsDuringCameraMove)) {
       this.removeCameraMoveStart = this.scene.camera.moveStart.addEventListener(() => {
-        this.setCameraLabelSuspended(true)
+        this.handleCameraMoveStateChange(true)
       })
       this.removeCameraMoveEnd = this.scene.camera.moveEnd.addEventListener(() => {
-        this.setCameraLabelSuspended(false)
+        this.handleCameraMoveStateChange(false)
       })
     }
 
@@ -354,6 +387,8 @@ export class CesiumMvtPrimitiveLayer {
   destroy(): void {
     this.destroyed = true
     this.clearSymbolRebuildTimer()
+    this.clearVisibleTileRefreshTimer()
+    this.clearViewportUpdateTimer()
     this.unsubscribeViewport?.()
     this.unsubscribeTiles()
     this.unsubscribeScheduler?.()
@@ -371,6 +406,17 @@ export class CesiumMvtPrimitiveLayer {
   }
 
   private handleTileEvent = (event: TileDecodeEvent): void => {
+    if (this.cameraMoving) {
+      this.suppressedTileEventsDuringCameraMove = true
+      this.scheduleViewportUpdate(true)
+      return
+    }
+
+    if (this.visibleTileRefreshTimer !== undefined) {
+      this.suppressedTileEventsDuringCameraMove = true
+      return
+    }
+
     if (event.type === 'decoded') {
       if (this.sourceCache && !this.sourceCache.isVisible(event.tile.id)) {
         return
@@ -382,6 +428,48 @@ export class CesiumMvtPrimitiveLayer {
   }
 
   private handleViewportEvent = (snapshot: MvtViewportSnapshot): void => {
+    if (this.cameraMoving) {
+      this.currentZoom = snapshot.zoom
+      this.pendingViewportSnapshot = snapshot
+      this.scheduleViewportUpdate()
+      return
+    }
+
+    this.applyViewportSnapshot(snapshot)
+  }
+
+  private handleCameraMoveStateChange(moving: boolean): void {
+    if (this.cameraMoving === moving) {
+      return
+    }
+
+    this.cameraMoving = moving
+    if (this.options.showLabels && this.suspendLabelsDuringCameraMove) {
+      this.setCameraLabelSuspended(moving)
+    }
+
+    if (moving) {
+      return
+    }
+
+    const pendingViewportSnapshot = this.pendingViewportSnapshot
+    const suppressedTileEvents = this.suppressedTileEventsDuringCameraMove
+
+    if (pendingViewportSnapshot) {
+      this.flushViewportUpdate(true)
+      return
+    }
+
+    if (suppressedTileEvents) {
+      this.suppressedTileEventsDuringCameraMove = false
+      this.scheduleVisibleTileRefresh()
+    }
+  }
+
+  private applyViewportSnapshot(
+    snapshot: MvtViewportSnapshot,
+    forceTileRefresh = false,
+  ): void {
     const previousZoom = this.currentZoom
     this.currentZoom = snapshot.zoom
     const zoomChanged = previousZoom !== this.currentZoom
@@ -415,8 +503,8 @@ export class CesiumMvtPrimitiveLayer {
       tileSetChanged = true
     }
 
-    if (zoomChanged && this.styleRenderer) {
-      this.rebuildVisibleTiles()
+    if (forceTileRefresh || (zoomChanged && this.styleRenderer)) {
+      this.scheduleVisibleTileRefresh()
       return
     }
 
@@ -437,40 +525,267 @@ export class CesiumMvtPrimitiveLayer {
         return
       }
 
-      this.rebuildVisibleTiles()
+      this.scheduleSymbolRebuild(true)
     }, 0)
   }
 
-  private rebuildVisibleTiles(): void {
-    const cachedTiles = this.scheduler.getCachedTiles()
-
-    this.symbolRenderer.clear()
-    for (const group of this.groups.values()) {
-      group.destroy()
+  private scheduleViewportUpdate(forceTileRefresh = false): void {
+    if (this.destroyed) {
+      return
     }
-    this.groups.clear()
 
-    for (const tile of cachedTiles) {
-      if (this.sourceCache && !this.sourceCache.isVisible(tile.id)) {
+    if (forceTileRefresh) {
+      this.pendingViewportRequiresTileRefresh = true
+    }
+
+    if (this.viewportUpdateTimer !== undefined) {
+      return
+    }
+
+    this.viewportUpdateTimer = setTimeout(() => {
+      this.viewportUpdateTimer = undefined
+      this.flushViewportUpdate()
+    }, this.movingViewportUpdateDelayMs)
+  }
+
+  private clearViewportUpdateTimer(): void {
+    if (this.viewportUpdateTimer !== undefined) {
+      clearTimeout(this.viewportUpdateTimer)
+      this.viewportUpdateTimer = undefined
+    }
+  }
+
+  private flushViewportUpdate(forceImmediate = false): void {
+    this.clearViewportUpdateTimer()
+
+    if (this.destroyed) {
+      return
+    }
+
+    const pendingViewportSnapshot = this.pendingViewportSnapshot
+    const forceTileRefresh =
+      this.pendingViewportRequiresTileRefresh ||
+      this.suppressedTileEventsDuringCameraMove
+
+    this.pendingViewportSnapshot = undefined
+    this.pendingViewportRequiresTileRefresh = false
+    this.suppressedTileEventsDuringCameraMove = false
+
+    if (pendingViewportSnapshot) {
+      this.applyViewportSnapshot(
+        pendingViewportSnapshot,
+        forceImmediate || forceTileRefresh,
+      )
+      return
+    }
+
+    if (forceTileRefresh) {
+      this.scheduleVisibleTileRefresh(forceImmediate)
+    }
+  }
+
+  private scheduleVisibleTileRefresh(forceImmediate = false): void {
+    if (this.destroyed) {
+      return
+    }
+
+    if (forceImmediate) {
+      this.clearVisibleTileRefreshTimer()
+      this.flushVisibleTileRefresh()
+      return
+    }
+
+    if (this.visibleTileRefreshTimer !== undefined) {
+      return
+    }
+
+    this.visibleTileRefreshTimer = setTimeout(() => {
+      this.visibleTileRefreshTimer = undefined
+      this.flushVisibleTileRefresh()
+    }, this.visibleTileRefreshDelayMs)
+  }
+
+  private clearVisibleTileRefreshTimer(): void {
+    if (this.visibleTileRefreshTimer !== undefined) {
+      clearTimeout(this.visibleTileRefreshTimer)
+      this.visibleTileRefreshTimer = undefined
+    }
+  }
+
+  private flushVisibleTileRefresh(): void {
+    if (this.destroyed) {
+      return
+    }
+
+    this.refreshVisibleTiles()
+  }
+
+  private refreshVisibleTiles(): void {
+    if (!this.styleRenderer) {
+      const cachedTiles = this.scheduler.getCachedTiles()
+
+      for (const group of this.groups.values()) {
+        group.destroy()
+      }
+      this.groups.clear()
+
+      for (const tile of cachedTiles) {
+        if (this.sourceCache && !this.sourceCache.isVisible(tile.id)) {
+          continue
+        }
+
+        this.addTile(tile)
+      }
+
+      this.scene.requestRender()
+      return
+    }
+
+    const zoom =
+      estimateSceneZoom(this.scene) ??
+      this.currentZoom ??
+      this.sourceCache?.getSnapshot()?.level ??
+      0
+    const visibleTileIds = new Set(
+      this.sourceCache
+        ? this.sourceCache.getIds()
+        : this.scheduler.getCachedTiles().map((tile) => tile.id),
+    )
+
+    let symbolRefreshNeeded = false
+
+    for (const tileId of visibleTileIds) {
+      const tile = this.scheduler.getTile(tileId)
+      if (!tile) {
         continue
       }
 
-      this.addTile(tile)
+      const group = this.groups.get(tileId)
+      if (!group) {
+        this.addTile(tile, zoom)
+        continue
+      }
+
+      switch (group.refreshMode) {
+        case 'none':
+          break
+        case 'full':
+          symbolRefreshNeeded = true
+          group.destroy()
+          this.groups.delete(tileId)
+          this.addTile(tile, zoom)
+          break
+        case 'symbols':
+          symbolRefreshNeeded = true
+          if (group.mode === 'generic') {
+            group.destroy()
+            this.groups.delete(tileId)
+            this.addTile(tile, zoom)
+            break
+          }
+
+          group.symbolPlacements = this.collectStyledTileSymbolPlacements(tile, zoom)
+          group.labelCount = group.symbolPlacements.length
+          group.iconCount = group.symbolPlacements.filter(
+            (placement) => !!placement.candidate.iconImageName,
+          ).length
+          break
+      }
     }
 
+    if (symbolRefreshNeeded) {
+      this.scheduleSymbolRebuild()
+    }
     this.scene.requestRender()
   }
 
-  private addTile(tile: DecodedTileRecord): void {
+  private getCandidateDecodedLayers(
+    tile: DecodedTileRecord,
+    decodedLayersByName: Map<string, DecodedLayerRecord>,
+    sourceLayer?: string,
+  ): DecodedLayerRecord[] {
+    if (sourceLayer) {
+      const decodedLayer = decodedLayersByName.get(sourceLayer)
+      return decodedLayer ? [decodedLayer] : []
+    }
+
+    return tile.layers
+  }
+
+  private collectTileRefreshMode(
+    tile: DecodedTileRecord,
+    decodedLayersByName: Map<string, DecodedLayerRecord>,
+  ): CompiledStyleRefreshMode {
+    if (!this.styleRenderer) {
+      return 'none'
+    }
+
+    let refreshMode: CompiledStyleRefreshMode = 'none'
+
+    for (const compiled of this.styleRenderer.layers) {
+      if (compiled.zoomRefreshMode === 'none') {
+        continue
+      }
+
+      const appliesToTile = this.getCandidateDecodedLayers(
+        tile,
+        decodedLayersByName,
+        compiled.sourceLayer,
+      ).some((layer) => this.options.layerFilter(layer, tile))
+
+      if (!appliesToTile) {
+        continue
+      }
+
+      refreshMode = mergeRefreshMode(refreshMode, compiled.zoomRefreshMode)
+      if (refreshMode === 'full') {
+        break
+      }
+    }
+
+    return refreshMode
+  }
+
+  private collectSortedStyledFeatures(
+    compiled: CompiledStyleLayer,
+    layer: DecodedLayerRecord,
+    tile: DecodedTileRecord,
+    zoom: number,
+  ): StyledFeatureEntry[] {
+    return layer.features
+      .map((feature, featureIndex) => ({
+        feature,
+        featureIndex,
+        sortKey: evaluateStyleLayerSortKey(compiled, feature, zoom),
+      }))
+      .filter(
+        ({ feature }) =>
+          this.options.featureFilter(feature, layer, tile) &&
+          compiled.filter(feature, zoom),
+      )
+      .sort((left, right) => {
+        const delta = left.sortKey - right.sortKey
+        if (delta !== 0) {
+          return delta
+        }
+
+        return left.featureIndex - right.featureIndex
+      })
+  }
+
+  private addTile(tile: DecodedTileRecord, zoomOverride?: number): void {
     if (this.styleRenderer) {
-      this.addStyledTile(tile)
+      this.addStyledTile(tile, zoomOverride)
       return
     }
 
     this.addGenericTile(tile)
   }
 
-  private addGenericTile(tile: DecodedTileRecord): void {
+  private addGenericTile(
+    tile: DecodedTileRecord,
+    refreshMode: CompiledStyleRefreshMode = 'none',
+  ): void {
     if (this.groups.has(tile.id)) {
       return
     }
@@ -598,6 +913,8 @@ export class CesiumMvtPrimitiveLayer {
     }
 
     const group: TilePrimitiveGroup = {
+      mode: 'generic',
+      refreshMode,
       pointCount,
       lineCount,
       polygonCount,
@@ -629,13 +946,16 @@ export class CesiumMvtPrimitiveLayer {
     this.scene.requestRender()
   }
 
-  private addStyledTile(tile: DecodedTileRecord): void {
+  private addStyledTile(tile: DecodedTileRecord, zoomOverride?: number): void {
     if (this.groups.has(tile.id) || !this.styleRenderer) {
       return
     }
 
     const zoom =
-      estimateSceneZoom(this.scene) ?? this.currentZoom ?? tile.coord.level
+      zoomOverride ??
+      estimateSceneZoom(this.scene) ??
+      this.currentZoom ??
+      tile.coord.level
     const destroyers: Array<() => void> = []
     const styledSymbolPlacements: StyledSymbolPlacement[] = []
     let pointCount = 0
@@ -648,14 +968,14 @@ export class CesiumMvtPrimitiveLayer {
     const decodedLayersByName = new Map(
       tile.layers.map((layer) => [layer.name, layer]),
     )
+    const refreshMode = this.collectTileRefreshMode(tile, decodedLayersByName)
 
     for (const compiled of this.styleRenderer.layers) {
-      const candidateLayers = compiled.sourceLayer
-        ? (() => {
-            const decodedLayer = decodedLayersByName.get(compiled.sourceLayer)
-            return decodedLayer ? [decodedLayer] : []
-          })()
-        : tile.layers
+      const candidateLayers = this.getCandidateDecodedLayers(
+        tile,
+        decodedLayersByName,
+        compiled.sourceLayer,
+      )
 
       for (const layer of candidateLayers) {
         if (!this.options.layerFilter(layer, tile)) {
@@ -706,24 +1026,12 @@ export class CesiumMvtPrimitiveLayer {
           return lineCollection
         }
 
-        const sortedFeatures = layer.features
-          .map((feature, featureIndex) => ({
-            feature,
-            featureIndex,
-            sortKey: evaluateStyleLayerSortKey(compiled, feature, zoom),
-          }))
-          .filter(({ feature }) =>
-            this.options.featureFilter(feature, layer, tile) &&
-            compiled.filter(feature, zoom),
-          )
-          .sort((left, right) => {
-            const delta = left.sortKey - right.sortKey
-            if (delta !== 0) {
-              return delta
-            }
-
-            return left.featureIndex - right.featureIndex
-          })
+        const sortedFeatures = this.collectSortedStyledFeatures(
+          compiled,
+          layer,
+          tile,
+          zoom,
+        )
 
         for (const { feature, featureIndex } of sortedFeatures) {
           switch (compiled.type) {
@@ -909,11 +1217,13 @@ export class CesiumMvtPrimitiveLayer {
     }
 
     if (!handledStyledLayer) {
-      this.addGenericTile(tile)
+      this.addGenericTile(tile, refreshMode)
       return
     }
 
     const group: TilePrimitiveGroup = {
+      mode: 'styled',
+      refreshMode,
       pointCount,
       lineCount,
       polygonCount,
@@ -932,6 +1242,66 @@ export class CesiumMvtPrimitiveLayer {
       this.scheduleSymbolRebuild()
     }
     this.scene.requestRender()
+  }
+
+  private collectStyledTileSymbolPlacements(
+    tile: DecodedTileRecord,
+    zoom: number,
+  ): StyledSymbolPlacement[] {
+    if (!this.styleRenderer || !this.options.showLabels) {
+      return []
+    }
+
+    const placements: StyledSymbolPlacement[] = []
+    const decodedLayersByName = new Map(
+      tile.layers.map((layer) => [layer.name, layer]),
+    )
+
+    for (const compiled of this.styleRenderer.layers) {
+      if (compiled.type !== 'symbol') {
+        continue
+      }
+
+      const candidateLayers = this.getCandidateDecodedLayers(
+        tile,
+        decodedLayersByName,
+        compiled.sourceLayer,
+      )
+
+      for (const layer of candidateLayers) {
+        if (!this.options.layerFilter(layer, tile)) {
+          continue
+        }
+
+        if (!compiled.matches(layer, tile, zoom)) {
+          continue
+        }
+
+        const sortedFeatures = this.collectSortedStyledFeatures(
+          compiled,
+          layer,
+          tile,
+          zoom,
+        )
+
+        for (const { feature, featureIndex } of sortedFeatures) {
+          const placement = createStyledSymbolPlacement({
+            tilingScheme: this.tilingScheme,
+            tile,
+            layer,
+            feature,
+            featureIndex,
+            compiled,
+            zoom,
+          })
+          if (placement) {
+            placements.push(placement)
+          }
+        }
+      }
+    }
+
+    return placements
   }
 
   private scheduleSymbolRebuild(forceImmediate = false): void {

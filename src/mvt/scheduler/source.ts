@@ -48,8 +48,10 @@ type CesiumSurfaceTileRecord = {
 
 type SceneTileState = {
   desiredTiles: Map<string, TileCoord>
-  visibleTiles: Map<string, TileCoord>
+  visibleTileIds: Set<string>
 }
+
+const STYLE_ZOOM_STEP = 0.25
 
 function toTileId(sourceId: string, tile: TileCoord): string {
   return `${sourceId}:${tile.level}/${tile.x}/${tile.y}`
@@ -93,7 +95,12 @@ function selectDesiredImagery(
     : readyImagery
 }
 
+function quantizeZoom(zoom: number): number {
+  return Math.round(zoom / STYLE_ZOOM_STEP) * STYLE_ZOOM_STEP
+}
+
 export class CesiumMvtSourceCache {
+  private readonly defaultTransitionHoldMs = 180
   private readonly scene: Scene
   private readonly scheduler: TileScheduler
   private readonly source: MvtSourceOptions
@@ -107,8 +114,11 @@ export class CesiumMvtSourceCache {
   private paused = false
   private destroyed = false
   private readonly autoUpdate: boolean
+  private readonly transitionHoldMs: number
   private latestTileLevel: number
   private latestZoom: number
+  private pendingVisibleTileIds?: Set<string>
+  private pendingVisibleSince = 0
 
   constructor(options: CesiumMvtSourceCacheOptions) {
     this.scene = options.scene
@@ -116,6 +126,7 @@ export class CesiumMvtSourceCache {
     this.source = options.source
     this.imageryLayer = options.imageryLayer
     this.autoUpdate = options.autoUpdate ?? true
+    this.transitionHoldMs = options.transitionHoldMs ?? this.defaultTransitionHoldMs
     this.latestTileLevel = this.source.minimumLevel ?? 0
     this.latestZoom = this.latestTileLevel
     this.snapshot = {
@@ -192,6 +203,8 @@ export class CesiumMvtSourceCache {
 
     this.pendingRequestedTiles.clear()
     this.activeTileIds.clear()
+    this.pendingVisibleTileIds = undefined
+    this.pendingVisibleSince = 0
 
     for (const tileId of this.pinnedTileIds) {
       this.scheduler.cancel(tileId)
@@ -267,7 +280,10 @@ export class CesiumMvtSourceCache {
     const previousActive = new Set(this.activeTileIds)
     const previousPinned = new Set(this.pinnedTileIds)
     const nextSceneState = this.collectSceneTiles()
-    const nextActive = new Set(nextSceneState.visibleTiles.keys())
+    const nextActive = this.resolveActiveTileIds(
+      nextSceneState.visibleTileIds,
+      previousActive,
+    )
     const nextPinned = new Set([
       ...nextSceneState.desiredTiles.keys(),
       ...nextActive,
@@ -342,7 +358,7 @@ export class CesiumMvtSourceCache {
 
   private collectSceneTiles(): SceneTileState {
     const desiredTiles = new Map<string, TileCoord>()
-    const visibleTiles = new Map<string, TileCoord>()
+    const visibleTileIds = new Set<string>()
 
     for (const [tileId, record] of this.pendingRequestedTiles) {
       desiredTiles.set(tileId, record.coord)
@@ -388,17 +404,14 @@ export class CesiumMvtSourceCache {
           continue
         }
 
-        visibleTiles.set(
-          toTileId(this.source.id, visibleCoord),
-          visibleCoord,
-        )
+        visibleTileIds.add(toTileId(this.source.id, visibleCoord))
       }
     }
 
     this.pendingRequestedTiles.clear()
     return {
       desiredTiles,
-      visibleTiles,
+      visibleTileIds,
     }
   }
 
@@ -407,9 +420,11 @@ export class CesiumMvtSourceCache {
       this.source.minimumLevel ?? 0,
       tileLevel,
     )
-    this.latestZoom = Math.max(
-      0,
-      Math.round(estimateSceneZoom(this.scene) ?? this.latestTileLevel),
+    this.latestZoom = quantizeZoom(
+      Math.max(
+        0,
+        estimateSceneZoom(this.scene) ?? this.latestTileLevel,
+      ),
     )
   }
 
@@ -433,9 +448,59 @@ export class CesiumMvtSourceCache {
     return undefined
   }
 
+  private resolveActiveTileIds(
+    candidateVisibleTileIds: Set<string>,
+    previousActive: Set<string>,
+  ): Set<string> {
+    if (
+      this.transitionHoldMs <= 0 ||
+      previousActive.size === 0 ||
+      areTileSetsEqual(previousActive, candidateVisibleTileIds)
+    ) {
+      this.pendingVisibleTileIds = undefined
+      this.pendingVisibleSince = 0
+      return candidateVisibleTileIds
+    }
+
+    const now = Date.now()
+    if (
+      this.pendingVisibleTileIds &&
+      areTileSetsEqual(this.pendingVisibleTileIds, candidateVisibleTileIds)
+    ) {
+      if (now - this.pendingVisibleSince >= this.transitionHoldMs) {
+        this.pendingVisibleTileIds = undefined
+        this.pendingVisibleSince = 0
+        return candidateVisibleTileIds
+      }
+    } else {
+      this.pendingVisibleTileIds = new Set(candidateVisibleTileIds)
+      this.pendingVisibleSince = now
+    }
+
+    this.scene.requestRender()
+    return previousActive
+  }
+
   private emit(): void {
     for (const listener of this.listeners) {
       listener(this.snapshot)
     }
   }
+}
+
+function areTileSetsEqual(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean {
+  if (left.size !== right.size) {
+    return false
+  }
+
+  for (const tileId of left) {
+    if (!right.has(tileId)) {
+      return false
+    }
+  }
+
+  return true
 }

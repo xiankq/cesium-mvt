@@ -61,14 +61,31 @@ async function decodeTile(job: TileDecodeJob): Promise<DecodedTileRecord> {
   const response = await fetch(job.url)
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch tile ${job.id}: ${response.status} ${response.statusText}`)
+    throw new Error(
+      `[fetch] Failed to fetch tile ${job.id} from ${job.url}: ${response.status} ${response.statusText}`,
+    )
   }
 
   const buffer = await response.arrayBuffer()
-  const vectorTile = new VectorTile(new Pbf(buffer))
-  const layers = Object.entries(vectorTile.layers).map(([name, layer]) =>
-    decodeLayer(name, layer),
-  )
+  let vectorTile: VectorTile
+  try {
+    vectorTile = new VectorTile(new Pbf(buffer))
+  } catch (error) {
+    throw new Error(
+      `[parse] Failed to parse tile ${job.id} from ${job.url}: ${toErrorMessage(error)}`,
+    )
+  }
+
+  let layers: DecodedLayerRecord[]
+  try {
+    layers = Object.entries(vectorTile.layers).map(([name, layer]) =>
+      decodeLayer(job, name, layer),
+    )
+  } catch (error) {
+    throw new Error(
+      `[decode] Failed to decode tile ${job.id} from ${job.url}: ${toErrorMessage(error)}`,
+    )
+  }
 
   return {
     id: job.id,
@@ -83,7 +100,11 @@ async function decodeTile(job: TileDecodeJob): Promise<DecodedTileRecord> {
   }
 }
 
-function decodeLayer(name: string, layer: VectorTile['layers'][string]): DecodedLayerRecord {
+function decodeLayer(
+  job: TileDecodeJob,
+  name: string,
+  layer: VectorTile['layers'][string],
+): DecodedLayerRecord {
   const features: DecodedFeatureRecord[] = []
   const geometryHistogram: Record<TileGeometryType, number> = {
     Unknown: 0,
@@ -93,21 +114,27 @@ function decodeLayer(name: string, layer: VectorTile['layers'][string]): Decoded
   }
 
   for (let index = 0; index < layer.length; index += 1) {
-    const feature = layer.feature(index)
-    const type = VectorTileFeature.types[feature.type] ?? 'Unknown'
-    const geometry = feature.loadGeometry().map((part) =>
-      part.map((point) => [point.x, point.y] as [number, number]),
-    )
+    try {
+      const feature = layer.feature(index)
+      const type = VectorTileFeature.types[feature.type] ?? 'Unknown'
+      const geometry = feature.loadGeometry().map((part) =>
+        part.map((point) => [point.x, point.y] as [number, number]),
+      )
 
-    geometryHistogram[type] += 1
+      geometryHistogram[type] += 1
 
-    features.push({
-      id: feature.id,
-      type,
-      bbox: feature.bbox() as [number, number, number, number],
-      properties: feature.properties,
-      geometry,
-    })
+      features.push({
+        id: feature.id,
+        type,
+        bbox: feature.bbox() as [number, number, number, number],
+        properties: feature.properties,
+        geometry,
+      })
+    } catch (error) {
+      throw new Error(
+        `[layer:${name}] Failed to decode feature ${index} for tile ${job.id}: ${toErrorMessage(error)}`,
+      )
+    }
   }
 
   return {
@@ -117,4 +144,8 @@ function decodeLayer(name: string, layer: VectorTile['layers'][string]): Decoded
     geometryHistogram,
     features,
   }
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

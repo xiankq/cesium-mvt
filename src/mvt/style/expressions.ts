@@ -15,6 +15,7 @@ import {
 } from '../types'
 
 export type CompiledStyleExpression<T> = {
+  zoomDependent: boolean
   evaluate(feature: DecodedFeatureRecord, zoom: number): T
 }
 
@@ -172,7 +173,12 @@ export function compilePropertyExpression<T>(
     throw new Error(compiled.value.map((issue) => issue.message).join('; '))
   }
 
+  const zoomDependent =
+    compiled.value.kind === 'camera' ||
+    compiled.value.kind === 'composite'
+
   return {
+    zoomDependent,
     evaluate(feature: DecodedFeatureRecord, zoom: number): T {
       try {
         const evaluated = compiled.value.evaluate(
