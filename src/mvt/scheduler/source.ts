@@ -296,7 +296,8 @@ export class CesiumMvtSourceCache {
 
     for (const [tileId, record] of this.demandedTiles) {
       const expiry = record.lastTouchedAt + this.transitionHoldMs
-      if (expiry <= now) {
+      const isCurrentLevel = record.coord.level === nextLevel
+      if (!isCurrentLevel && expiry <= now) {
         continue
       }
 
@@ -304,10 +305,15 @@ export class CesiumMvtSourceCache {
       nextDemanded.set(tileId, record)
 
       nextPinned.add(tileId)
-      for (const ancestorId of record.ancestors) {
-        const currentExpiry = nextFallbackUntil.get(ancestorId)
-        if (currentExpiry === undefined || expiry > currentExpiry) {
-          nextFallbackUntil.set(ancestorId, expiry)
+      const keepAncestors =
+        expiry > now ||
+        (isCurrentLevel && this.scheduler.getTile(tileId) === undefined)
+      if (keepAncestors) {
+        for (const ancestorId of record.ancestors) {
+          const currentExpiry = nextFallbackUntil.get(ancestorId)
+          if (currentExpiry === undefined || expiry > currentExpiry) {
+            nextFallbackUntil.set(ancestorId, expiry)
+          }
         }
       }
     }

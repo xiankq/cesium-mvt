@@ -181,16 +181,21 @@ export class TileScheduler {
 
       this.queuedIds.delete(job.id)
 
-      const task = this.runJob(job)
+      const task = this.runJob(job, token)
       this.inflight.set(job.id, task)
       this.emit()
       void task
     }
   }
 
-  private async runJob(job: TileDecodeJob): Promise<void> {
+  private async runJob(job: TileDecodeJob, token: number): Promise<void> {
     try {
       const tile = await this.worker.decode(job)
+      const currentToken = this.requestTokens.get(job.id)
+      if (currentToken !== token) {
+        return
+      }
+
       const evicted = this.cache.set(job.id, tile, {
         skipEviction: (key) => this.pinned.has(key),
       })
