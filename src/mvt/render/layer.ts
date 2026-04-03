@@ -1,12 +1,9 @@
 import {
   Cartesian2,
   BillboardCollection,
-  ColorGeometryInstanceAttribute,
   Color,
   GeometryInstance,
   PointPrimitiveCollection,
-  PolygonGeometry,
-  PolygonHierarchy,
   PolylineCollection,
   PerInstanceColorAppearance,
   Primitive,
@@ -36,16 +33,13 @@ import { resolveFormattedText } from '../style/expressions'
 import {
   addPrimitiveOrdered,
   applyOpacity,
-  createPolylineMaterial,
-  ensureClosedLoop,
   estimateSceneZoom,
   evaluateStyleLayerSortKey,
   getFeatureAnchor,
-  groupPolygonRings,
   removeAndDestroyPrimitive,
   tilePointToCartesian,
-  toCartesianPositions,
 } from './geometry'
+import { renderLineStringPrimitives } from './line-string'
 import {
   applyTextTransform,
   buildSymbolDedupeKey,
@@ -65,6 +59,8 @@ import {
   unionScreenRects,
   wrapSymbolText,
 } from './label'
+import { renderPointPrimitives } from './point'
+import { renderPolygonPrimitives } from './polygon'
 
 export type CesiumMvtPrimitiveLayerOptions = {
   style?: MapLibreStyleDocument
@@ -554,45 +550,51 @@ export class CesiumMvtPrimitiveLayer {
 
         switch (feature.type) {
           case 'Point':
-            pointCount += this.renderPoints(
+            pointCount += renderPointPrimitives({
+              tilingScheme: this.tilingScheme,
               tile,
-              layer.extent,
-              layer.name,
+              extent: layer.extent,
+              layerId: layer.name,
               feature,
-              pointCollection,
-              pointColor,
-              pointOutlineColor,
-            )
+              collection: pointCollection,
+              color: pointColor,
+              outlineColor: pointOutlineColor,
+              pixelSize: this.options.pointPixelSize,
+            })
             break
           case 'LineString':
-            lineCount += this.renderLineStrings(
+            lineCount += renderLineStringPrimitives({
+              tilingScheme: this.tilingScheme,
               tile,
-              layer.extent,
-              layer.name,
+              extent: layer.extent,
+              layerId: layer.name,
               feature,
-              lineCollection,
-              this.options.lineColor,
-              false,
-            )
+              collection: lineCollection,
+              color: this.options.lineColor,
+              width: this.options.lineWidth,
+            })
             break
           case 'Polygon':
-            polygonCount += this.renderPolygons(
+            polygonCount += renderPolygonPrimitives({
+              tilingScheme: this.tilingScheme,
               tile,
-              layer.extent,
-              layer.name,
+              extent: layer.extent,
+              layerId: layer.name,
               feature,
-              polygonInstances,
-              polygonFillColor,
-            )
-            lineCount += this.renderLineStrings(
+              instances: polygonInstances,
+              color: polygonFillColor,
+            })
+            lineCount += renderLineStringPrimitives({
+              tilingScheme: this.tilingScheme,
               tile,
-              layer.extent,
-              layer.name,
+              extent: layer.extent,
+              layerId: layer.name,
               feature,
-              lineCollection,
-              this.options.polygonOutlineColor,
-              true,
-            )
+              collection: lineCollection,
+              color: this.options.polygonOutlineColor,
+              width: this.options.polygonOutlineWidth,
+              closedLoop: true,
+            })
             break
           default:
             break
@@ -649,147 +651,6 @@ export class CesiumMvtPrimitiveLayer {
       this.scheduleSymbolRebuild()
     }
     this.scene.requestRender()
-  }
-
-  private renderPoints(
-    tile: DecodedTileRecord,
-    extent: number,
-    layerName: string,
-    feature: DecodedFeatureRecord,
-    collection: PointPrimitiveCollection | undefined,
-    color: Color,
-    outlineColor: Color,
-    pixelSize?: number,
-    outlineWidth?: number,
-  ): number {
-    if (!collection) return 0
-
-    let count = 0
-    for (const part of feature.geometry) {
-      for (const point of part) {
-        const position = tilePointToCartesian(
-          this.tilingScheme,
-          tile.coord,
-          point,
-          extent,
-        )
-
-        collection.add({
-          show: true,
-          position,
-          color,
-          outlineColor,
-          outlineWidth: outlineWidth ?? 1,
-          pixelSize: pixelSize ?? this.options.pointPixelSize,
-          id: {
-            tileId: tile.id,
-            layer: layerName,
-            featureId: feature.id,
-          },
-        })
-        count += 1
-      }
-    }
-
-    return count
-  }
-
-  private renderLineStrings(
-    tile: DecodedTileRecord,
-    extent: number,
-    layerName: string,
-    feature: DecodedFeatureRecord,
-    collection: PolylineCollection | undefined,
-    color: Color,
-    loop: boolean,
-    width?: number,
-  ): number {
-    if (!collection) return 0
-
-    let count = 0
-    for (const part of feature.geometry) {
-      if (part.length < 2) continue
-
-      const positions = toCartesianPositions(
-        this.tilingScheme,
-        tile.coord,
-        part,
-        extent,
-      )
-      if (positions.length < 2) continue
-
-      collection.add({
-        show: true,
-        positions: loop ? ensureClosedLoop(positions) : positions,
-        width:
-          width ??
-          (loop ? this.options.polygonOutlineWidth : this.options.lineWidth),
-        material: createPolylineMaterial(color),
-        loop: false,
-        id: {
-          tileId: tile.id,
-          layer: layerName,
-          featureId: feature.id,
-        },
-      })
-      count += 1
-    }
-
-    return count
-  }
-
-  private renderPolygons(
-    tile: DecodedTileRecord,
-    extent: number,
-    layerName: string,
-    feature: DecodedFeatureRecord,
-    instances: GeometryInstance[],
-    color: Color,
-  ): number {
-    let count = 0
-
-    for (const polygon of groupPolygonRings(feature.geometry)) {
-      const outerPositions = toCartesianPositions(
-        this.tilingScheme,
-        tile.coord,
-        polygon.outer,
-        extent,
-      )
-      if (outerPositions.length < 3) continue
-
-      const holes = polygon.holes
-        .map((ring) =>
-          toCartesianPositions(this.tilingScheme, tile.coord, ring, extent),
-        )
-        .filter((positions) => positions.length >= 3)
-        .map((positions) => new PolygonHierarchy(ensureClosedLoop(positions)))
-
-      const geometry = new PolygonGeometry({
-        polygonHierarchy: new PolygonHierarchy(
-          ensureClosedLoop(outerPositions),
-          holes,
-        ),
-        vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
-      })
-
-      instances.push(
-        new GeometryInstance({
-          geometry,
-          attributes: {
-            color: ColorGeometryInstanceAttribute.fromColor(color),
-          },
-          id: {
-            tileId: tile.id,
-            layer: layerName,
-            featureId: feature.id,
-          },
-        }),
-      )
-
-      count += 1
-    }
-
-    return count
   }
 
   private addStyledTile(tile: DecodedTileRecord): void {
@@ -891,112 +752,116 @@ export class CesiumMvtPrimitiveLayer {
         for (const { feature, featureIndex } of sortedFeatures) {
           switch (compiled.type) {
             case 'fill': {
+              const style = compiled.fill
               if (!this.options.showPolygonFills) {
                 break
               }
 
               const baseFillColor =
-                compiled.fill?.color?.evaluate(feature, zoom) ??
+                style.color?.evaluate(feature, zoom) ??
                 this.options.polygonFillColor
-              const fillOpacity = compiled.fill?.opacity?.evaluate(feature, zoom)
+              const fillOpacity = style.opacity?.evaluate(feature, zoom)
               const fillColor = applyOpacity(baseFillColor, fillOpacity)
 
-              bucketPolygonCount += this.renderPolygons(
+              bucketPolygonCount += renderPolygonPrimitives({
+                tilingScheme: this.tilingScheme,
                 tile,
-                layer.extent,
-                compiled.id,
+                extent: layer.extent,
+                layerId: compiled.id,
                 feature,
-                polygonInstances,
-                fillColor,
-              )
+                instances: polygonInstances,
+                color: fillColor,
+              })
 
               const fillAntialias =
-                compiled.fill?.antialias?.evaluate(feature, zoom) ?? true
+                style.antialias?.evaluate(feature, zoom) ?? true
               if (
                 this.options.showPolygonOutlines &&
                 fillAntialias &&
-                compiled.fill?.outlineColor !== undefined
+                style.outlineColor !== undefined
               ) {
                 const outlineCollection = ensureLineCollection()
                 const outlineColor = applyOpacity(
-                  compiled.fill.outlineColor.evaluate(feature, zoom),
+                  style.outlineColor.evaluate(feature, zoom),
                   fillOpacity,
                 )
-                bucketLineCount += this.renderLineStrings(
+                bucketLineCount += renderLineStringPrimitives({
+                  tilingScheme: this.tilingScheme,
                   tile,
-                  layer.extent,
-                  compiled.id,
+                  extent: layer.extent,
+                  layerId: compiled.id,
                   feature,
-                  outlineCollection,
-                  outlineColor,
-                  true,
-                  1,
-                )
+                  collection: outlineCollection,
+                  color: outlineColor,
+                  width: 1,
+                  closedLoop: true,
+                })
               }
               break
             }
             case 'line': {
+              const style = compiled.line
               if (!this.options.showLines) {
                 break
               }
 
               const lineColor = applyOpacity(
-                compiled.line?.color?.evaluate(feature, zoom) ??
+                style.color?.evaluate(feature, zoom) ??
                   this.options.lineColor,
-                compiled.line?.opacity?.evaluate(feature, zoom),
+                style.opacity?.evaluate(feature, zoom),
               )
-              const lineWidth = compiled.line?.width?.evaluate(feature, zoom)
+              const lineWidth = style.width?.evaluate(feature, zoom)
               const collection = ensureLineCollection()
-              bucketLineCount += this.renderLineStrings(
+              bucketLineCount += renderLineStringPrimitives({
+                tilingScheme: this.tilingScheme,
                 tile,
-                layer.extent,
-                compiled.id,
+                extent: layer.extent,
+                layerId: compiled.id,
                 feature,
                 collection,
-                lineColor,
-                false,
-                lineWidth,
-              )
+                color: lineColor,
+                width: lineWidth ?? this.options.lineWidth,
+              })
               break
             }
             case 'circle': {
+              const style = compiled.circle
               if (!this.options.showPoints) {
                 break
               }
 
-              const circleOpacity =
-                compiled.circle?.opacity?.evaluate(feature, zoom)
-              const strokeOpacity =
-                compiled.circle?.strokeOpacity?.evaluate(feature, zoom) ?? 1
+              const circleOpacity = style.opacity?.evaluate(feature, zoom)
+              const strokeOpacity = style.strokeOpacity?.evaluate(feature, zoom) ?? 1
               const circleColor = applyOpacity(
-                compiled.circle?.color?.evaluate(feature, zoom) ??
+                style.color?.evaluate(feature, zoom) ??
                   this.options.pointColor,
                 circleOpacity,
               )
               const strokeColor = applyOpacity(
-                compiled.circle?.strokeColor?.evaluate(feature, zoom) ??
+                style.strokeColor?.evaluate(feature, zoom) ??
                   this.options.pointOutlineColor,
                 strokeOpacity,
               )
-              const radius = compiled.circle?.radius?.evaluate(feature, zoom) ?? 5
+              const radius = style.radius?.evaluate(feature, zoom) ?? 5
               const pixelSize = Math.max(1, Math.round(radius * 2))
-              const outlineWidth =
-                compiled.circle?.strokeWidth?.evaluate(feature, zoom) ?? 0
+              const outlineWidth = style.strokeWidth?.evaluate(feature, zoom) ?? 0
               const collection = ensurePointCollection()
-              bucketPointCount += this.renderPoints(
+              bucketPointCount += renderPointPrimitives({
+                tilingScheme: this.tilingScheme,
                 tile,
-                layer.extent,
-                compiled.id,
+                extent: layer.extent,
+                layerId: compiled.id,
                 feature,
                 collection,
-                circleColor,
-                strokeColor,
+                color: circleColor,
+                outlineColor: strokeColor,
                 pixelSize,
                 outlineWidth,
-              )
+              })
               break
             }
             case 'symbol': {
+              const style = compiled.symbol
               const anchor = getFeatureAnchor(feature)
               if (!anchor) {
                 break
@@ -1015,21 +880,18 @@ export class CesiumMvtPrimitiveLayer {
 
               const textSize = Math.max(
                 1,
-                compiled.symbol?.textSize?.evaluate(feature, zoom) ?? 16,
+                style.textSize?.evaluate(feature, zoom) ?? 16,
               )
-              const textFieldValue =
-                compiled.symbol?.textField?.evaluate(feature, zoom)
+              const textFieldValue = style.textField?.evaluate(feature, zoom)
               const textInfo = resolveFormattedText(textFieldValue)
               const rawText = textInfo.text.trim()
               const textTransform =
-                compiled.symbol?.textTransform?.evaluate(feature, zoom) ??
+                style.textTransform?.evaluate(feature, zoom) ??
                 'none'
-              const textMaxWidth =
-                compiled.symbol?.textMaxWidth?.evaluate(feature, zoom) ?? 10
-              const textLineHeight =
-                compiled.symbol?.textLineHeight?.evaluate(feature, zoom) ?? 1.2
+              const textMaxWidth = style.textMaxWidth?.evaluate(feature, zoom) ?? 10
+              const textLineHeight = style.textLineHeight?.evaluate(feature, zoom) ?? 1.2
               const textLetterSpacing =
-                compiled.symbol?.textLetterSpacing?.evaluate(feature, zoom) ?? 0
+                style.textLetterSpacing?.evaluate(feature, zoom) ?? 0
               const transformedText = applyTextTransform(rawText, textTransform)
               const wrappedText = wrapSymbolText(
                 transformedText,
@@ -1041,33 +903,31 @@ export class CesiumMvtPrimitiveLayer {
               const textKey = normalizeSymbolKey(transformedText)
 
               const fontStack =
-                compiled.symbol?.textFont?.evaluate(feature, zoom) ??
+                style.textFont?.evaluate(feature, zoom) ??
                 textInfo.fontStack ??
                 DEFAULT_TEXT_FONT_STACK
+              const textOpacity = style.textOpacity?.evaluate(feature, zoom)
               const textColor = applyOpacity(
-                compiled.symbol?.textColor?.evaluate(feature, zoom) ??
+                style.textColor?.evaluate(feature, zoom) ??
                   textInfo.textColor ??
                   Color.WHITE,
-                compiled.symbol?.textOpacity?.evaluate(feature, zoom),
+                textOpacity,
               )
               const haloColor = applyOpacity(
-                compiled.symbol?.textHaloColor?.evaluate(feature, zoom) ??
+                style.textHaloColor?.evaluate(feature, zoom) ??
                   Color.TRANSPARENT,
-                compiled.symbol?.textOpacity?.evaluate(feature, zoom),
+                textOpacity,
               )
               const haloWidth = Math.max(
                 0,
-                compiled.symbol?.textHaloWidth?.evaluate(feature, zoom) ?? 0,
+                style.textHaloWidth?.evaluate(feature, zoom) ?? 0,
               )
-              const textHaloBlur =
-                compiled.symbol?.textHaloBlur?.evaluate(feature, zoom) ?? 0
+              const textHaloBlur = style.textHaloBlur?.evaluate(feature, zoom) ?? 0
               const textAnchorName = String(
-                compiled.symbol?.textAnchor?.evaluate(feature, zoom) ?? 'center',
+                style.textAnchor?.evaluate(feature, zoom) ?? 'center',
               )
-              const textVariableAnchors =
-                compiled.symbol?.textVariableAnchor?.evaluate(feature, zoom) ?? []
-              const textJustify =
-                compiled.symbol?.textJustify?.evaluate(feature, zoom) ?? 'auto'
+              const textVariableAnchors = style.textVariableAnchor?.evaluate(feature, zoom) ?? []
+              const textJustify = style.textJustify?.evaluate(feature, zoom) ?? 'auto'
               const origins = {
                 ...parseTextAnchor(textAnchorName),
                 horizontalOrigin: resolveTextJustifyOrigin(
@@ -1076,104 +936,87 @@ export class CesiumMvtPrimitiveLayer {
                 ),
               }
               const textOffset = textOffsetToPixelOffset(
-                compiled.symbol?.textOffset?.evaluate(feature, zoom),
+                style.textOffset?.evaluate(feature, zoom),
                 textSize,
               )
-              const textTranslate =
-                compiled.symbol?.textTranslate?.evaluate(feature, zoom)
+              const textTranslate = style.textTranslate?.evaluate(feature, zoom)
               const textTranslateOffset = textTranslate
                 ? new Cartesian2(textTranslate[0], textTranslate[1])
                 : undefined
               const textTranslateAnchor =
-                compiled.symbol?.textTranslateAnchor?.evaluate(feature, zoom) ??
+                style.textTranslateAnchor?.evaluate(feature, zoom) ??
                 'map'
-              const textRadialOffset =
-                compiled.symbol?.textRadialOffset?.evaluate(feature, zoom) ?? 0
+              const textRadialOffset = style.textRadialOffset?.evaluate(feature, zoom) ?? 0
               const textPadding = Math.max(
                 0,
-                compiled.symbol?.textPadding?.evaluate(feature, zoom) ?? 2,
+                style.textPadding?.evaluate(feature, zoom) ?? 2,
               )
-              const allowOverlap =
-                compiled.symbol?.textAllowOverlap?.evaluate(feature, zoom) ??
-                false
+              const allowOverlap = style.textAllowOverlap?.evaluate(feature, zoom) ?? false
               const overlapMode =
-                compiled.symbol?.textOverlap?.evaluate(feature, zoom) ??
+                style.textOverlap?.evaluate(feature, zoom) ??
                 (allowOverlap ? 'always' : 'never')
               const ignorePlacement =
-                compiled.symbol?.textIgnorePlacement?.evaluate(feature, zoom) ??
-                false
-              const textOptional =
-                compiled.symbol?.textOptional?.evaluate(feature, zoom) ??
-                false
-              const sortKey =
-                compiled.symbol?.symbolSortKey?.evaluate(feature, zoom) ?? 0
-              const symbolZOrder =
-                compiled.symbol?.symbolZOrder?.evaluate(feature, zoom) ?? 'auto'
-              const iconImageName =
-                compiled.symbol?.iconImage?.evaluate(feature, zoom) || undefined
-              const iconSize =
-                Math.max(0.1, compiled.symbol?.iconSize?.evaluate(feature, zoom) ?? 1)
+                style.textIgnorePlacement?.evaluate(feature, zoom) ?? false
+              const textOptional = style.textOptional?.evaluate(feature, zoom) ?? false
+              const sortKey = style.symbolSortKey?.evaluate(feature, zoom) ?? 0
+              const symbolZOrder = style.symbolZOrder?.evaluate(feature, zoom) ?? 'auto'
+              const iconImageName = style.iconImage?.evaluate(feature, zoom) || undefined
+              const iconSize = Math.max(0.1, style.iconSize?.evaluate(feature, zoom) ?? 1)
+              const iconOpacity = style.iconOpacity?.evaluate(feature, zoom) ?? 1
               const iconColor = applyOpacity(
-                compiled.symbol?.iconColor?.evaluate(feature, zoom) ??
+                style.iconColor?.evaluate(feature, zoom) ??
                   Color.BLACK,
-                compiled.symbol?.iconOpacity?.evaluate(feature, zoom),
+                iconOpacity,
               )
               const iconAnchorName = String(
-                compiled.symbol?.iconAnchor?.evaluate(feature, zoom) ??
+                style.iconAnchor?.evaluate(feature, zoom) ??
                   textAnchorName,
               )
               const iconOrigins = parseTextAnchor(iconAnchorName)
-              const iconOffsetValue =
-                compiled.symbol?.iconOffset?.evaluate(feature, zoom)
+              const iconOffsetValue = style.iconOffset?.evaluate(feature, zoom)
               const iconOffset = iconOffsetValue
                 ? new Cartesian2(
                     iconOffsetValue[0] * iconSize,
                     iconOffsetValue[1] * iconSize,
                   )
                 : new Cartesian2(0, 0)
-              const iconTranslateValue =
-                compiled.symbol?.iconTranslate?.evaluate(feature, zoom)
+              const iconTranslateValue = style.iconTranslate?.evaluate(feature, zoom)
               const iconTranslate = iconTranslateValue
                 ? new Cartesian2(iconTranslateValue[0], iconTranslateValue[1])
                 : undefined
               const iconTranslateAnchor =
-                compiled.symbol?.iconTranslateAnchor?.evaluate(feature, zoom) ??
+                style.iconTranslateAnchor?.evaluate(feature, zoom) ??
                 'map'
-              const iconAllowOverlap =
-                compiled.symbol?.iconAllowOverlap?.evaluate(feature, zoom) ??
-                false
+              const iconAllowOverlap = style.iconAllowOverlap?.evaluate(feature, zoom) ?? false
               const iconOverlapMode =
-                compiled.symbol?.iconOverlap?.evaluate(feature, zoom) ??
+                style.iconOverlap?.evaluate(feature, zoom) ??
                 (iconAllowOverlap ? 'always' : 'never')
               const iconIgnorePlacement =
-                compiled.symbol?.iconIgnorePlacement?.evaluate(feature, zoom) ??
-                false
-              const iconOptional =
-                compiled.symbol?.iconOptional?.evaluate(feature, zoom) ?? false
+                style.iconIgnorePlacement?.evaluate(feature, zoom) ?? false
+              const iconOptional = style.iconOptional?.evaluate(feature, zoom) ?? false
               const iconHaloColor = applyOpacity(
-                compiled.symbol?.iconHaloColor?.evaluate(feature, zoom) ??
+                style.iconHaloColor?.evaluate(feature, zoom) ??
                   Color.TRANSPARENT,
-                compiled.symbol?.iconOpacity?.evaluate(feature, zoom),
+                iconOpacity,
               )
               const iconHaloWidth = Math.max(
                 0,
-                compiled.symbol?.iconHaloWidth?.evaluate(feature, zoom) ?? 0,
+                style.iconHaloWidth?.evaluate(feature, zoom) ?? 0,
               )
               const iconHaloBlur = Math.max(
                 0,
-                compiled.symbol?.iconHaloBlur?.evaluate(feature, zoom) ?? 0,
+                style.iconHaloBlur?.evaluate(feature, zoom) ?? 0,
               )
               const iconPadding = Math.max(
                 0,
-                compiled.symbol?.iconPadding?.evaluate(feature, zoom) ?? 2,
+                style.iconPadding?.evaluate(feature, zoom) ?? 2,
               )
-              const iconTextFit =
-                compiled.symbol?.iconTextFit?.evaluate(feature, zoom) ?? 'none'
+              const iconTextFit = style.iconTextFit?.evaluate(feature, zoom) ?? 'none'
               const iconTextFitPadding =
-                compiled.symbol?.iconTextFitPadding?.evaluate(feature, zoom) ??
+                style.iconTextFitPadding?.evaluate(feature, zoom) ??
                 [0, 0, 0, 0]
               const iconRotate =
-                -((compiled.symbol?.iconRotate?.evaluate(feature, zoom) ?? 0) * Math.PI) /
+                -((style.iconRotate?.evaluate(feature, zoom) ?? 0) * Math.PI) /
                 180
               const featureId = feature.id ?? `${layer.name}:${featureIndex}`
 
@@ -1214,8 +1057,7 @@ export class CesiumMvtPrimitiveLayer {
                   iconImageName,
                   iconSize,
                   iconColor,
-                  iconOpacity:
-                    compiled.symbol?.iconOpacity?.evaluate(feature, zoom) ?? 1,
+                  iconOpacity,
                   iconHaloColor,
                   iconHaloWidth,
                   iconHaloBlur,

@@ -296,13 +296,13 @@ export function evaluateStyleLayerSortKey(
 ): number {
   switch (compiled.type) {
     case 'fill':
-      return compiled.fill?.sortKey?.evaluate(feature, zoom) ?? 0
+      return compiled.fill.sortKey?.evaluate(feature, zoom) ?? 0
     case 'line':
-      return compiled.line?.sortKey?.evaluate(feature, zoom) ?? 0
+      return compiled.line.sortKey?.evaluate(feature, zoom) ?? 0
     case 'circle':
-      return compiled.circle?.sortKey?.evaluate(feature, zoom) ?? 0
+      return compiled.circle.sortKey?.evaluate(feature, zoom) ?? 0
     case 'symbol':
-      return compiled.symbol?.symbolSortKey?.evaluate(feature, zoom) ?? 0
+      return compiled.symbol.symbolSortKey?.evaluate(feature, zoom) ?? 0
     default:
       return 0
   }
