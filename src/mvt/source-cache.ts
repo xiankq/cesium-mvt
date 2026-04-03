@@ -1,264 +1,195 @@
-import {
-  Cartesian2,
-  Cartographic,
-  Rectangle,
-  type Scene,
-  type TilingScheme,
-} from 'cesium'
-import { createTileDecodeJob } from './tile-job'
+import type { Scene } from 'cesium'
 import type {
   DecodedTileRecord,
   MvtSourceOptions,
   MvtViewportListener,
   MvtViewportSnapshot,
   TileCoord,
+  TileDecodeEvent,
 } from './types'
 import type { TileScheduler } from './tile-scheduler'
 
 export type CesiumMvtSourceCacheOptions = {
   scene: Scene
   scheduler: TileScheduler
-  tilingScheme: TilingScheme
+  tilingScheme: import('cesium').TilingScheme
   source: MvtSourceOptions
   autoUpdate?: boolean
   tilePadding?: number
   transitionHoldMs?: number
 }
 
-const scratchRectangle = new Rectangle()
-const scratchRectanglePoints = [
-  new Cartographic(),
-  new Cartographic(),
-  new Cartographic(),
-  new Cartographic(),
-  new Cartographic(),
-]
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(Math.max(value, minimum), maximum)
+type TileDemandRecord = {
+  coord: TileCoord
+  requestedAt: number
+  lastTouchedAt: number
+  ancestors: string[]
 }
 
-function normalizeTileIndex(index: number, length: number): number {
-  const normalized = index % length
-  return normalized < 0 ? normalized + length : normalized
+function toTileId(sourceId: string, tile: TileCoord): string {
+  return `${sourceId}:${tile.level}/${tile.x}/${tile.y}`
 }
 
-function unwrapTileIndex(index: number, center: number, length: number): number {
-  const half = length / 2
-  if (index - center > half) return index - length
-  if (center - index > half) return index + length
-  return index
-}
+function collectAncestorCoords(
+  tile: TileCoord,
+  minimumLevel: number,
+): TileCoord[] {
+  const ancestors: TileCoord[] = []
+  let x = tile.x
+  let y = tile.y
 
-function collectRectangleSamples(rectangle: Rectangle): Cartographic[] {
-  Rectangle.southwest(rectangle, scratchRectanglePoints[0])
-  Rectangle.northwest(rectangle, scratchRectanglePoints[1])
-  Rectangle.northeast(rectangle, scratchRectanglePoints[2])
-  Rectangle.southeast(rectangle, scratchRectanglePoints[3])
-  Rectangle.center(rectangle, scratchRectanglePoints[4])
-  return scratchRectanglePoints
-}
-
-function toTileXY(
-  tilingScheme: TilingScheme,
-  position: Cartographic,
-  level: number,
-): Cartesian2 | undefined {
-  try {
-    return tilingScheme.positionToTileXY(position, level, new Cartesian2())
-  } catch {
-    return undefined
+  for (let level = tile.level - 1; level >= minimumLevel; level -= 1) {
+    x = Math.floor(x / 2)
+    y = Math.floor(y / 2)
+    ancestors.push({ x, y, level })
   }
+
+  return ancestors
+}
+
+function collectAncestorIds(
+  sourceId: string,
+  tile: TileCoord,
+  minimumLevel: number,
+): string[] {
+  return collectAncestorCoords(tile, minimumLevel).map((ancestor) =>
+    toTileId(sourceId, ancestor),
+  )
 }
 
 export class CesiumMvtSourceCache {
   private readonly scene: Scene
   private readonly scheduler: TileScheduler
-  private readonly tilingScheme: TilingScheme
   private readonly source: MvtSourceOptions
   private readonly listeners = new Set<MvtViewportListener>()
+  private readonly demandedTiles = new Map<string, TileDemandRecord>()
+  private readonly decodedFallbackUntil = new Map<string, number>()
   private readonly activeTileIds = new Set<string>()
-  private readonly pendingExitSince = new Map<string, number>()
-  private readonly tilePadding: number
+  private readonly requestedTileIds = new Set<string>()
+  private readonly pinnedTileIds = new Set<string>()
   private readonly transitionHoldMs: number
-  private removePreRender?: () => void
-  private snapshot: MvtViewportSnapshot | undefined
+  private readonly autoUpdate: boolean
+  private removeTileListener?: () => void
+  private sweepTimer?: ReturnType<typeof setTimeout>
+  private snapshot: MvtViewportSnapshot
   private paused = false
   private destroyed = false
+  private latestLevel: number
 
   constructor(options: CesiumMvtSourceCacheOptions) {
     this.scene = options.scene
     this.scheduler = options.scheduler
-    this.tilingScheme = options.tilingScheme
     this.source = options.source
-    this.tilePadding = options.tilePadding ?? 1
-    this.transitionHoldMs = options.transitionHoldMs ?? 240
+    this.transitionHoldMs = options.transitionHoldMs ?? 640
+    this.autoUpdate = options.autoUpdate ?? true
+    this.latestLevel = this.source.minimumLevel ?? 0
+    this.snapshot = {
+      sourceId: this.source.id,
+      rectangle: undefined,
+      zoom: this.latestLevel,
+      level: this.latestLevel,
+      activeTileIds: [],
+      enteredTileIds: [],
+      exitedTileIds: [],
+    }
 
-    if (options.autoUpdate ?? true) {
+    this.removeTileListener = this.scheduler.subscribeTiles(this.handleTileEvent)
+
+    if (this.autoUpdate) {
       this.attach()
     }
   }
 
   attach(): void {
-    if (this.destroyed || this.removePreRender) {
+    if (this.destroyed) {
       return
     }
 
-    this.removePreRender = this.scene.preRender.addEventListener(() => {
-      this.update()
-    })
-
-    this.update(true)
+    this.scheduleSweep()
   }
 
   pause(): void {
     this.paused = true
+    this.clearSweepTimer()
   }
 
   resume(): void {
-    if (!this.paused) return
+    if (!this.paused) {
+      return
+    }
+
     this.paused = false
-    this.update(true)
+    this.update()
   }
 
   reload(): void {
-    this.update(true)
+    this.update()
   }
 
-  update(force = false): MvtViewportSnapshot | undefined {
+  touch(tile: TileCoord): MvtViewportSnapshot | undefined {
     if (this.destroyed || this.paused) {
       return this.snapshot
     }
 
-    const rectangle = this.computeViewportRectangle()
-    if (!rectangle) {
-      return this.snapshot
-    }
-
-    const level = this.deriveLevel(rectangle)
-    const nextTileCoords = this.collectVisibleTileCoords(rectangle, level)
-    if (nextTileCoords.length === 0) {
-      return this.snapshot
-    }
-    const nextTileIds = nextTileCoords.map((tile) => this.toTileId(tile))
-
-    const nextSet = new Set(nextTileIds)
     const now = Date.now()
-    const renderedBefore = new Set(this.activeTileIds)
-    const enteredTileIds: string[] = []
-    const exitedCandidates: string[] = []
+    const tileId = toTileId(this.source.id, tile)
+    this.requestedTileIds.add(tileId)
+    const record = this.demandedTiles.get(tileId)
 
-    for (const tileId of nextTileIds) {
-      if (!renderedBefore.has(tileId)) {
-        enteredTileIds.push(tileId)
-      }
-      this.pendingExitSince.delete(tileId)
+    if (record) {
+      record.lastTouchedAt = now
+    } else {
+      this.demandedTiles.set(tileId, {
+        coord: tile,
+        requestedAt: now,
+        lastTouchedAt: now,
+        ancestors: collectAncestorIds(
+          this.source.id,
+          tile,
+          this.source.minimumLevel ?? 0,
+        ),
+      })
     }
 
-    for (const tileId of renderedBefore) {
-      if (!nextSet.has(tileId)) {
-        exitedCandidates.push(tileId)
-        if (!this.pendingExitSince.has(tileId)) {
-          this.pendingExitSince.set(tileId, now)
-        }
-      }
-    }
+    this.latestLevel = tile.level
+    const snapshot = this.rebuildState(now)
+    this.scheduleSweep(now)
+    return snapshot
+  }
 
-    for (const tile of nextTileCoords) {
-      this.scheduler.schedule(
-        createTileDecodeJob(this.source, this.tilingScheme, tile),
-      )
-    }
-
-    if (!force && enteredTileIds.length === 0 && exitedCandidates.length === 0) {
-      for (const tileId of nextTileIds) {
-        this.scheduler.getTile(tileId)
-      }
-      this.activeTileIds.clear()
-      for (const tileId of renderedBefore) {
-        this.activeTileIds.add(tileId)
-      }
-      for (const tileId of nextTileIds) {
-        this.activeTileIds.add(tileId)
-      }
+  update(): MvtViewportSnapshot | undefined {
+    if (this.destroyed || this.paused) {
       return this.snapshot
     }
 
-    const oldestPendingExitAge = this.pendingExitSince.size > 0
-      ? Math.max(
-          ...Array.from(this.pendingExitSince.values(), (since) => now - since),
-        )
-      : 0
-    const nextTilesReady = nextTileIds.every((tileId) => this.scheduler.getTile(tileId) !== undefined)
-    const commitPendingExits =
-      force ||
-      (this.pendingExitSince.size > 0 &&
-        nextTilesReady &&
-        oldestPendingExitAge >= this.transitionHoldMs)
-
-    const exitedTileIds = commitPendingExits
-      ? Array.from(this.pendingExitSince.keys())
-      : []
-
-    if (commitPendingExits) {
-      for (const tileId of exitedTileIds) {
-        this.scheduler.cancel(tileId)
-      }
-      this.pendingExitSince.clear()
-      this.activeTileIds.clear()
-      for (const tileId of nextTileIds) {
-        this.activeTileIds.add(tileId)
-      }
-    } else {
-      this.activeTileIds.clear()
-      for (const tileId of renderedBefore) {
-        this.activeTileIds.add(tileId)
-      }
-      for (const tileId of nextTileIds) {
-        this.activeTileIds.add(tileId)
-      }
-    }
-
-    for (const tileId of this.activeTileIds) {
-      this.scheduler.getTile(tileId)
-    }
-
-    this.snapshot = {
-      sourceId: this.source.id,
-      rectangle: Rectangle.clone(rectangle),
-      zoom: this.estimateZoom(rectangle),
-      level,
-      activeTileIds: Array.from(this.activeTileIds),
-      enteredTileIds,
-      exitedTileIds,
-    }
-
-    this.emit()
-
-    if (enteredTileIds.length > 0 || exitedTileIds.length > 0) {
-      this.scene.requestRender()
-    }
-
-    return this.snapshot
+    const snapshot = this.rebuildState(Date.now())
+    this.scheduleSweep()
+    return snapshot
   }
 
   clearTiles(): void {
-    if (this.destroyed) return
-
-    for (const tileId of this.activeTileIds) {
-      this.scheduler.cancel(tileId)
+    if (this.destroyed) {
+      return
     }
 
-    this.pendingExitSince.clear()
-
     const exitedTileIds = Array.from(this.activeTileIds)
+
+    this.demandedTiles.clear()
+    this.decodedFallbackUntil.clear()
     this.activeTileIds.clear()
+    this.requestedTileIds.clear()
+    this.pinnedTileIds.clear()
+    this.clearSweepTimer()
+
+    for (const tileId of exitedTileIds) {
+      this.scheduler.unpin(tileId)
+    }
 
     this.snapshot = {
       sourceId: this.source.id,
-      rectangle: this.snapshot?.rectangle ? Rectangle.clone(this.snapshot.rectangle) : undefined,
-      zoom: this.snapshot?.zoom ?? 0,
-      level: this.snapshot?.level ?? this.source.minimumLevel ?? 0,
+      rectangle: undefined,
+      zoom: this.latestLevel,
+      level: this.latestLevel,
       activeTileIds: [],
       enteredTileIds: [],
       exitedTileIds,
@@ -269,11 +200,13 @@ export class CesiumMvtSourceCache {
   }
 
   remove(): void {
-    if (this.destroyed) return
+    if (this.destroyed) {
+      return
+    }
 
     this.clearTiles()
-    this.removePreRender?.()
-    this.removePreRender = undefined
+    this.removeTileListener?.()
+    this.removeTileListener = undefined
     this.listeners.clear()
     this.destroyed = true
   }
@@ -284,9 +217,7 @@ export class CesiumMvtSourceCache {
 
   subscribe(listener: MvtViewportListener): () => void {
     this.listeners.add(listener)
-    if (this.snapshot) {
-      listener(this.snapshot)
-    }
+    listener(this.snapshot)
 
     return () => {
       this.listeners.delete(listener)
@@ -309,96 +240,239 @@ export class CesiumMvtSourceCache {
     return this.activeTileIds.has(tileId)
   }
 
-  private computeViewportRectangle(): Rectangle | undefined {
-    const rectangle = this.scene.camera.computeViewRectangle(this.tilingScheme.ellipsoid)
-    if (!rectangle) {
-      return this.snapshot?.rectangle
+  private handleTileEvent = (event: TileDecodeEvent): void => {
+    if (this.destroyed || this.paused) {
+      return
     }
 
-    const sourceRectangle = this.source.rectangle ?? this.tilingScheme.rectangle
-    return Rectangle.intersection(rectangle, sourceRectangle, scratchRectangle)
-  }
-
-  private estimateZoom(rectangle: Rectangle): number {
-    const sourceRectangle = this.source.rectangle ?? this.tilingScheme.rectangle
-    const minimumLevel = this.source.minimumLevel ?? 0
-    const maximumLevel = this.source.maximumLevel ?? 23
-
-    const horizontal = sourceRectangle.width / Math.max(rectangle.width, 1e-12)
-    const vertical = sourceRectangle.height / Math.max(rectangle.height, 1e-12)
-    const baseX = this.tilingScheme.getNumberOfXTilesAtLevel(0)
-    const baseY = this.tilingScheme.getNumberOfYTilesAtLevel(0)
-    const zoomEstimate = Math.max(
-      Math.log2(horizontal / baseX),
-      Math.log2(vertical / baseY),
-    )
-
-    return clamp(zoomEstimate, minimumLevel, maximumLevel)
-  }
-
-  private deriveLevel(rectangle: Rectangle): number {
-    return Math.round(this.estimateZoom(rectangle))
-  }
-
-  private collectVisibleTileCoords(rectangle: Rectangle, level: number): TileCoord[] {
-    const xCount = this.tilingScheme.getNumberOfXTilesAtLevel(level)
-    const yCount = this.tilingScheme.getNumberOfYTilesAtLevel(level)
-    const samples = collectRectangleSamples(rectangle)
-    const tileSamples = samples
-      .map((sample) => toTileXY(this.tilingScheme, sample, level))
-      .filter((sample): sample is Cartesian2 => sample !== undefined)
-
-    if (tileSamples.length === 0) {
-      return []
+    if (event.type === 'evicted') {
+      this.handleEvictedTile(event.tileId)
+      return
     }
 
-    const centerTile = tileSamples[Math.floor(tileSamples.length / 2)]
-    const unwrappedX = tileSamples.map((sample) =>
-      unwrapTileIndex(sample.x, centerTile.x, xCount),
-    )
-    const yValues = tileSamples.map((sample) => sample.y)
-
-    let minX = Math.floor(Math.min(...unwrappedX)) - this.tilePadding
-    let maxX = Math.ceil(Math.max(...unwrappedX)) + this.tilePadding
-    let minY = Math.floor(Math.min(...yValues)) - this.tilePadding
-    let maxY = Math.ceil(Math.max(...yValues)) + this.tilePadding
-
-    if (maxX - minX + 1 >= xCount) {
-      minX = 0
-      maxX = xCount - 1
+    if (event.type !== 'decoded') {
+      return
     }
 
-    minY = clamp(minY, 0, yCount - 1)
-    maxY = clamp(maxY, 0, yCount - 1)
+    if (!this.isVisible(event.tile.id)) {
+      return
+    }
 
-    const coords: TileCoord[] = []
-    const seen = new Set<string>()
+    const now = Date.now()
+    this.latestLevel = event.tile.coord.level
 
-    for (let y = minY; y <= maxY; y += 1) {
-      for (let x = minX; x <= maxX; x += 1) {
-        const normalizedX = normalizeTileIndex(x, xCount)
-        const tile: TileCoord = {
-          x: normalizedX,
-          y,
-          level,
-        }
-        const id = this.toTileId(tile)
-        if (seen.has(id)) continue
-        seen.add(id)
-        coords.push(tile)
+    for (const ancestorId of collectAncestorIds(
+      this.source.id,
+      event.tile.coord,
+      this.source.minimumLevel ?? 0,
+    )) {
+      const expiry = now + this.transitionHoldMs
+      const currentExpiry = this.decodedFallbackUntil.get(ancestorId)
+      if (currentExpiry === undefined || expiry > currentExpiry) {
+        this.decodedFallbackUntil.set(ancestorId, expiry)
       }
     }
 
-    return coords
+    this.rebuildState(now)
+    this.scheduleSweep(now)
   }
 
-  private toTileId(tile: TileCoord): string {
-    return `${this.source.id}:${tile.level}/${tile.x}/${tile.y}`
+  private rebuildState(now: number): MvtViewportSnapshot | undefined {
+    const previousSnapshot = this.snapshot
+    const previousActive = new Set(this.activeTileIds)
+    const previousPinned = new Set(this.pinnedTileIds)
+    const nextDemanded = new Map<string, TileDemandRecord>()
+    const nextFallbackUntil = new Map<string, number>()
+    const nextActive = new Set<string>(this.requestedTileIds)
+    const nextPinned = new Set<string>()
+    const enteredTileIds: string[] = []
+    const exitedTileIds: string[] = []
+
+    const nextLevel = this.latestLevel
+    const nextZoom = this.latestLevel
+
+    for (const [tileId, record] of this.demandedTiles) {
+      const expiry = record.lastTouchedAt + this.transitionHoldMs
+      nextActive.add(tileId)
+
+      if (now < expiry) {
+        nextDemanded.set(tileId, record)
+        nextPinned.add(tileId)
+        for (const ancestorId of record.ancestors) {
+          const currentExpiry = nextFallbackUntil.get(ancestorId)
+          if (currentExpiry === undefined || expiry > currentExpiry) {
+            nextFallbackUntil.set(ancestorId, expiry)
+          }
+        }
+      }
+    }
+
+    for (const [tileId, expiry] of this.decodedFallbackUntil) {
+      if (expiry <= now) {
+        if (!nextDemanded.has(tileId)) {
+          this.requestedTileIds.delete(tileId)
+          nextActive.delete(tileId)
+        }
+        continue
+      }
+
+      const currentExpiry = nextFallbackUntil.get(tileId)
+      if (currentExpiry === undefined || expiry > currentExpiry) {
+        nextFallbackUntil.set(tileId, expiry)
+      }
+    }
+
+    for (const [tileId, expiry] of nextFallbackUntil) {
+      if (expiry <= now) {
+        continue
+      }
+
+      nextActive.add(tileId)
+      nextPinned.add(tileId)
+    }
+
+    this.demandedTiles.clear()
+    for (const [tileId, record] of nextDemanded) {
+      this.demandedTiles.set(tileId, record)
+    }
+
+    this.decodedFallbackUntil.clear()
+    for (const [tileId, expiry] of nextFallbackUntil) {
+      if (expiry > now) {
+        this.decodedFallbackUntil.set(tileId, expiry)
+      }
+    }
+
+    for (const tileId of previousPinned) {
+      if (!nextPinned.has(tileId)) {
+        this.scheduler.unpin(tileId)
+      }
+    }
+
+    for (const tileId of nextPinned) {
+      if (!previousPinned.has(tileId)) {
+        this.scheduler.pin(tileId)
+      }
+    }
+
+    for (const tileId of previousActive) {
+      if (!nextActive.has(tileId)) {
+        exitedTileIds.push(tileId)
+      }
+    }
+
+    for (const tileId of nextActive) {
+      if (!previousActive.has(tileId)) {
+        enteredTileIds.push(tileId)
+      }
+    }
+
+    this.activeTileIds.clear()
+    for (const tileId of nextActive) {
+      this.activeTileIds.add(tileId)
+      this.scheduler.getTile(tileId)
+    }
+    this.pinnedTileIds.clear()
+    for (const tileId of nextPinned) {
+      this.pinnedTileIds.add(tileId)
+    }
+
+    const nextSnapshot: MvtViewportSnapshot = {
+      sourceId: this.source.id,
+      rectangle: undefined,
+      zoom: nextZoom,
+      level: nextLevel,
+      activeTileIds: Array.from(nextActive),
+      enteredTileIds,
+      exitedTileIds,
+    }
+
+    const changed =
+      previousSnapshot.zoom !== nextSnapshot.zoom ||
+      previousSnapshot.level !== nextSnapshot.level ||
+      enteredTileIds.length > 0 ||
+      exitedTileIds.length > 0
+
+    this.snapshot = nextSnapshot
+
+    if (changed) {
+      this.emit()
+      this.scene.requestRender()
+    }
+
+    return this.snapshot
+  }
+
+  private handleEvictedTile(tileId: string): void {
+    const hadActive = this.activeTileIds.delete(tileId)
+    this.requestedTileIds.delete(tileId)
+    this.demandedTiles.delete(tileId)
+    this.decodedFallbackUntil.delete(tileId)
+
+    const wasPinned = this.pinnedTileIds.delete(tileId)
+    if (wasPinned) {
+      this.scheduler.unpin(tileId)
+    }
+
+    if (hadActive || wasPinned) {
+      this.snapshot = {
+        sourceId: this.source.id,
+        rectangle: this.snapshot.rectangle,
+        zoom: this.latestLevel,
+        level: this.latestLevel,
+        activeTileIds: Array.from(this.activeTileIds),
+        enteredTileIds: [],
+        exitedTileIds: [tileId],
+      }
+      this.emit()
+      this.scene.requestRender()
+    }
+  }
+
+  private scheduleSweep(now = Date.now()): void {
+    if (!this.autoUpdate || this.destroyed || this.paused) {
+      return
+    }
+
+    let nextExpiry = Number.POSITIVE_INFINITY
+
+    for (const record of this.demandedTiles.values()) {
+      const expiry = record.lastTouchedAt + this.transitionHoldMs
+      if (expiry < nextExpiry) {
+        nextExpiry = expiry
+      }
+    }
+
+    for (const expiry of this.decodedFallbackUntil.values()) {
+      if (expiry < nextExpiry) {
+        nextExpiry = expiry
+      }
+    }
+
+    this.clearSweepTimer()
+
+    if (!Number.isFinite(nextExpiry)) {
+      return
+    }
+
+    const delay = Math.max(0, nextExpiry - now)
+    this.sweepTimer = setTimeout(() => {
+      this.sweepTimer = undefined
+      if (!this.destroyed && !this.paused) {
+        this.rebuildState(Date.now())
+        this.scheduleSweep()
+      }
+    }, delay)
+  }
+
+  private clearSweepTimer(): void {
+    if (this.sweepTimer !== undefined) {
+      clearTimeout(this.sweepTimer)
+      this.sweepTimer = undefined
+    }
   }
 
   private emit(): void {
-    if (!this.snapshot) return
-
     for (const listener of this.listeners) {
       listener(this.snapshot)
     }

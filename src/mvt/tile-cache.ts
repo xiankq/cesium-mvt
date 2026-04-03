@@ -20,7 +20,13 @@ export class TileCache<K, V> {
     return value
   }
 
-  set(key: K, value: V): Array<{ key: K; value: V }> {
+  set(
+    key: K,
+    value: V,
+    options?: {
+      skipEviction?: (key: K, value: V) => boolean
+    },
+  ): Array<{ key: K; value: V }> {
     const evicted: Array<{ key: K; value: V }> = []
 
     if (this.entries.has(key)) {
@@ -28,7 +34,7 @@ export class TileCache<K, V> {
     }
 
     this.entries.set(key, value)
-    evicted.push(...this.trim())
+    evicted.push(...this.trim(options?.skipEviction))
 
     return evicted
   }
@@ -45,21 +51,20 @@ export class TileCache<K, V> {
     return this.entries.values()
   }
 
-  private trim(): Array<{ key: K; value: V }> {
+  trim(skipEviction?: (key: K, value: V) => boolean): Array<{ key: K; value: V }> {
     const evicted: Array<{ key: K; value: V }> = []
 
-    while (this.entries.size > this.capacity) {
-      const oldestKey = this.entries.keys().next().value as K | undefined
-      if (oldestKey === undefined) return evicted
+    for (const [key, value] of Array.from(this.entries.entries())) {
+      if (this.entries.size <= this.capacity) {
+        break
+      }
 
-      const oldestValue = this.entries.get(oldestKey)
-      if (oldestValue === undefined) {
-        this.entries.delete(oldestKey)
+      if (skipEviction?.(key, value)) {
         continue
       }
 
-      evicted.push({ key: oldestKey, value: oldestValue })
-      this.entries.delete(oldestKey)
+      evicted.push({ key, value })
+      this.entries.delete(key)
     }
 
     return evicted

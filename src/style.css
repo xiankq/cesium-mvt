@@ -69,6 +69,13 @@ select {
     linear-gradient(160deg, #02050a 0%, #07111f 48%, #0b1424 100%);
 }
 
+.cesium-viewer-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 .cesium-page::before {
   content: '';
   position: absolute;

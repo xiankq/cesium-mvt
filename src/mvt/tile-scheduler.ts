@@ -16,6 +16,7 @@ export class TileScheduler {
   private readonly queue: TileDecodeJob[] = []
   private readonly queuedIds = new Set<string>()
   private readonly inflight = new Map<string, Promise<void>>()
+  private readonly pinned = new Map<string, number>()
   private readonly listeners = new Set<SchedulerListener>()
   private readonly tileListeners = new Set<TileListener>()
   private readonly state: MvtSchedulerSnapshot
@@ -51,6 +52,30 @@ export class TileScheduler {
 
   getTile(tileId: string): DecodedTileRecord | undefined {
     return this.cache.get(tileId)
+  }
+
+  touch(tileId: string): boolean {
+    return this.cache.get(tileId) !== undefined
+  }
+
+  pin(tileId: string): void {
+    this.pinned.set(tileId, (this.pinned.get(tileId) ?? 0) + 1)
+    this.touch(tileId)
+  }
+
+  unpin(tileId: string): void {
+    const current = this.pinned.get(tileId)
+    if (current === undefined) {
+      return
+    }
+
+    if (current <= 1) {
+      this.pinned.delete(tileId)
+    } else {
+      this.pinned.set(tileId, current - 1)
+    }
+
+    this.trimCache()
   }
 
   getCachedTiles(): DecodedTileRecord[] {
@@ -104,6 +129,7 @@ export class TileScheduler {
     this.queue.length = 0
     this.queuedIds.clear()
     this.inflight.clear()
+    this.pinned.clear()
     this.cache.clear()
     this.listeners.clear()
     this.tileListeners.clear()
@@ -127,7 +153,9 @@ export class TileScheduler {
   private async runJob(job: TileDecodeJob): Promise<void> {
     try {
       const tile = await this.worker.decode(job)
-      const evicted = this.cache.set(job.id, tile)
+      const evicted = this.cache.set(job.id, tile, {
+        skipEviction: (key) => this.pinned.has(key),
+      })
       this.state.decoded += 1
       this.state.lastTileId = job.id
       this.emitTile({
@@ -147,6 +175,16 @@ export class TileScheduler {
       this.inflight.delete(job.id)
       this.emit()
       void this.pump()
+    }
+  }
+
+  private trimCache(): void {
+    const evicted = this.cache.trim((key) => this.pinned.has(key))
+    for (const entry of evicted) {
+      this.emitTile({
+        type: 'evicted',
+        tileId: entry.key,
+      })
     }
   }
 

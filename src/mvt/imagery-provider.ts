@@ -4,6 +4,7 @@ import { createTransparentCanvas } from './transparent-canvas'
 import type { TileScheduler } from './tile-scheduler'
 import type { Request } from 'cesium'
 import { createTileDecodeJob } from './tile-job'
+import type { CesiumMvtSourceCache } from './source-cache'
 
 export type CesiumMvtImageryProviderOptions = MvtSourceOptions & {
   scheduler: TileScheduler
@@ -15,6 +16,7 @@ export class CesiumMvtImageryProvider extends UrlTemplateImageryProvider {
   private readonly urlTemplate: string
   private readonly subdomains?: string | string[]
   private readonly customTags?: MvtSourceOptions['customTags']
+  private lifecycle?: CesiumMvtSourceCache
 
   constructor(options: CesiumMvtImageryProviderOptions) {
     const {
@@ -40,12 +42,19 @@ export class CesiumMvtImageryProvider extends UrlTemplateImageryProvider {
     this.customTags = customTags
   }
 
+  setLifecycle(lifecycle: CesiumMvtSourceCache | undefined): void {
+    this.lifecycle = lifecycle
+  }
+
   override requestImage(
     x: number,
     y: number,
     level: number,
     _request?: Request,
   ): Promise<HTMLCanvasElement> {
+    const coord = { x, y, level }
+    this.lifecycle?.touch(coord)
+
     const job: TileDecodeJob = createTileDecodeJob(
       {
         id: this.sourceId,
@@ -58,7 +67,7 @@ export class CesiumMvtImageryProvider extends UrlTemplateImageryProvider {
         customTags: this.customTags,
       },
       this.tilingScheme,
-      { x, y, level },
+      coord,
     )
 
     this.scheduler.schedule(job)
