@@ -54,49 +54,70 @@ function buildSpriteUrl(baseUrl: string, pixelRatio: number, extension: 'json' |
 }
 
 function loadImage(url: string, signal?: AbortSignal): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    let settled = false
-
-    const cleanup = () => {
-      if (signal) {
-        signal.removeEventListener('abort', handleAbort)
-      }
-    }
-
-    const finishResolve = () => {
-      if (settled) return
-      settled = true
-      cleanup()
-      resolve(image)
-    }
-
-    const finishReject = (error: Error) => {
-      if (settled) return
-      settled = true
-      cleanup()
-      reject(error)
-    }
-
-    const handleAbort = () => {
-      finishReject(new Error('Sprite loading was aborted.'))
-    }
-
-    image.onload = finishResolve
-    image.onerror = () => finishReject(new Error(`Failed to load sprite image: ${url}`))
-
-    if (signal) {
-      if (signal.aborted) {
-        handleAbort()
-        return
+  return fetch(url, { signal })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to load sprite image: ${url}`)
       }
 
-      signal.addEventListener('abort', handleAbort, { once: true })
-    }
+      const blob = await response.blob()
+      return new Promise((resolve, reject) => {
+        const image = new Image()
+        const objectUrl = URL.createObjectURL(blob)
+        let settled = false
 
-    image.decoding = 'async'
-    image.src = url
-  })
+        const cleanup = () => {
+          if (signal) {
+            signal.removeEventListener('abort', handleAbort)
+          }
+          URL.revokeObjectURL(objectUrl)
+        }
+
+        const finishResolve = () => {
+          if (settled) return
+          settled = true
+          cleanup()
+          resolve(image)
+        }
+
+        const finishReject = (error: Error) => {
+          if (settled) return
+          settled = true
+          cleanup()
+          reject(error)
+        }
+
+        const handleAbort = () => {
+          finishReject(new Error('Sprite loading was aborted.'))
+        }
+
+        image.onload = finishResolve
+        image.onerror = () => finishReject(new Error(`Failed to decode sprite image: ${url}`))
+
+        if (signal) {
+          if (signal.aborted) {
+            handleAbort()
+            return
+          }
+
+          signal.addEventListener('abort', handleAbort, { once: true })
+        }
+
+        image.decoding = 'async'
+        image.src = objectUrl
+      })
+    })
+}
+
+function isValidSpriteMetadataEntry(entry: SpriteMetadataEntry): boolean {
+  return (
+    Number.isFinite(entry.x) &&
+    Number.isFinite(entry.y) &&
+    Number.isFinite(entry.width) &&
+    Number.isFinite(entry.height) &&
+    entry.width > 0 &&
+    entry.height > 0
+  )
 }
 
 export class MapLibreSpriteAtlas {
@@ -208,14 +229,7 @@ export class MapLibreSpriteAtlas {
 
         this.entries.clear()
         for (const [id, entry] of Object.entries(metadata)) {
-          if (
-            !entry ||
-            typeof entry !== 'object' ||
-            !Number.isFinite(entry.x) ||
-            !Number.isFinite(entry.y) ||
-            !Number.isFinite(entry.width) ||
-            !Number.isFinite(entry.height)
-          ) {
+          if (!entry || typeof entry !== 'object' || !isValidSpriteMetadataEntry(entry)) {
             continue
           }
 

@@ -1,4 +1,10 @@
-import type { Scene } from 'cesium'
+import {
+  Cartesian2,
+  Cartographic,
+  Rectangle,
+  type Scene,
+  type TilingScheme,
+} from 'cesium'
 import type {
   DecodedTileRecord,
   MvtSourceOptions,
@@ -13,7 +19,7 @@ import { estimateSceneZoom } from '../render/geometry'
 export type CesiumMvtSourceCacheOptions = {
   scene: Scene
   scheduler: TileScheduler
-  tilingScheme: import('cesium').TilingScheme
+  tilingScheme: TilingScheme
   source: MvtSourceOptions
   autoUpdate?: boolean
   tilePadding?: number
@@ -57,9 +63,140 @@ function collectAncestorIds(
   )
 }
 
+type TileIndex = {
+  x: number
+  y: number
+}
+
+const scratchViewRectangle = new Rectangle()
+const scratchClippedRectangle = new Rectangle()
+const scratchSourceRectangle = new Rectangle()
+const scratchSouthwest = new Cartographic()
+const scratchNorthwest = new Cartographic()
+const scratchNortheast = new Cartographic()
+const scratchSoutheast = new Cartographic()
+const scratchTileXY = new Cartesian2()
+
+function wrapTileX(x: number, tileCount: number): number {
+  return ((x % tileCount) + tileCount) % tileCount
+}
+
+function clampTileY(y: number, tileCount: number): number {
+  return Math.max(0, Math.min(tileCount - 1, y))
+}
+
+function resolveTileIndex(
+  tilingScheme: TilingScheme,
+  position: Cartographic,
+  level: number,
+): TileIndex | undefined {
+  const tile = tilingScheme.positionToTileXY(position, level, scratchTileXY)
+  if (!tile) {
+    return undefined
+  }
+
+  return {
+    x: tile.x,
+    y: tile.y,
+  }
+}
+
+function addTileRange(
+  tileIds: Set<string>,
+  sourceId: string,
+  level: number,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+  xTileCount: number,
+  yTileCount: number,
+): void {
+  const clampedMinY = clampTileY(minY, yTileCount)
+  const clampedMaxY = clampTileY(maxY, yTileCount)
+  if (clampedMinY > clampedMaxY) {
+    return
+  }
+
+  if (maxX - minX + 1 >= xTileCount) {
+    for (let y = clampedMinY; y <= clampedMaxY; y += 1) {
+      for (let x = 0; x < xTileCount; x += 1) {
+        tileIds.add(toTileId(sourceId, { x, y, level }))
+      }
+    }
+    return
+  }
+
+  for (let y = clampedMinY; y <= clampedMaxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      tileIds.add(
+        toTileId(sourceId, {
+          x: wrapTileX(x, xTileCount),
+          y,
+          level,
+        }),
+      )
+    }
+  }
+}
+
+function addRectangleTileIds(
+  tileIds: Set<string>,
+  sourceId: string,
+  tilingScheme: TilingScheme,
+  rectangle: Rectangle,
+  level: number,
+  tilePadding: number,
+): void {
+  const tileCorners = [
+    resolveTileIndex(
+      tilingScheme,
+      Rectangle.southwest(rectangle, scratchSouthwest),
+      level,
+    ),
+    resolveTileIndex(
+      tilingScheme,
+      Rectangle.northwest(rectangle, scratchNorthwest),
+      level,
+    ),
+    resolveTileIndex(
+      tilingScheme,
+      Rectangle.northeast(rectangle, scratchNortheast),
+      level,
+    ),
+    resolveTileIndex(
+      tilingScheme,
+      Rectangle.southeast(rectangle, scratchSoutheast),
+      level,
+    ),
+  ].filter((tile): tile is TileIndex => tile !== undefined)
+
+  if (tileCorners.length === 0) {
+    return
+  }
+
+  const minX = Math.min(...tileCorners.map((tile) => tile.x)) - tilePadding
+  const maxX = Math.max(...tileCorners.map((tile) => tile.x)) + tilePadding
+  const minY = Math.min(...tileCorners.map((tile) => tile.y)) - tilePadding
+  const maxY = Math.max(...tileCorners.map((tile) => tile.y)) + tilePadding
+
+  addTileRange(
+    tileIds,
+    sourceId,
+    level,
+    minX,
+    maxX,
+    minY,
+    maxY,
+    tilingScheme.getNumberOfXTilesAtLevel(level),
+    tilingScheme.getNumberOfYTilesAtLevel(level),
+  )
+}
+
 export class CesiumMvtSourceCache {
   private readonly scene: Scene
   private readonly scheduler: TileScheduler
+  private readonly tilingScheme: TilingScheme
   private readonly source: MvtSourceOptions
   private readonly listeners = new Set<MvtViewportListener>()
   private readonly demandedTiles = new Map<string, TileDemandRecord>()
@@ -68,25 +205,30 @@ export class CesiumMvtSourceCache {
   private readonly pinnedTileIds = new Set<string>()
   private readonly transitionHoldMs: number
   private readonly autoUpdate: boolean
+  private readonly tilePadding: number
   private removeTileListener?: () => void
   private sweepTimer?: ReturnType<typeof setTimeout>
   private snapshot: MvtViewportSnapshot
   private paused = false
   private destroyed = false
-  private latestLevel: number
+  private latestTileLevel: number
+  private latestZoom: number
 
   constructor(options: CesiumMvtSourceCacheOptions) {
     this.scene = options.scene
     this.scheduler = options.scheduler
+    this.tilingScheme = options.tilingScheme
     this.source = options.source
     this.transitionHoldMs = options.transitionHoldMs ?? 640
     this.autoUpdate = options.autoUpdate ?? true
-    this.latestLevel = this.source.minimumLevel ?? 0
+    this.tilePadding = Math.max(0, Math.floor(options.tilePadding ?? 1))
+    this.latestTileLevel = this.source.minimumLevel ?? 0
+    this.latestZoom = this.latestTileLevel
     this.snapshot = {
       sourceId: this.source.id,
       rectangle: undefined,
-      zoom: this.latestLevel,
-      level: this.latestLevel,
+      zoom: this.latestZoom,
+      level: this.latestTileLevel,
       activeTileIds: [],
       enteredTileIds: [],
       exitedTileIds: [],
@@ -148,10 +290,7 @@ export class CesiumMvtSourceCache {
       })
     }
 
-    this.latestLevel = Math.max(
-      0,
-      Math.round(estimateSceneZoom(this.scene) ?? tile.level),
-    )
+    this.updateLatestViewState(tile.level)
     const snapshot = this.rebuildState(now)
     this.scheduleSweep(now)
     return snapshot
@@ -162,6 +301,7 @@ export class CesiumMvtSourceCache {
       return this.snapshot
     }
 
+    this.updateLatestViewState()
     const snapshot = this.rebuildState(Date.now())
     this.scheduleSweep()
     return snapshot
@@ -188,8 +328,8 @@ export class CesiumMvtSourceCache {
     this.snapshot = {
       sourceId: this.source.id,
       rectangle: undefined,
-      zoom: this.latestLevel,
-      level: this.latestLevel,
+      zoom: this.latestZoom,
+      level: this.latestTileLevel,
       activeTileIds: [],
       enteredTileIds: [],
       exitedTileIds,
@@ -259,10 +399,7 @@ export class CesiumMvtSourceCache {
     }
 
     const now = Date.now()
-    this.latestLevel = Math.max(
-      0,
-      Math.round(estimateSceneZoom(this.scene) ?? event.tile.coord.level),
-    )
+    this.updateLatestViewState()
 
     for (const ancestorId of collectAncestorIds(
       this.source.id,
@@ -291,12 +428,25 @@ export class CesiumMvtSourceCache {
     const enteredTileIds: string[] = []
     const exitedTileIds: string[] = []
 
-    const nextLevel = this.latestLevel
-    const nextZoom = this.latestLevel
+    const nextLevel = this.latestTileLevel
+    const nextZoom = this.latestZoom
+    const viewportTileIds = this.collectViewportTileIds(nextLevel)
+    const shouldFilterCurrentLevelByViewport =
+      viewportTileIds !== undefined && viewportTileIds.size > 0
 
     for (const [tileId, record] of this.demandedTiles) {
       const expiry = record.lastTouchedAt + this.transitionHoldMs
       const isCurrentLevel = record.coord.level === nextLevel
+      const isViewportTile =
+        isCurrentLevel && (
+          !shouldFilterCurrentLevelByViewport ||
+          viewportTileIds?.has(tileId) === true
+        )
+
+      if (isCurrentLevel && !isViewportTile) {
+        continue
+      }
+
       if (!isCurrentLevel && expiry <= now) {
         continue
       }
@@ -306,8 +456,8 @@ export class CesiumMvtSourceCache {
 
       nextPinned.add(tileId)
       const keepAncestors =
-        expiry > now ||
-        (isCurrentLevel && this.scheduler.getTile(tileId) === undefined)
+        isViewportTile &&
+        (expiry > now || this.scheduler.getTile(tileId) === undefined)
       if (keepAncestors) {
         for (const ancestorId of record.ancestors) {
           const currentExpiry = nextFallbackUntil.get(ancestorId)
@@ -425,8 +575,8 @@ export class CesiumMvtSourceCache {
       this.snapshot = {
         sourceId: this.source.id,
         rectangle: this.snapshot.rectangle,
-        zoom: this.latestLevel,
-        level: this.latestLevel,
+        zoom: this.latestZoom,
+        level: this.latestTileLevel,
         activeTileIds: Array.from(this.activeTileIds),
         enteredTileIds: [],
         exitedTileIds: [tileId],
@@ -483,5 +633,87 @@ export class CesiumMvtSourceCache {
     for (const listener of this.listeners) {
       listener(this.snapshot)
     }
+  }
+
+  private updateLatestViewState(tileLevel = this.latestTileLevel): void {
+    this.latestTileLevel = Math.max(
+      this.source.minimumLevel ?? 0,
+      tileLevel,
+    )
+    this.latestZoom = Math.max(
+      0,
+      estimateSceneZoom(this.scene) ?? this.latestTileLevel,
+    )
+  }
+
+  private collectViewportTileIds(level: number): Set<string> | undefined {
+    const viewRectangle = this.scene.camera.computeViewRectangle(
+      this.scene.globe?.ellipsoid,
+      scratchViewRectangle,
+    )
+    if (!viewRectangle) {
+      return undefined
+    }
+
+    let clippedRectangle = Rectangle.intersection(
+      viewRectangle,
+      this.tilingScheme.rectangle,
+      scratchClippedRectangle,
+    )
+    if (!clippedRectangle) {
+      return new Set()
+    }
+
+    if (this.source.rectangle) {
+      clippedRectangle = Rectangle.intersection(
+        clippedRectangle,
+        this.source.rectangle,
+        scratchSourceRectangle,
+      )
+      if (!clippedRectangle) {
+        return new Set()
+      }
+    }
+
+    const tileIds = new Set<string>()
+    if (clippedRectangle.west <= clippedRectangle.east) {
+      addRectangleTileIds(
+        tileIds,
+        this.source.id,
+        this.tilingScheme,
+        clippedRectangle,
+        level,
+        this.tilePadding,
+      )
+      return tileIds
+    }
+
+    addRectangleTileIds(
+      tileIds,
+      this.source.id,
+      this.tilingScheme,
+      new Rectangle(
+        clippedRectangle.west,
+        clippedRectangle.south,
+        Math.PI,
+        clippedRectangle.north,
+      ),
+      level,
+      this.tilePadding,
+    )
+    addRectangleTileIds(
+      tileIds,
+      this.source.id,
+      this.tilingScheme,
+      new Rectangle(
+        -Math.PI,
+        clippedRectangle.south,
+        clippedRectangle.east,
+        clippedRectangle.north,
+      ),
+      level,
+      this.tilePadding,
+    )
+    return tileIds
   }
 }

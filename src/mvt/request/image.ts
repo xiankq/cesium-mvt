@@ -6,22 +6,24 @@ export class TileImageCache {
     height = 256,
     fillStyle?: string,
   ): HTMLCanvasElement {
-    const key = `${width}x${height}:${fillStyle ?? 'transparent'}`
+    const safeWidth = Math.max(1, Math.floor(width))
+    const safeHeight = Math.max(1, Math.floor(height))
+    const key = `${safeWidth}x${safeHeight}:${fillStyle ?? 'transparent'}`
     const cached = this.images.get(key)
     if (cached) {
       return cached
     }
 
     const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
+    canvas.width = safeWidth
+    canvas.height = safeHeight
 
     const context = canvas.getContext('2d')
     if (context) {
-      context.clearRect(0, 0, width, height)
+      context.clearRect(0, 0, safeWidth, safeHeight)
       if (fillStyle) {
         context.fillStyle = fillStyle
-        context.fillRect(0, 0, width, height)
+        context.fillRect(0, 0, safeWidth, safeHeight)
       }
     }
 
