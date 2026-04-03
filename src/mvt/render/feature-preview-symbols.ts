@@ -7,7 +7,7 @@ import {
   Scene,
   VerticalOrigin,
 } from 'cesium'
-import type { ScreenRect } from './screen-space'
+import type { ScreenRect } from '../utils/screen-space'
 import type { SpriteAtlasEntry } from './sprite-atlas'
 
 export type SymbolPlacementCandidate = {

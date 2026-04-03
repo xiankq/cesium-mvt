@@ -4,8 +4,8 @@ import type {
   MvtSchedulerSnapshot,
   TileDecodeEvent,
   TileDecodeJob,
-} from './types'
-import { VectorTileWorkerClient } from './worker-client'
+} from '../types'
+import { VectorTileWorkerClient } from '../worker/vector-tile-worker-client'
 import TinyQueue from 'tinyqueue'
 
 type SchedulerListener = (snapshot: MvtSchedulerSnapshot) => void

@@ -1,5 +1,5 @@
-import type { ScreenRect } from './screen-space'
-import { collectScreenGridKeys, intersects } from './screen-space'
+import type { ScreenRect } from '../utils/screen-space'
+import { collectScreenGridKeys, intersects } from '../utils/screen-space'
 
 type StoredLabel = {
   rect: ScreenRect

@@ -1,6 +1,6 @@
 import type { TilingScheme } from 'cesium'
 import { buildTileUrl } from './url-template'
-import type { MvtSourceOptions, TileCoord, TileDecodeJob } from './types'
+import type { MvtSourceOptions, TileCoord, TileDecodeJob } from '../types'
 
 export function createTileDecodeJob(
   source: MvtSourceOptions,

@@ -11,8 +11,8 @@ import type {
   DecodedFeatureRecord,
   TileCoord,
   TileGeometryPart,
-} from './types'
-import type { CompiledStyleLayer } from './maplibre-style-renderer'
+} from '../types'
+import type { CompiledStyleLayer } from '../style/maplibre-style-renderer'
 
 const scratchNativePosition = new Cartesian3()
 const scratchCartographic = new Cartographic()

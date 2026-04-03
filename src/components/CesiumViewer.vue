@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, provide, shallowRef } from 'vue'
-import { EllipsoidTerrainProvider, Viewer } from 'cesium'
+import { Viewer } from 'cesium'
 import { CesiumViewerKey } from './cesium-viewer-context'
-
-const emit = defineEmits<{
-  ready: [viewer: Viewer]
-}>()
 
 const container = shallowRef<HTMLDivElement | null>(null)
 const viewerRef = shallowRef<Viewer>()
@@ -30,11 +26,9 @@ onMounted(() => {
     requestRenderMode: true,
     maximumRenderTimeChange: Number.POSITIVE_INFINITY,
     shouldAnimate: false,
-    terrainProvider: new EllipsoidTerrainProvider(),
   })
 
   viewerRef.value = viewer
-  emit('ready', viewer)
 })
 
 onBeforeUnmount(() => {

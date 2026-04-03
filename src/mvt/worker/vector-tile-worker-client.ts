@@ -1,4 +1,4 @@
-import type { DecodedTileRecord, TileDecodeJob } from './types'
+import type { DecodedTileRecord, TileDecodeJob } from '../types'
 
 type WorkerRequest = {
   id: number
@@ -31,7 +31,7 @@ export class VectorTileWorkerClient {
   private requestId = 0
 
   constructor() {
-    this.worker = new Worker(new URL('./worker/vector-tile.worker.ts', import.meta.url), {
+    this.worker = new Worker(new URL('./vector-tile.worker.ts', import.meta.url), {
       type: 'module',
     })
     this.worker.onmessage = this.handleMessage

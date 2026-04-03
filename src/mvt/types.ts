@@ -111,8 +111,10 @@ export type MvtViewportSnapshot = {
 
 export type MvtViewportListener = (snapshot: MvtViewportSnapshot) => void
 
-export type CesiumMvtRuntimeOptions = {
+export type MvtProviderOptions = {
   source: MvtSourceOptions
   maxConcurrentRequests?: number
   cacheSize?: number
 }
+
+export type CesiumMvtRuntimeOptions = MvtProviderOptions

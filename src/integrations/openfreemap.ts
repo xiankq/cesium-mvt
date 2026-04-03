@@ -5,7 +5,7 @@ import {
   summarizeMapLibreStyle,
   type MapLibreStyleDocument,
 } from '../mvt'
-import type { CesiumMvtRuntimeOptions, MvtSourceOptions } from '../mvt'
+import type { MvtProviderOptions, MvtSourceOptions } from '../mvt'
 
 type RemoteTileJson = {
   tilejson?: string
@@ -33,7 +33,7 @@ type OpenFreeMapEnv = ImportMetaEnv & {
 
 export type OpenFreeMapMvtRuntimeMode = 'disabled' | 'template' | 'style'
 
-export type OpenFreeMapMvtRuntimeConfig = CesiumMvtRuntimeOptions & {
+export type OpenFreeMapMvtRuntimeConfig = MvtProviderOptions & {
   enabled: boolean
   mode: OpenFreeMapMvtRuntimeMode
   title: string

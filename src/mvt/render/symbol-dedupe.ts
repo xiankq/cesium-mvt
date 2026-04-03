@@ -1,5 +1,5 @@
-import type { ScreenRect } from './screen-space'
-import { collectScreenGridKeys } from './screen-space'
+import type { ScreenRect } from '../utils/screen-space'
+import { collectScreenGridKeys } from '../utils/screen-space'
 import murmurhash from 'murmurhash-js'
 
 type StoredSymbol = {

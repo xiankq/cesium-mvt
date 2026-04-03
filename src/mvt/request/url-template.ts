@@ -1,5 +1,5 @@
 import { Rectangle } from 'cesium'
-import type { UrlTemplateContext } from './types'
+import type { UrlTemplateContext } from '../types'
 
 function toDegrees(radians: number): string {
   return String((radians * 180) / Math.PI)

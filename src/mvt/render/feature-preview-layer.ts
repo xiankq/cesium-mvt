@@ -19,11 +19,11 @@ import type {
   DecodedTileRecord,
   MvtSchedulerSnapshot,
   MvtViewportSnapshot,
-} from './types'
-import type { TileDecodeEvent } from './types'
-import type { TileScheduler } from './tile-scheduler'
-import type { CesiumMvtSourceCache } from './source-cache'
-import type { MapLibreStyleDocument } from './maplibre-style'
+} from '../types'
+import type { TileDecodeEvent } from '../types'
+import type { TileScheduler } from '../scheduler/tile-scheduler'
+import type { CesiumMvtSourceCache } from '../scheduler/source-cache'
+import type { MapLibreStyleDocument } from '../style/maplibre-style'
 import { MapLibreSpriteAtlas } from './sprite-atlas'
 import { ScreenLabelCollisionIndex } from './label-collision'
 import { ScreenSymbolDedupeIndex } from './symbol-dedupe'
@@ -31,8 +31,8 @@ import { TextSpriteAtlas, buildTextSpriteRequest } from './text-atlas'
 import {
   compileMapLibreStyleRenderer,
   type CompiledMapLibreStyleRenderer,
-} from './maplibre-style-renderer'
-import { resolveFormattedText } from './maplibre-style-expressions'
+} from '../style/maplibre-style-renderer'
+import { resolveFormattedText } from '../style/maplibre-style-expressions'
 import {
   addPrimitiveOrdered,
   applyOpacity,

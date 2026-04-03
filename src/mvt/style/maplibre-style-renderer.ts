@@ -8,7 +8,7 @@ import type {
   DecodedFeatureRecord,
   DecodedLayerRecord,
   DecodedTileRecord,
-} from './types'
+} from '../types'
 import {
   buildStyleFeatureFilter,
   buildStyleLayerVisibility,

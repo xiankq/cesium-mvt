@@ -11,7 +11,7 @@ import {
   type DecodedFeatureRecord,
   type DecodedLayerRecord,
   type DecodedTileRecord,
-} from './types'
+} from '../types'
 
 export type CompiledStyleExpression<T> = {
   evaluate(feature: DecodedFeatureRecord, zoom: number): T

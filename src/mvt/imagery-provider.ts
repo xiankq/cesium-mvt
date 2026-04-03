@@ -1,87 +1,99 @@
-import { UrlTemplateImageryProvider } from 'cesium'
-import type { MvtSourceOptions, TileDecodeJob } from './types'
-import { createTransparentCanvas } from './transparent-canvas'
-import type { TileScheduler } from './tile-scheduler'
-import type { Request } from 'cesium'
-import { createTileDecodeJob } from './tile-job'
-import type { CesiumMvtSourceCache } from './source-cache'
+import type { ImageryLayer, Viewer } from 'cesium'
+import { CesiumMvtPrimitiveLayer } from './render/feature-preview-layer'
+import { TileRequestImageryProvider } from './request/tile-request-imagery-provider'
+import { CesiumMvtSourceCache } from './scheduler/source-cache'
+import { TileScheduler } from './scheduler/tile-scheduler'
+import { resolveMapLibreStyleBackgroundColor } from './style/maplibre-style-renderer'
+import type { MapLibreStyleDocument } from './style/maplibre-style'
+import type { MvtProviderOptions, MvtSchedulerSnapshot } from './types'
 
-export type CesiumMvtImageryProviderOptions = MvtSourceOptions & {
-  scheduler: TileScheduler
+type SchedulerListener = (snapshot: MvtSchedulerSnapshot) => void
+
+export type MvtImageryProviderOptions = MvtProviderOptions & {
+  viewer: Viewer
+  style?: MapLibreStyleDocument
 }
 
-export class CesiumMvtImageryProvider extends UrlTemplateImageryProvider {
-  private readonly scheduler: TileScheduler
-  private readonly sourceId: string
-  private readonly urlTemplate: string
-  private readonly subdomains?: string | string[]
-  private readonly customTags?: MvtSourceOptions['customTags']
-  private lifecycle?: CesiumMvtSourceCache
+export class MvtImageryProvider {
+  readonly scheduler: TileScheduler
+  readonly provider: TileRequestImageryProvider
 
-  constructor(options: CesiumMvtImageryProviderOptions) {
+  private readonly viewer: Viewer
+  private readonly sourceCache: CesiumMvtSourceCache
+  private readonly imageryLayer: ImageryLayer
+  private previewLayer?: CesiumMvtPrimitiveLayer
+  private destroyed = false
+
+  constructor(options: MvtImageryProviderOptions) {
     const {
-      scheduler,
-      id,
-      urlTemplate,
-      subdomains,
-      customTags,
-      ...imageryOptions
+      viewer,
+      source,
+      style,
+      maxConcurrentRequests,
+      cacheSize,
     } = options
 
-    super({
-      ...imageryOptions,
-      url: urlTemplate,
-      enablePickFeatures: false,
-      hasAlphaChannel: true,
+    this.viewer = viewer
+    this.scheduler = new TileScheduler(
+      source.id,
+      maxConcurrentRequests,
+      cacheSize,
+    )
+    this.provider = new TileRequestImageryProvider({
+      ...source,
+      scheduler: this.scheduler,
     })
 
-    this.scheduler = scheduler
-    this.sourceId = id
-    this.urlTemplate = urlTemplate
-    this.subdomains = subdomains
-    this.customTags = customTags
+    const backgroundColor = style
+      ? resolveMapLibreStyleBackgroundColor(style)
+      : undefined
+    if (backgroundColor) {
+      viewer.scene.globe.baseColor = backgroundColor
+      viewer.scene.backgroundColor = backgroundColor
+    }
+
+    this.sourceCache = new CesiumMvtSourceCache({
+      scene: viewer.scene,
+      scheduler: this.scheduler,
+      tilingScheme: this.provider.tilingScheme,
+      source,
+    })
+    this.provider.setLifecycle(this.sourceCache)
+    this.imageryLayer = viewer.scene.imageryLayers.addImageryProvider(this.provider)
+
+    try {
+      if (style) {
+        this.previewLayer = new CesiumMvtPrimitiveLayer(
+          viewer.scene,
+          this.scheduler,
+          this.provider.tilingScheme,
+          {
+            style,
+            sourceCache: this.sourceCache,
+          },
+        )
+      }
+    } catch (error) {
+      this.destroy()
+      throw error
+    }
   }
 
-  setLifecycle(lifecycle: CesiumMvtSourceCache | undefined): void {
-    this.lifecycle = lifecycle
+  subscribe(listener: SchedulerListener): () => void {
+    return this.scheduler.subscribe(listener)
   }
 
-  override requestImage(
-    x: number,
-    y: number,
-    level: number,
-    _request?: Request,
-  ): Promise<HTMLCanvasElement> {
-    const coord = { x, y, level }
-    this.lifecycle?.touch(coord)
+  destroy(): void {
+    if (this.destroyed) {
+      return
+    }
 
-    const job: TileDecodeJob = createTileDecodeJob(
-      {
-        id: this.sourceId,
-        urlTemplate: this.urlTemplate,
-        subdomains: this.subdomains,
-        maximumLevel: this.maximumLevel,
-        tilingScheme: this.tilingScheme,
-        tileWidth: this.tileWidth,
-        tileHeight: this.tileHeight,
-        customTags: this.customTags,
-      },
-      this.tilingScheme,
-      coord,
-    )
-
-    this.scheduler.schedule(job)
-
-    return Promise.resolve(createTransparentCanvas(this.tileWidth, this.tileHeight))
-  }
-
-  override pickFeatures(
-    _x: number,
-    _y: number,
-    _level: number,
-    _longitude: number,
-    _latitude: number,
-  ): undefined {
-    return undefined
+    this.destroyed = true
+    this.previewLayer?.destroy()
+    this.previewLayer = undefined
+    this.provider.setLifecycle(undefined)
+    this.sourceCache.destroy()
+    this.viewer.scene.imageryLayers.remove(this.imageryLayer, true)
+    this.scheduler.destroy()
   }
 }
