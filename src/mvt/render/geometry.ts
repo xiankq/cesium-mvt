@@ -12,7 +12,7 @@ import type {
   TileCoord,
   TileGeometryPart,
 } from '../types'
-import type { CompiledStyleLayer } from '../style/maplibre-style-renderer'
+import type { CompiledStyleLayer } from '../style/renderer'
 
 const scratchNativePosition = new Cartesian3()
 const scratchCartographic = new Cartographic()
@@ -51,7 +51,7 @@ export function tilePointToCartesian(
   return Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0)
 }
 
-export function toPositions(
+export function toCartesianPositions(
   tilingScheme: TilingScheme,
   tile: TileCoord,
   part: [number, number][],
@@ -117,7 +117,7 @@ export function applyOpacity(color: Color, opacity: number | undefined): Color {
   return next
 }
 
-export function computeLineMidpoint(part: TileGeometryPart): [number, number] {
+export function computeLineStringMidpoint(part: TileGeometryPart): [number, number] {
   if (part.length === 0) {
     return [0, 0]
   }
@@ -206,7 +206,7 @@ export function getFeatureAnchor(
     case 'Point':
       return firstPart[0]
     case 'LineString':
-      return computeLineMidpoint(firstPart)
+      return computeLineStringMidpoint(firstPart)
     case 'Polygon':
       return computeRingCentroid(firstPart)
     default:

@@ -1,6 +1,6 @@
 import { type Color } from 'cesium'
 import murmurhash from 'murmurhash-js'
-import { fontStackToCss, type SymbolPlacementCandidate } from './feature-preview-symbols'
+import { fontStackToCss, type SymbolPlacementCandidate } from './label'
 
 export type TextSpriteLayout = {
   bucketKey: string
@@ -63,6 +63,11 @@ type TextAtlasBucket = {
 const DEFAULT_PAGE_CSS_SIZE = 1024
 const DEFAULT_PADDING = 2
 const DEFAULT_BACKGROUND_MARGIN = 2
+const JUSTIFY_TO_TEXT_ALIGN: Record<'left' | 'center' | 'right', CanvasTextAlign> = {
+  left: 'left',
+  center: 'center',
+  right: 'right',
+}
 
 function colorToCss(color: Color): string {
   return color.toCssColorString()
@@ -142,22 +147,14 @@ function resolveTextAlign(
   justify: 'auto' | 'left' | 'center' | 'right',
   anchor: string,
 ): CanvasTextAlign {
-  switch (justify) {
-    case 'left':
-      return 'left'
-    case 'right':
-      return 'right'
-    case 'center':
-      return 'center'
-    default:
-      if (anchor.includes('left')) {
-        return 'left'
-      }
-      if (anchor.includes('right')) {
-        return 'right'
-      }
-      return 'center'
-  }
+  return (
+    JUSTIFY_TO_TEXT_ALIGN[justify as keyof typeof JUSTIFY_TO_TEXT_ALIGN]
+    ?? (anchor.includes('left')
+      ? 'left'
+      : anchor.includes('right')
+        ? 'right'
+        : 'center')
+  )
 }
 
 function measureTextLayout(

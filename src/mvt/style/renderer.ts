@@ -27,10 +27,10 @@ import {
   compileTextTransformExpression,
   compileTextTranslateAnchorExpression,
   type CompiledStyleExpression,
-} from './maplibre-style-expressions'
+} from './expressions'
 
-export { resolveFormattedText } from './maplibre-style-expressions'
-export type { CompiledStyleExpression, ResolvedFormattedText } from './maplibre-style-expressions'
+export { resolveFormattedText } from './expressions'
+export type { CompiledStyleExpression, ResolvedFormattedText } from './expressions'
 
 type SupportedStyleLayerType = 'fill' | 'line' | 'circle' | 'symbol'
 type SupportedLayerSpecification = LayerSpecification & {

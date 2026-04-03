@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, provide, shallowRef } from 'vue'
 import { Viewer } from 'cesium'
-import { CesiumViewerKey } from './cesium-viewer-context'
+import { ViewerKey } from './viewer-context'
 
 const container = shallowRef<HTMLDivElement | null>(null)
 const viewerRef = shallowRef<Viewer>()
 
-provide(CesiumViewerKey, viewerRef)
+provide(ViewerKey, viewerRef)
 
 onMounted(() => {
   if (!container.value) return

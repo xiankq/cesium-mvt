@@ -1,9 +1,9 @@
 import type { Request } from 'cesium'
 import { UrlTemplateImageryProvider } from 'cesium'
 import { createTransparentCanvas } from './transparent-canvas'
-import { createTileDecodeJob } from './tile-job'
-import type { CesiumMvtSourceCache } from '../scheduler/source-cache'
-import type { TileScheduler } from '../scheduler/tile-scheduler'
+import { createTileDecodeJob } from './job'
+import type { CesiumMvtSourceCache } from '../scheduler/source'
+import type { TileScheduler } from '../scheduler/scheduler'
 import type { MvtSourceOptions, TileDecodeJob } from '../types'
 
 export type TileRequestImageryProviderOptions = MvtSourceOptions & {

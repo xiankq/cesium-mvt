@@ -1,4 +1,4 @@
-export * from './imagery-provider'
+export * from './provider'
 export * from './types'
 export * from './request'
 export * from './scheduler'

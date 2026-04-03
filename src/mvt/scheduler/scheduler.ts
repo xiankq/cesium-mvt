@@ -1,11 +1,11 @@
-import { TileCache } from './tile-cache'
+import { TileCache } from './cache'
 import type {
   DecodedTileRecord,
   MvtSchedulerSnapshot,
   TileDecodeEvent,
   TileDecodeJob,
 } from '../types'
-import { VectorTileWorkerClient } from '../worker/vector-tile-worker-client'
+import { VectorTileWorkerClient } from '../worker/client'
 import TinyQueue from 'tinyqueue'
 
 type SchedulerListener = (snapshot: MvtSchedulerSnapshot) => void

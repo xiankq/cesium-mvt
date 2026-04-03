@@ -1,1 +1,1 @@
-export * from './vector-tile-worker-client'
+export * from './client'

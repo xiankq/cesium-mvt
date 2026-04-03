@@ -8,7 +8,7 @@ import {
   VerticalOrigin,
 } from 'cesium'
 import type { ScreenRect } from '../utils/screen-space'
-import type { SpriteAtlasEntry } from './sprite-atlas'
+import type { SpriteAtlasEntry } from './sprite'
 
 export type SymbolPlacementCandidate = {
   labelId: string
@@ -85,96 +85,120 @@ export type SymbolBucketRuntime = {
 }
 
 type SymbolScreenRect = ScreenRect
+type TextAnchorOrigin = {
+  horizontalOrigin: HorizontalOrigin
+  verticalOrigin: VerticalOrigin
+}
+type TextJustify = SymbolPlacementCandidate['textJustify']
+type TextTransform = SymbolPlacementCandidate['textTransform']
+type IconTextFit = NonNullable<SymbolPlacementCandidate['iconTextFit']>
 
 export const DEFAULT_TEXT_FONT_STACK = ['Open Sans Regular', 'Arial Unicode MS Regular']
 const scratchCanvasPosition = new Cartesian2()
+const DEFAULT_TEXT_ANCHOR_ORIGIN: TextAnchorOrigin = {
+  horizontalOrigin: HorizontalOrigin.CENTER,
+  verticalOrigin: VerticalOrigin.BOTTOM,
+}
+const TEXT_ANCHOR_ORIGINS: Record<string, TextAnchorOrigin> = {
+  left: {
+    horizontalOrigin: HorizontalOrigin.LEFT,
+    verticalOrigin: VerticalOrigin.CENTER,
+  },
+  right: {
+    horizontalOrigin: HorizontalOrigin.RIGHT,
+    verticalOrigin: VerticalOrigin.CENTER,
+  },
+  top: {
+    horizontalOrigin: HorizontalOrigin.CENTER,
+    verticalOrigin: VerticalOrigin.TOP,
+  },
+  bottom: {
+    horizontalOrigin: HorizontalOrigin.CENTER,
+    verticalOrigin: VerticalOrigin.BOTTOM,
+  },
+  'top-left': {
+    horizontalOrigin: HorizontalOrigin.LEFT,
+    verticalOrigin: VerticalOrigin.TOP,
+  },
+  'top-right': {
+    horizontalOrigin: HorizontalOrigin.RIGHT,
+    verticalOrigin: VerticalOrigin.TOP,
+  },
+  'bottom-left': {
+    horizontalOrigin: HorizontalOrigin.LEFT,
+    verticalOrigin: VerticalOrigin.BOTTOM,
+  },
+  'bottom-right': {
+    horizontalOrigin: HorizontalOrigin.RIGHT,
+    verticalOrigin: VerticalOrigin.BOTTOM,
+  },
+  center: DEFAULT_TEXT_ANCHOR_ORIGIN,
+}
+const TEXT_JUSTIFY_ORIGINS: Record<Exclude<TextJustify, 'auto'>, HorizontalOrigin> = {
+  left: HorizontalOrigin.LEFT,
+  center: HorizontalOrigin.CENTER,
+  right: HorizontalOrigin.RIGHT,
+}
+const TEXT_TRANSFORMERS: Record<TextTransform, (text: string) => string> = {
+  none: (text) => text,
+  uppercase: (text) => text.toLocaleUpperCase(),
+  lowercase: (text) => text.toLocaleLowerCase(),
+}
+const HORIZONTAL_ORIGIN_RADIAL_FACTORS: Partial<Record<HorizontalOrigin, number>> = {
+  [HorizontalOrigin.LEFT]: 1,
+  [HorizontalOrigin.RIGHT]: -1,
+}
+const VERTICAL_ORIGIN_RADIAL_FACTORS: Partial<Record<VerticalOrigin, number>> = {
+  [VerticalOrigin.TOP]: 1,
+  [VerticalOrigin.BOTTOM]: -1,
+}
+type IconDimensionResolver = (input: {
+  intrinsicWidth: number
+  intrinsicHeight: number
+  targetWidth: number
+  targetHeight: number
+}) => {
+  width: number
+  height: number
+}
+const ICON_TEXT_FIT_DIMENSION_RESOLVERS: Record<
+  Exclude<IconTextFit, 'none'>,
+  IconDimensionResolver
+> = {
+  width: ({ intrinsicWidth, intrinsicHeight, targetWidth }) => ({
+    width: targetWidth,
+    height: intrinsicHeight * (targetWidth / intrinsicWidth),
+  }),
+  height: ({ intrinsicWidth, intrinsicHeight, targetHeight }) => ({
+    width: intrinsicWidth * (targetHeight / intrinsicHeight),
+    height: targetHeight,
+  }),
+  both: ({ targetWidth, targetHeight }) => ({
+    width: targetWidth,
+    height: targetHeight,
+  }),
+}
 
 export function parseTextAnchor(anchor: string): {
   horizontalOrigin: HorizontalOrigin
   verticalOrigin: VerticalOrigin
 } {
-  switch (anchor) {
-    case 'left':
-      return {
-        horizontalOrigin: HorizontalOrigin.LEFT,
-        verticalOrigin: VerticalOrigin.CENTER,
-      }
-    case 'right':
-      return {
-        horizontalOrigin: HorizontalOrigin.RIGHT,
-        verticalOrigin: VerticalOrigin.CENTER,
-      }
-    case 'top':
-      return {
-        horizontalOrigin: HorizontalOrigin.CENTER,
-        verticalOrigin: VerticalOrigin.TOP,
-      }
-    case 'bottom':
-      return {
-        horizontalOrigin: HorizontalOrigin.CENTER,
-        verticalOrigin: VerticalOrigin.BOTTOM,
-      }
-    case 'top-left':
-      return {
-        horizontalOrigin: HorizontalOrigin.LEFT,
-        verticalOrigin: VerticalOrigin.TOP,
-      }
-    case 'top-right':
-      return {
-        horizontalOrigin: HorizontalOrigin.RIGHT,
-        verticalOrigin: VerticalOrigin.TOP,
-      }
-    case 'bottom-left':
-      return {
-        horizontalOrigin: HorizontalOrigin.LEFT,
-        verticalOrigin: VerticalOrigin.BOTTOM,
-      }
-    case 'bottom-right':
-      return {
-        horizontalOrigin: HorizontalOrigin.RIGHT,
-        verticalOrigin: VerticalOrigin.BOTTOM,
-      }
-    case 'center':
-      return {
-        horizontalOrigin: HorizontalOrigin.CENTER,
-        verticalOrigin: VerticalOrigin.BOTTOM,
-      }
-    default:
-      return {
-        horizontalOrigin: HorizontalOrigin.CENTER,
-        verticalOrigin: VerticalOrigin.BOTTOM,
-      }
-  }
+  return TEXT_ANCHOR_ORIGINS[anchor] ?? DEFAULT_TEXT_ANCHOR_ORIGIN
 }
 
 export function resolveTextJustifyOrigin(
   anchor: string,
   justify: 'auto' | 'left' | 'center' | 'right',
 ): HorizontalOrigin {
-  switch (justify) {
-    case 'left':
-      return HorizontalOrigin.LEFT
-    case 'right':
-      return HorizontalOrigin.RIGHT
-    case 'center':
-      return HorizontalOrigin.CENTER
-    default:
-      return parseTextAnchor(anchor).horizontalOrigin
-  }
+  return TEXT_JUSTIFY_ORIGINS[justify as Exclude<TextJustify, 'auto'>]
+    ?? parseTextAnchor(anchor).horizontalOrigin
 }
 
 export function applyTextTransform(
   text: string,
   transform: 'none' | 'uppercase' | 'lowercase',
 ): string {
-  switch (transform) {
-    case 'uppercase':
-      return text.toLocaleUpperCase()
-    case 'lowercase':
-      return text.toLocaleLowerCase()
-    default:
-      return text
-  }
+  return (TEXT_TRANSFORMERS[transform] ?? TEXT_TRANSFORMERS.none)(text)
 }
 
 export function wrapSymbolText(
@@ -295,27 +319,8 @@ export function resolveTextPixelOffset(
 
   if (radialOffset !== 0) {
     const radius = radialOffset * textSize
-    switch (origins.horizontalOrigin) {
-      case HorizontalOrigin.LEFT:
-        offset.x += radius
-        break
-      case HorizontalOrigin.RIGHT:
-        offset.x -= radius
-        break
-      default:
-        break
-    }
-
-    switch (origins.verticalOrigin) {
-      case VerticalOrigin.TOP:
-        offset.y += radius
-        break
-      case VerticalOrigin.BOTTOM:
-        offset.y -= radius
-        break
-      default:
-        break
-    }
+    offset.x += radius * (HORIZONTAL_ORIGIN_RADIAL_FACTORS[origins.horizontalOrigin] ?? 0)
+    offset.y += radius * (VERTICAL_ORIGIN_RADIAL_FACTORS[origins.verticalOrigin] ?? 0)
   }
 
   return offset
@@ -542,28 +547,18 @@ export function resolveIconImageDimensions(
   const targetWidth = textWidth + Math.max(0, iconTextFitPadding[3]) + Math.max(0, iconTextFitPadding[1])
   const targetHeight = textHeight + Math.max(0, iconTextFitPadding[0]) + Math.max(0, iconTextFitPadding[2])
 
-  switch (iconTextFit) {
-    case 'width':
-      return {
-        width: targetWidth,
-        height: intrinsicHeight * (targetWidth / intrinsicWidth),
-      }
-    case 'height':
-      return {
-        width: intrinsicWidth * (targetHeight / intrinsicHeight),
-        height: targetHeight,
-      }
-    case 'both':
-      return {
-        width: targetWidth,
-        height: targetHeight,
-      }
-    default:
-      return {
+  const resolveDimensions = ICON_TEXT_FIT_DIMENSION_RESOLVERS[iconTextFit]
+  return resolveDimensions
+    ? resolveDimensions({
+        intrinsicWidth,
+        intrinsicHeight,
+        targetWidth,
+        targetHeight,
+      })
+    : {
         width: intrinsicWidth,
         height: intrinsicHeight,
       }
-  }
 }
 
 export function fontStackToCss(

@@ -21,18 +21,18 @@ import type {
   MvtViewportSnapshot,
 } from '../types'
 import type { TileDecodeEvent } from '../types'
-import type { TileScheduler } from '../scheduler/tile-scheduler'
-import type { CesiumMvtSourceCache } from '../scheduler/source-cache'
-import type { MapLibreStyleDocument } from '../style/maplibre-style'
-import { MapLibreSpriteAtlas } from './sprite-atlas'
-import { ScreenLabelCollisionIndex } from './label-collision'
-import { ScreenSymbolDedupeIndex } from './symbol-dedupe'
-import { TextSpriteAtlas, buildTextSpriteRequest } from './text-atlas'
+import type { TileScheduler } from '../scheduler/scheduler'
+import type { CesiumMvtSourceCache } from '../scheduler/source'
+import type { MapLibreStyleDocument } from '../style/document'
+import { MapLibreSpriteAtlas } from './sprite'
+import { ScreenLabelCollisionIndex } from './collision'
+import { ScreenSymbolDedupeIndex } from './dedupe'
+import { TextSpriteAtlas, buildTextSpriteRequest } from './text'
 import {
   compileMapLibreStyleRenderer,
   type CompiledMapLibreStyleRenderer,
-} from '../style/maplibre-style-renderer'
-import { resolveFormattedText } from '../style/maplibre-style-expressions'
+} from '../style/renderer'
+import { resolveFormattedText } from '../style/expressions'
 import {
   addPrimitiveOrdered,
   applyOpacity,
@@ -44,8 +44,8 @@ import {
   groupPolygonRings,
   removeAndDestroyPrimitive,
   tilePointToCartesian,
-  toPositions,
-} from './feature-preview-geometry'
+  toCartesianPositions,
+} from './geometry'
 import {
   applyTextTransform,
   buildSymbolDedupeKey,
@@ -64,7 +64,7 @@ import {
   textOffsetToPixelOffset,
   unionScreenRects,
   wrapSymbolText,
-} from './feature-preview-symbols'
+} from './label'
 
 export type CesiumMvtPrimitiveLayerOptions = {
   style?: MapLibreStyleDocument
@@ -168,6 +168,8 @@ export class CesiumMvtPrimitiveLayer {
   private readonly labelResumeDelayMs: number
   private readonly symbolRebuildDelayMs = 160
   private symbolRebuildTimer?: ReturnType<typeof setTimeout>
+  private symbolLayoutDirty = false
+  private symbolLayoutDirtyWhileHidden = false
 
   constructor(
     scene: Scene,
@@ -315,7 +317,7 @@ export class CesiumMvtPrimitiveLayer {
     }
 
     if (forceImmediate) {
-      this.setLabelsVisible(true)
+      this.setLabelsVisible(true, true)
       return
     }
 
@@ -346,19 +348,33 @@ export class CesiumMvtPrimitiveLayer {
     }
   }
 
-  private setLabelsVisible(visible: boolean): void {
+  private setLabelsVisible(visible: boolean, forceSymbolRebuild = false): void {
     const nextVisible = this.options.showLabels && visible
     if (this.labelsVisible === nextVisible) {
       return
     }
 
     this.labelsVisible = nextVisible
+    const revealExistingRuntimes = nextVisible && !this.symbolLayoutDirtyWhileHidden
     for (const runtime of this.symbolBucketRuntimes.values()) {
-      runtime.setLabelsVisible(nextVisible)
+      runtime.setLabelsVisible(revealExistingRuntimes)
     }
 
-    if (nextVisible && this.symbolBucketRuntimes.size === 0) {
-      this.scheduleSymbolRebuild()
+    if (!nextVisible) {
+      this.clearSymbolRebuildTimer()
+      if (this.symbolLayoutDirty) {
+        this.symbolLayoutDirtyWhileHidden = true
+      }
+      this.scene.requestRender()
+      return
+    }
+
+    if (
+      this.symbolBucketRuntimes.size === 0 ||
+      this.symbolLayoutDirty ||
+      this.symbolLayoutDirtyWhileHidden
+    ) {
+      this.scheduleSymbolRebuild(forceSymbolRebuild)
     }
 
     this.scene.requestRender()
@@ -549,7 +565,7 @@ export class CesiumMvtPrimitiveLayer {
             )
             break
           case 'LineString':
-            lineCount += this.renderPaths(
+            lineCount += this.renderLineStrings(
               tile,
               layer.extent,
               layer.name,
@@ -568,7 +584,7 @@ export class CesiumMvtPrimitiveLayer {
               polygonInstances,
               polygonFillColor,
             )
-            lineCount += this.renderPaths(
+            lineCount += this.renderLineStrings(
               tile,
               layer.extent,
               layer.name,
@@ -678,7 +694,7 @@ export class CesiumMvtPrimitiveLayer {
     return count
   }
 
-  private renderPaths(
+  private renderLineStrings(
     tile: DecodedTileRecord,
     extent: number,
     layerName: string,
@@ -694,7 +710,7 @@ export class CesiumMvtPrimitiveLayer {
     for (const part of feature.geometry) {
       if (part.length < 2) continue
 
-      const positions = toPositions(
+      const positions = toCartesianPositions(
         this.tilingScheme,
         tile.coord,
         part,
@@ -733,7 +749,7 @@ export class CesiumMvtPrimitiveLayer {
     let count = 0
 
     for (const polygon of groupPolygonRings(feature.geometry)) {
-      const outerPositions = toPositions(
+      const outerPositions = toCartesianPositions(
         this.tilingScheme,
         tile.coord,
         polygon.outer,
@@ -743,7 +759,7 @@ export class CesiumMvtPrimitiveLayer {
 
       const holes = polygon.holes
         .map((ring) =>
-          toPositions(this.tilingScheme, tile.coord, ring, extent),
+          toCartesianPositions(this.tilingScheme, tile.coord, ring, extent),
         )
         .filter((positions) => positions.length >= 3)
         .map((positions) => new PolygonHierarchy(ensureClosedLoop(positions)))
@@ -906,7 +922,7 @@ export class CesiumMvtPrimitiveLayer {
                   compiled.fill.outlineColor.evaluate(feature, zoom),
                   fillOpacity,
                 )
-                bucketLineCount += this.renderPaths(
+                bucketLineCount += this.renderLineStrings(
                   tile,
                   layer.extent,
                   compiled.id,
@@ -931,7 +947,7 @@ export class CesiumMvtPrimitiveLayer {
               )
               const lineWidth = compiled.line?.width?.evaluate(feature, zoom)
               const collection = ensureLineCollection()
-              bucketLineCount += this.renderPaths(
+              bucketLineCount += this.renderLineStrings(
                 tile,
                 layer.extent,
                 compiled.id,
@@ -1306,17 +1322,31 @@ export class CesiumMvtPrimitiveLayer {
     this.scene.requestRender()
   }
 
-  private scheduleSymbolRebuild(): void {
-    if (this.destroyed) {
+  private scheduleSymbolRebuild(forceImmediate = false): void {
+    if (this.destroyed || !this.options.showLabels || !this.styleRenderer) {
       return
     }
 
-    this.clearSymbolRebuildTimer()
+    this.symbolLayoutDirty = true
+    if (!this.labelsVisible) {
+      this.symbolLayoutDirtyWhileHidden = true
+      this.clearSymbolRebuildTimer()
+      return
+    }
+
+    if (forceImmediate) {
+      this.clearSymbolRebuildTimer()
+      this.flushSymbolRebuild()
+      return
+    }
+
+    if (this.symbolRebuildTimer !== undefined) {
+      return
+    }
+
     this.symbolRebuildTimer = setTimeout(() => {
       this.symbolRebuildTimer = undefined
-      if (!this.destroyed) {
-        this.rebuildStyledSymbols()
-      }
+      this.flushSymbolRebuild()
     }, this.symbolRebuildDelayMs)
   }
 
@@ -1325,6 +1355,21 @@ export class CesiumMvtPrimitiveLayer {
       clearTimeout(this.symbolRebuildTimer)
       this.symbolRebuildTimer = undefined
     }
+  }
+
+  private flushSymbolRebuild(): void {
+    if (this.destroyed || !this.symbolLayoutDirty) {
+      return
+    }
+
+    if (!this.labelsVisible) {
+      this.symbolLayoutDirtyWhileHidden = true
+      return
+    }
+
+    this.symbolLayoutDirty = false
+    this.symbolLayoutDirtyWhileHidden = false
+    this.rebuildStyledSymbols()
   }
 
   private destroySymbolBucketRuntimes(): void {

@@ -3,16 +3,16 @@ import { inject, onBeforeUnmount, watch } from 'vue'
 import { Color, Viewer } from 'cesium'
 import { MvtImageryProvider } from '../mvt'
 import { resolveOpenFreeMapMvtRuntimeConfigFromEnv } from '../integrations/openfreemap'
-import { CesiumViewerKey } from './cesium-viewer-context'
+import { ViewerKey } from './viewer-context'
 
 let viewer: Viewer | undefined
 let mvtProvider: MvtImageryProvider | undefined
 let loadAbortController: AbortController | undefined
 let destroyed = false
-const viewerRef = inject(CesiumViewerKey)
+const viewerRef = inject(ViewerKey)
 
 if (!viewerRef) {
-  throw new Error('CesiumMvtScene must be used inside CesiumViewer.')
+  throw new Error('MvtScene must be used inside Viewer.')
 }
 
 function configureViewer(currentViewer: Viewer) {

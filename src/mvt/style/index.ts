@@ -1,3 +1,3 @@
-export * from './maplibre-style'
-export * from './maplibre-style-expressions'
-export * from './maplibre-style-renderer'
+export * from './document'
+export * from './expressions'
+export * from './renderer'

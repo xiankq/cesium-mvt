@@ -7,8 +7,8 @@ import type {
   TileCoord,
   TileDecodeEvent,
 } from '../types'
-import type { TileScheduler } from './tile-scheduler'
-import { estimateSceneZoom } from '../render/feature-preview-geometry'
+import type { TileScheduler } from './scheduler'
+import { estimateSceneZoom } from '../render/geometry'
 
 export type CesiumMvtSourceCacheOptions = {
   scene: Scene

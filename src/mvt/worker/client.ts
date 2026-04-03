@@ -31,7 +31,7 @@ export class VectorTileWorkerClient {
   private requestId = 0
 
   constructor() {
-    this.worker = new Worker(new URL('./vector-tile.worker.ts', import.meta.url), {
+    this.worker = new Worker(new URL('./worker.ts', import.meta.url), {
       type: 'module',
     })
     this.worker.onmessage = this.handleMessage

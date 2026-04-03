@@ -1,10 +1,10 @@
 import type { ImageryLayer, Viewer } from 'cesium'
-import { CesiumMvtPrimitiveLayer } from './render/feature-preview-layer'
-import { TileRequestImageryProvider } from './request/tile-request-imagery-provider'
-import { CesiumMvtSourceCache } from './scheduler/source-cache'
-import { TileScheduler } from './scheduler/tile-scheduler'
-import { resolveMapLibreStyleBackgroundColor } from './style/maplibre-style-renderer'
-import type { MapLibreStyleDocument } from './style/maplibre-style'
+import { CesiumMvtPrimitiveLayer } from './render/layer'
+import { TileRequestImageryProvider } from './request/provider'
+import { CesiumMvtSourceCache } from './scheduler/source'
+import { TileScheduler } from './scheduler/scheduler'
+import { resolveMapLibreStyleBackgroundColor } from './style/renderer'
+import type { MapLibreStyleDocument } from './style/document'
 import type { MvtProviderOptions, MvtSchedulerSnapshot } from './types'
 
 type SchedulerListener = (snapshot: MvtSchedulerSnapshot) => void

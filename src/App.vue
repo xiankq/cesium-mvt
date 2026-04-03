@@ -1,12 +1,12 @@
 <template>
   <main class="cesium-page">
-    <CesiumViewer>
-      <CesiumMvtScene />
-    </CesiumViewer>
+    <Viewer>
+      <MvtScene />
+    </Viewer>
   </main>
 </template>
 
 <script setup lang="ts">
-import CesiumViewer from './components/CesiumViewer.vue'
-import CesiumMvtScene from './components/CesiumMvtScene.vue'
+import Viewer from './components/Viewer.vue'
+import MvtScene from './components/MvtScene.vue'
 </script>
