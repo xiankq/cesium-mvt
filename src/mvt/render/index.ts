@@ -1,6 +1,7 @@
 export * from './geometry'
 export * from './layer'
 export * from './label'
+export * from './symbol'
 export * from './collision'
 export * from './sprite'
 export * from './dedupe'

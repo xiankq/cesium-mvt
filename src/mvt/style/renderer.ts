@@ -25,7 +25,6 @@ import {
   compileTextOffsetExpression,
   compileTextOverlapExpression,
   compileTextTransformExpression,
-  compileTextTranslateAnchorExpression,
   type CompiledStyleExpression,
 } from './expressions'
 
@@ -90,7 +89,6 @@ type CompiledSymbolStyle = {
   textAnchor?: CompiledStyleExpression<string>
   textOffset?: CompiledStyleExpression<[number, number]>
   textTranslate?: CompiledStyleExpression<[number, number]>
-  textTranslateAnchor?: CompiledStyleExpression<'map' | 'viewport'>
   textRadialOffset?: CompiledStyleExpression<number>
   textAllowOverlap?: CompiledStyleExpression<boolean>
   textOverlap?: CompiledStyleExpression<'never' | 'always' | 'cooperative'>
@@ -103,9 +101,7 @@ type CompiledSymbolStyle = {
   iconAnchor?: CompiledStyleExpression<string>
   iconOffset?: CompiledStyleExpression<[number, number]>
   iconRotate?: CompiledStyleExpression<number>
-  iconRotationAlignment?: CompiledStyleExpression<'map' | 'viewport' | 'auto'>
   iconTranslate?: CompiledStyleExpression<[number, number]>
-  iconTranslateAnchor?: CompiledStyleExpression<'map' | 'viewport'>
   iconAllowOverlap?: CompiledStyleExpression<boolean>
   iconOverlap?: CompiledStyleExpression<'never' | 'always' | 'cooperative'>
   iconIgnorePlacement?: CompiledStyleExpression<boolean>
@@ -408,13 +404,6 @@ function compileSymbolStyle(
             paintSymbolSpec['text-translate'],
           )
         : undefined,
-    textTranslateAnchor:
-      layer.paint?.['text-translate-anchor'] !== undefined
-        ? compileTextTranslateAnchorExpression(
-            layer.paint['text-translate-anchor'],
-            paintSymbolSpec['text-translate-anchor'],
-          )
-        : undefined,
     textRadialOffset: compileNumberExpression(
       layer.layout?.['text-radial-offset'],
       layoutSymbolSpec['text-radial-offset'],
@@ -494,26 +483,11 @@ function compileSymbolStyle(
       layoutSymbolSpec['icon-rotate'],
       0,
     ),
-    iconRotationAlignment:
-      layer.layout?.['icon-rotation-alignment'] !== undefined
-        ? compileEnumExpression<'map' | 'viewport' | 'auto'>(
-            layer.layout['icon-rotation-alignment'],
-            layoutSymbolSpec['icon-rotation-alignment'],
-            'auto',
-          )
-        : undefined,
     iconTranslate:
       layer.paint?.['icon-translate'] !== undefined
         ? compileTextOffsetExpression(
             layer.paint['icon-translate'],
             paintSymbolSpec['icon-translate'],
-          )
-        : undefined,
-    iconTranslateAnchor:
-      layer.paint?.['icon-translate-anchor'] !== undefined
-        ? compileTextTranslateAnchorExpression(
-            layer.paint['icon-translate-anchor'],
-            paintSymbolSpec['icon-translate-anchor'],
           )
         : undefined,
     iconAllowOverlap: compileBooleanExpression(

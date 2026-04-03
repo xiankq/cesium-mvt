@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, onBeforeUnmount, watch } from 'vue'
-import { Color, Viewer } from 'cesium'
+import { Viewer } from 'cesium'
 import { MvtImageryProvider } from '../mvt'
 import { resolveOpenFreeMapMvtRuntimeConfigFromEnv } from '../integrations/openfreemap'
 import { ViewerKey } from './viewer-context'
@@ -16,7 +16,6 @@ if (!viewerRef) {
 }
 
 function configureViewer(currentViewer: Viewer) {
-  currentViewer.scene.globe.baseColor = Color.fromCssColorString('#08111f')
   currentViewer.scene.globe.enableLighting = false
   currentViewer.scene.globe.showGroundAtmosphere = true
   currentViewer.scene.highDynamicRange = false

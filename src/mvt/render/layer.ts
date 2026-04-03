@@ -1,6 +1,4 @@
 import {
-  Cartesian2,
-  BillboardCollection,
   Color,
   GeometryInstance,
   PointPrimitiveCollection,
@@ -22,45 +20,22 @@ import type { TileScheduler } from '../scheduler/scheduler'
 import type { CesiumMvtSourceCache } from '../scheduler/source'
 import type { MapLibreStyleDocument } from '../style/document'
 import { MapLibreSpriteAtlas } from './sprite'
-import { ScreenLabelCollisionIndex } from './collision'
-import { ScreenSymbolDedupeIndex } from './dedupe'
-import { TextSpriteAtlas, buildTextSpriteRequest } from './text'
 import {
   compileMapLibreStyleRenderer,
   type CompiledMapLibreStyleRenderer,
 } from '../style/renderer'
-import { resolveFormattedText } from '../style/expressions'
 import {
   addPrimitiveOrdered,
   applyOpacity,
   estimateSceneZoom,
   evaluateStyleLayerSortKey,
-  getFeatureAnchor,
   removeAndDestroyPrimitive,
-  tilePointToCartesian,
 } from './geometry'
 import { renderLineStringPrimitives } from './line-string'
-import {
-  applyTextTransform,
-  buildSymbolDedupeKey,
-  combinePixelOffsets,
-  estimateIconScreenRect,
-  estimateSpriteScreenRect,
-  normalizeSymbolKey,
-  parseTextAnchor,
-  resolveTextJustifyOrigin,
-  DEFAULT_TEXT_FONT_STACK,
-  resolveTextPixelOffset,
-  resolveIconImageDimensions,
-  type SymbolPlacementCandidate,
-  type StyledSymbolPlacement,
-  type SymbolBucketRuntime,
-  textOffsetToPixelOffset,
-  unionScreenRects,
-  wrapSymbolText,
-} from './label'
+import type { StyledSymbolPlacement } from './label'
 import { renderPointPrimitives } from './point'
 import { renderPolygonPrimitives } from './polygon'
+import { createStyledSymbolPlacement, SymbolRenderer } from './symbol'
 
 export type CesiumMvtPrimitiveLayerOptions = {
   style?: MapLibreStyleDocument
@@ -140,16 +115,13 @@ export class CesiumMvtPrimitiveLayer {
   }
   private readonly groups = new Map<string, TilePrimitiveGroup>()
   private readonly primitiveOrderMap = new WeakMap<object, number>()
-  private readonly labelCollisionIndex = new ScreenLabelCollisionIndex()
-  private readonly symbolDedupeIndex = new ScreenSymbolDedupeIndex()
   private readonly spriteAtlas?: MapLibreSpriteAtlas
-  private readonly textAtlas = new TextSpriteAtlas()
+  private readonly symbolRenderer: SymbolRenderer
   private readonly sourceCache?: CesiumMvtSourceCache
   private readonly styleRenderer?: CompiledMapLibreStyleRenderer
   private readonly unsubscribeTiles: () => void
   private readonly unsubscribeScheduler?: () => void
   private readonly unsubscribeViewport?: () => void
-  private readonly symbolBucketRuntimes = new Map<string, SymbolBucketRuntime>()
   private removeCameraMoveStart?: () => void
   private removeCameraMoveEnd?: () => void
   private currentZoom = 0
@@ -203,6 +175,11 @@ export class CesiumMvtPrimitiveLayer {
     this.spriteAtlas = options.style?.sprite
       ? new MapLibreSpriteAtlas(options.style.sprite)
       : undefined
+    this.symbolRenderer = new SymbolRenderer(
+      scene,
+      this.primitiveOrderMap,
+      this.spriteAtlas,
+    )
 
     this.unsubscribeTiles = scheduler.subscribeTiles(this.handleTileEvent)
     this.unsubscribeScheduler = this.suspendLabelsDuringLoading
@@ -352,9 +329,7 @@ export class CesiumMvtPrimitiveLayer {
 
     this.labelsVisible = nextVisible
     const revealExistingRuntimes = nextVisible && !this.symbolLayoutDirtyWhileHidden
-    for (const runtime of this.symbolBucketRuntimes.values()) {
-      runtime.setLabelsVisible(revealExistingRuntimes)
-    }
+    this.symbolRenderer.setVisible(revealExistingRuntimes)
 
     if (!nextVisible) {
       this.clearSymbolRebuildTimer()
@@ -366,7 +341,7 @@ export class CesiumMvtPrimitiveLayer {
     }
 
     if (
-      this.symbolBucketRuntimes.size === 0 ||
+      this.symbolRenderer.runtimeCount === 0 ||
       this.symbolLayoutDirty ||
       this.symbolLayoutDirtyWhileHidden
     ) {
@@ -387,15 +362,12 @@ export class CesiumMvtPrimitiveLayer {
     this.removeCameraMoveEnd?.()
     this.removeCameraMoveEnd = undefined
     this.clearLabelResumeTimer()
-    this.destroySymbolBucketRuntimes()
-    this.textAtlas.destroy()
+    this.symbolRenderer.destroy()
 
     for (const group of this.groups.values()) {
       group.destroy()
     }
     this.groups.clear()
-    this.labelCollisionIndex.clear()
-    this.symbolDedupeIndex.clear()
   }
 
   private handleTileEvent = (event: TileDecodeEvent): void => {
@@ -466,9 +438,7 @@ export class CesiumMvtPrimitiveLayer {
   private rebuildVisibleTiles(): void {
     const cachedTiles = this.scheduler.getCachedTiles()
 
-    this.destroySymbolBucketRuntimes()
-    this.labelCollisionIndex.clear()
-    this.symbolDedupeIndex.clear()
+    this.symbolRenderer.clear()
     for (const group of this.groups.values()) {
       group.destroy()
     }
@@ -697,7 +667,7 @@ export class CesiumMvtPrimitiveLayer {
         let bucketPointCount = 0
         let bucketLineCount = 0
         let bucketPolygonCount = 0
-        const symbolCandidates: SymbolPlacementCandidate[] = []
+        const bucketSymbolPlacements: StyledSymbolPlacement[] = []
         const layerOrderBase = tile.coord.level * 100_000 + compiled.order * 100
 
         const ensurePointCollection = () => {
@@ -861,220 +831,21 @@ export class CesiumMvtPrimitiveLayer {
               break
             }
             case 'symbol': {
-              const style = compiled.symbol
-              const anchor = getFeatureAnchor(feature)
-              if (!anchor) {
-                break
-              }
-
               if (!this.options.showLabels) {
                 break
               }
 
-              const position = tilePointToCartesian(
-                this.tilingScheme,
-                tile.coord,
-                anchor,
-                layer.extent,
-              )
-
-              const textSize = Math.max(
-                1,
-                style.textSize?.evaluate(feature, zoom) ?? 16,
-              )
-              const textFieldValue = style.textField?.evaluate(feature, zoom)
-              const textInfo = resolveFormattedText(textFieldValue)
-              const rawText = textInfo.text.trim()
-              const textTransform =
-                style.textTransform?.evaluate(feature, zoom) ??
-                'none'
-              const textMaxWidth = style.textMaxWidth?.evaluate(feature, zoom) ?? 10
-              const textLineHeight = style.textLineHeight?.evaluate(feature, zoom) ?? 1.2
-              const textLetterSpacing =
-                style.textLetterSpacing?.evaluate(feature, zoom) ?? 0
-              const transformedText = applyTextTransform(rawText, textTransform)
-              const wrappedText = wrapSymbolText(
-                transformedText,
-                textMaxWidth,
-                textSize,
-                textLetterSpacing,
-              )
-              const text = wrappedText.trim()
-              const textKey = normalizeSymbolKey(transformedText)
-
-              const fontStack =
-                style.textFont?.evaluate(feature, zoom) ??
-                textInfo.fontStack ??
-                DEFAULT_TEXT_FONT_STACK
-              const textOpacity = style.textOpacity?.evaluate(feature, zoom)
-              const textColor = applyOpacity(
-                style.textColor?.evaluate(feature, zoom) ??
-                  textInfo.textColor ??
-                  Color.WHITE,
-                textOpacity,
-              )
-              const haloColor = applyOpacity(
-                style.textHaloColor?.evaluate(feature, zoom) ??
-                  Color.TRANSPARENT,
-                textOpacity,
-              )
-              const haloWidth = Math.max(
-                0,
-                style.textHaloWidth?.evaluate(feature, zoom) ?? 0,
-              )
-              const textHaloBlur = style.textHaloBlur?.evaluate(feature, zoom) ?? 0
-              const textAnchorName = String(
-                style.textAnchor?.evaluate(feature, zoom) ?? 'center',
-              )
-              const textVariableAnchors = style.textVariableAnchor?.evaluate(feature, zoom) ?? []
-              const textJustify = style.textJustify?.evaluate(feature, zoom) ?? 'auto'
-              const origins = {
-                ...parseTextAnchor(textAnchorName),
-                horizontalOrigin: resolveTextJustifyOrigin(
-                  textAnchorName,
-                  textJustify,
-                ),
-              }
-              const textOffset = textOffsetToPixelOffset(
-                style.textOffset?.evaluate(feature, zoom),
-                textSize,
-              )
-              const textTranslate = style.textTranslate?.evaluate(feature, zoom)
-              const textTranslateOffset = textTranslate
-                ? new Cartesian2(textTranslate[0], textTranslate[1])
-                : undefined
-              const textTranslateAnchor =
-                style.textTranslateAnchor?.evaluate(feature, zoom) ??
-                'map'
-              const textRadialOffset = style.textRadialOffset?.evaluate(feature, zoom) ?? 0
-              const textPadding = Math.max(
-                0,
-                style.textPadding?.evaluate(feature, zoom) ?? 2,
-              )
-              const allowOverlap = style.textAllowOverlap?.evaluate(feature, zoom) ?? false
-              const overlapMode =
-                style.textOverlap?.evaluate(feature, zoom) ??
-                (allowOverlap ? 'always' : 'never')
-              const ignorePlacement =
-                style.textIgnorePlacement?.evaluate(feature, zoom) ?? false
-              const textOptional = style.textOptional?.evaluate(feature, zoom) ?? false
-              const sortKey = style.symbolSortKey?.evaluate(feature, zoom) ?? 0
-              const symbolZOrder = style.symbolZOrder?.evaluate(feature, zoom) ?? 'auto'
-              const iconImageName = style.iconImage?.evaluate(feature, zoom) || undefined
-              const iconSize = Math.max(0.1, style.iconSize?.evaluate(feature, zoom) ?? 1)
-              const iconOpacity = style.iconOpacity?.evaluate(feature, zoom) ?? 1
-              const iconColor = applyOpacity(
-                style.iconColor?.evaluate(feature, zoom) ??
-                  Color.BLACK,
-                iconOpacity,
-              )
-              const iconAnchorName = String(
-                style.iconAnchor?.evaluate(feature, zoom) ??
-                  textAnchorName,
-              )
-              const iconOrigins = parseTextAnchor(iconAnchorName)
-              const iconOffsetValue = style.iconOffset?.evaluate(feature, zoom)
-              const iconOffset = iconOffsetValue
-                ? new Cartesian2(
-                    iconOffsetValue[0] * iconSize,
-                    iconOffsetValue[1] * iconSize,
-                  )
-                : new Cartesian2(0, 0)
-              const iconTranslateValue = style.iconTranslate?.evaluate(feature, zoom)
-              const iconTranslate = iconTranslateValue
-                ? new Cartesian2(iconTranslateValue[0], iconTranslateValue[1])
-                : undefined
-              const iconTranslateAnchor =
-                style.iconTranslateAnchor?.evaluate(feature, zoom) ??
-                'map'
-              const iconAllowOverlap = style.iconAllowOverlap?.evaluate(feature, zoom) ?? false
-              const iconOverlapMode =
-                style.iconOverlap?.evaluate(feature, zoom) ??
-                (iconAllowOverlap ? 'always' : 'never')
-              const iconIgnorePlacement =
-                style.iconIgnorePlacement?.evaluate(feature, zoom) ?? false
-              const iconOptional = style.iconOptional?.evaluate(feature, zoom) ?? false
-              const iconHaloColor = applyOpacity(
-                style.iconHaloColor?.evaluate(feature, zoom) ??
-                  Color.TRANSPARENT,
-                iconOpacity,
-              )
-              const iconHaloWidth = Math.max(
-                0,
-                style.iconHaloWidth?.evaluate(feature, zoom) ?? 0,
-              )
-              const iconHaloBlur = Math.max(
-                0,
-                style.iconHaloBlur?.evaluate(feature, zoom) ?? 0,
-              )
-              const iconPadding = Math.max(
-                0,
-                style.iconPadding?.evaluate(feature, zoom) ?? 2,
-              )
-              const iconTextFit = style.iconTextFit?.evaluate(feature, zoom) ?? 'none'
-              const iconTextFitPadding =
-                style.iconTextFitPadding?.evaluate(feature, zoom) ??
-                [0, 0, 0, 0]
-              const iconRotate =
-                -((style.iconRotate?.evaluate(feature, zoom) ?? 0) * Math.PI) /
-                180
-              const featureId = feature.id ?? `${layer.name}:${featureIndex}`
-
-              if (text.length > 0 || iconImageName) {
-                symbolCandidates.push({
-                  labelId: `${tile.id}:${compiled.id}:${featureId}`,
-                  featureId: feature.id,
-                  sourceIndex: featureIndex,
-                  position,
-                  text: text.length > 0 ? text : undefined,
-                  textKey: text.length > 0 ? textKey : undefined,
-                  textSize,
-                  fontStack,
-                  textColor,
-                  haloColor,
-                  haloWidth,
-                  haloBlur: textHaloBlur,
-                  pixelOffset: textOffset,
-                  horizontalOrigin: origins.horizontalOrigin,
-                  verticalOrigin: origins.verticalOrigin,
-                  textAnchor: textAnchorName,
-                  textVariableAnchors,
-                  textPadding,
-                  textLineHeight,
-                  textLetterSpacing,
-                  textMaxWidth,
-                  textJustify,
-                  textTransform,
-                  textTranslate: textTranslateOffset ?? new Cartesian2(0, 0),
-                  textTranslateAnchor,
-                  textRadialOffset,
-                  allowOverlap,
-                  ignorePlacement,
-                  overlapMode,
-                  optional: textOptional,
-                  symbolZOrder,
-                  sortKey,
-                  iconImageName,
-                  iconSize,
-                  iconColor,
-                  iconOpacity,
-                  iconHaloColor,
-                  iconHaloWidth,
-                  iconHaloBlur,
-                  iconAnchor: iconAnchorName,
-                  iconVerticalOrigin: iconOrigins.verticalOrigin,
-                  iconOffset,
-                  iconTranslate: iconTranslate ?? new Cartesian2(0, 0),
-                  iconTranslateAnchor,
-                  iconPadding,
-                  iconTextFit,
-                  iconTextFitPadding,
-                  iconAllowOverlap,
-                  iconIgnorePlacement,
-                  iconOverlapMode,
-                  iconOptional,
-                  iconRotate,
-                })
+              const placement = createStyledSymbolPlacement({
+                tilingScheme: this.tilingScheme,
+                tile,
+                layer,
+                feature,
+                featureIndex,
+                compiled,
+                zoom,
+              })
+              if (placement) {
+                bucketSymbolPlacements.push(placement)
               }
 
               break
@@ -1084,17 +855,8 @@ export class CesiumMvtPrimitiveLayer {
           }
         }
 
-        if (symbolCandidates.length > 0) {
-          for (const candidate of symbolCandidates) {
-            styledSymbolPlacements.push({
-              tileId: tile.id,
-              tileLevel: tile.coord.level,
-              bucketKey: `${tile.id}:${compiled.id}`,
-              bucketOrder: compiled.order,
-              compiledId: compiled.id,
-              candidate,
-            })
-          }
+        if (bucketSymbolPlacements.length > 0) {
+          styledSymbolPlacements.push(...bucketSymbolPlacements)
         }
 
         let polygonPrimitive: Primitive | undefined
@@ -1121,13 +883,15 @@ export class CesiumMvtPrimitiveLayer {
           bucketPointCount > 0 ||
           bucketLineCount > 0 ||
           bucketPolygonCount > 0 ||
-          symbolCandidates.length > 0
+          bucketSymbolPlacements.length > 0
         ) {
           pointCount += bucketPointCount
           lineCount += bucketLineCount
           polygonCount += bucketPolygonCount
-          labelCount += symbolCandidates.length
-          iconCount += symbolCandidates.filter((candidate) => !!candidate.iconImageName).length
+          labelCount += bucketSymbolPlacements.length
+          iconCount += bucketSymbolPlacements.filter(
+            (placement) => !!placement.candidate.iconImageName,
+          ).length
 
           destroyers.push(() => {
             removeAndDestroyPrimitive(this.scene, pointCollection)
@@ -1211,395 +975,15 @@ export class CesiumMvtPrimitiveLayer {
 
     this.symbolLayoutDirty = false
     this.symbolLayoutDirtyWhileHidden = false
-    this.rebuildStyledSymbols()
-  }
-
-  private destroySymbolBucketRuntimes(): void {
-    for (const runtime of this.symbolBucketRuntimes.values()) {
-      runtime.destroy()
-    }
-    this.symbolBucketRuntimes.clear()
-  }
-
-  private compareStyledSymbolPlacements(
-    left: StyledSymbolPlacement & { screenY: number },
-    right: StyledSymbolPlacement & { screenY: number },
-  ): number {
-    const tileDelta = right.tileLevel - left.tileLevel
-    if (tileDelta !== 0) {
-      return tileDelta
-    }
-
-    const layerDelta = right.bucketOrder - left.bucketOrder
-    if (layerDelta !== 0) {
-      return layerDelta
-    }
-
-    const sortDelta = left.candidate.sortKey - right.candidate.sortKey
-    if (sortDelta !== 0) {
-      return sortDelta
-    }
-
-    const leftZOrder = left.candidate.symbolZOrder
-    const rightZOrder = right.candidate.symbolZOrder
-
-    if (leftZOrder === 'source' || rightZOrder === 'source') {
-      return left.candidate.sourceIndex - right.candidate.sourceIndex
-    }
-
-    if (leftZOrder === 'viewport-y' || rightZOrder === 'viewport-y') {
-      const yDelta = left.screenY - right.screenY
-      if (yDelta !== 0) {
-        return yDelta
-      }
-    }
-
-    if (leftZOrder === 'auto' || rightZOrder === 'auto') {
-      const yDelta = left.screenY - right.screenY
-      if (yDelta !== 0) {
-        return yDelta
-      }
-    }
-
-    return left.candidate.sourceIndex - right.candidate.sourceIndex
-  }
-
-  private ensureSymbolBucketRuntime(
-    placement: StyledSymbolPlacement,
-  ): SymbolBucketRuntime {
-    const existing = this.symbolBucketRuntimes.get(placement.bucketKey)
-    if (existing) {
-      return existing
-    }
-
-    const layerOrderBase =
-      placement.tileLevel * 100_000 + placement.bucketOrder * 100
-    const textBillboardCollection = new BillboardCollection({
-      show: this.labelsVisible,
-    })
-    addPrimitiveOrdered(
-      this.scene,
-      this.primitiveOrderMap,
-      textBillboardCollection,
-      layerOrderBase + 90,
+    this.symbolRenderer.rebuild(
+      this.collectStyledSymbolPlacements(),
+      this.labelsVisible,
     )
-
-    const iconBillboardCollection = new BillboardCollection({
-      show: this.labelsVisible,
-    })
-    addPrimitiveOrdered(
-      this.scene,
-      this.primitiveOrderMap,
-      iconBillboardCollection,
-      layerOrderBase + 80,
-    )
-
-    const runtime: SymbolBucketRuntime = {
-      tileId: placement.tileId,
-      bucketKey: placement.bucketKey,
-      order: placement.bucketOrder,
-      textBillboardCollection,
-      iconBillboardCollection,
-      setLabelsVisible: (visible: boolean) => {
-        textBillboardCollection.show = visible
-        iconBillboardCollection.show = visible
-      },
-      destroy: () => {
-        removeAndDestroyPrimitive(this.scene, textBillboardCollection)
-        removeAndDestroyPrimitive(this.scene, iconBillboardCollection)
-      },
-    }
-
-    this.symbolBucketRuntimes.set(placement.bucketKey, runtime)
-    return runtime
   }
 
-  private rebuildStyledSymbols(): void {
-    this.destroySymbolBucketRuntimes()
-    this.labelCollisionIndex.clear()
-    this.symbolDedupeIndex.clear()
-
-    if (!this.options.showLabels || !this.styleRenderer) {
-      this.scene.requestRender()
-      return
-    }
-
-    const placements = Array.from(this.groups.values())
-      .flatMap((group) => group.symbolPlacements)
-      .map((placement) => ({
-        ...placement,
-        textAnchorCandidates: placement.candidate.text
-          ? Array.from(
-              new Set(
-                placement.candidate.textVariableAnchors.length > 0
-                  ? placement.candidate.textVariableAnchors
-                  : [placement.candidate.textAnchor],
-              ),
-            )
-          : [placement.candidate.textAnchor],
-        screenY:
-          this.scene.cartesianToCanvasCoordinates(
-            placement.candidate.position,
-            new Cartesian2(),
-          )?.y ?? 0,
-      }))
-      .sort((left, right) => this.compareStyledSymbolPlacements(left, right))
-
-    for (const placement of placements) {
-      const candidate = placement.candidate
-      const textPlacementMode = candidate.ignorePlacement
-        ? 'always'
-        : candidate.overlapMode
-      const iconPlacementMode = candidate.iconIgnorePlacement
-        ? 'always'
-        : candidate.iconOverlapMode
-      const textAnchors =
-        placement.textAnchorCandidates.length > 0
-          ? placement.textAnchorCandidates
-          : [candidate.textAnchor]
-
-      let placed = false
-      for (const textAnchorName of textAnchors) {
-        const origins = {
-          ...parseTextAnchor(textAnchorName),
-          horizontalOrigin: resolveTextJustifyOrigin(
-            textAnchorName,
-            candidate.textJustify,
-          ),
-        }
-        const textPixelOffset = resolveTextPixelOffset(
-          candidate.pixelOffset,
-          candidate.textTranslate,
-          candidate.textRadialOffset,
-          candidate.textSize,
-          origins,
-        )
-        const textSprite = candidate.text
-          ? this.textAtlas.resolveImage(
-              buildTextSpriteRequest(candidate, candidate.text, textAnchorName),
-            )
-          : undefined
-        const textRect = textSprite
-          ? estimateSpriteScreenRect(
-              this.scene,
-              candidate.position,
-              textSprite.width,
-              textSprite.height,
-              textPixelOffset,
-              origins,
-              0,
-            )
-          : undefined
-
-        const iconOrigins = parseTextAnchor(candidate.iconAnchor)
-        const iconPixelOffset = combinePixelOffsets(
-          candidate.iconOffset,
-          candidate.iconTranslate,
-        )
-        const spriteEntry = candidate.iconImageName
-          ? this.spriteAtlas?.resolve(candidate.iconImageName)
-          : undefined
-        const spriteImage = candidate.iconImageName
-          ? this.spriteAtlas?.getImage(candidate.iconImageName)
-          : undefined
-        const resolvedIconRect =
-          spriteEntry && spriteImage
-            ? (() => {
-                const iconDimensions = resolveIconImageDimensions(
-                  spriteEntry,
-                  candidate.iconSize,
-                  textRect,
-                  candidate.iconTextFit ?? 'none',
-                  candidate.iconTextFitPadding,
-                )
-                const iconRect = estimateIconScreenRect(
-                  this.scene,
-                  candidate.position,
-                  iconDimensions.width,
-                  iconDimensions.height,
-                  iconPixelOffset,
-                  {
-                    horizontalOrigin: iconOrigins.horizontalOrigin,
-                    verticalOrigin: candidate.iconVerticalOrigin,
-                  },
-                  candidate.iconPadding,
-                )
-
-                if (
-                  !iconRect ||
-                  (candidate.iconHaloWidth <= 0 && candidate.iconHaloBlur <= 0)
-                ) {
-                  return iconRect
-                }
-
-                const haloSpread =
-                  candidate.iconHaloWidth + candidate.iconHaloBlur
-                const haloRect = estimateIconScreenRect(
-                  this.scene,
-                  candidate.position,
-                  iconDimensions.width + haloSpread * 2,
-                  iconDimensions.height + haloSpread * 2,
-                  iconPixelOffset,
-                  {
-                    horizontalOrigin: iconOrigins.horizontalOrigin,
-                    verticalOrigin: candidate.iconVerticalOrigin,
-                  },
-                  candidate.iconPadding,
-                )
-                return haloRect ? unionScreenRects(iconRect, haloRect) : iconRect
-              })()
-            : undefined
-
-        if (!textRect && !resolvedIconRect) {
-          continue
-        }
-
-        const placementRect =
-          textRect && resolvedIconRect
-            ? unionScreenRects(textRect, resolvedIconRect)
-            : textRect ?? resolvedIconRect
-        if (!placementRect) {
-          continue
-        }
-
-        const dedupeKey = buildSymbolDedupeKey(
-          placement.compiledId,
-          candidate,
-          candidate.text,
-        )
-        if (!this.symbolDedupeIndex.canPlace(dedupeKey, placementRect)) {
-          continue
-        }
-
-        const textFits =
-          textRect !== undefined &&
-          this.labelCollisionIndex.canPlace(textRect, textPlacementMode)
-        const iconFits =
-          resolvedIconRect !== undefined &&
-          this.labelCollisionIndex.canPlace(resolvedIconRect, iconPlacementMode)
-
-        const renderText =
-          textRect !== undefined &&
-          (textFits ||
-            (iconFits && candidate.optional) ||
-            (resolvedIconRect !== undefined && candidate.iconOptional) ||
-            !resolvedIconRect)
-        const renderIcon =
-          resolvedIconRect !== undefined &&
-          (iconFits ||
-            (textFits && candidate.iconOptional) ||
-            (textRect !== undefined && candidate.optional) ||
-            !textRect)
-
-        const acceptPlacement = candidate.text ? renderText : renderIcon
-        if (!acceptPlacement) {
-          continue
-        }
-
-        this.symbolDedupeIndex.add(candidate.labelId, dedupeKey, placementRect)
-
-        const runtime = this.ensureSymbolBucketRuntime(placement)
-
-        if (
-          renderIcon &&
-          spriteEntry &&
-          spriteImage &&
-          resolvedIconRect
-        ) {
-          const baseColor = spriteEntry.sdf
-            ? candidate.iconColor
-            : new Color(1, 1, 1, candidate.iconOpacity)
-          const iconDimensions = resolveIconImageDimensions(
-            spriteEntry,
-            candidate.iconSize,
-            textRect,
-            candidate.iconTextFit ?? 'none',
-            candidate.iconTextFitPadding,
-          )
-          const haloSpread = candidate.iconHaloWidth + candidate.iconHaloBlur
-
-          if (haloSpread > 0 && candidate.iconHaloColor.alpha > 0) {
-            runtime.iconBillboardCollection?.add({
-              show: true,
-              position: candidate.position,
-              image: spriteImage,
-              color: candidate.iconHaloColor,
-              width: iconDimensions.width + haloSpread * 2,
-              height: iconDimensions.height + haloSpread * 2,
-              pixelOffset: iconPixelOffset,
-              horizontalOrigin: iconOrigins.horizontalOrigin,
-              verticalOrigin: candidate.iconVerticalOrigin,
-              rotation: candidate.iconRotate,
-              id: {
-                tileId: placement.tileId,
-                layer: placement.compiledId,
-                featureId: candidate.featureId,
-                placementId: `${candidate.labelId}:icon-halo`,
-              },
-            })
-          }
-
-          runtime.iconBillboardCollection?.add({
-            show: true,
-            position: candidate.position,
-            image: spriteImage,
-            color: baseColor,
-            width: iconDimensions.width,
-            height: iconDimensions.height,
-            pixelOffset: iconPixelOffset,
-            horizontalOrigin: iconOrigins.horizontalOrigin,
-            verticalOrigin: candidate.iconVerticalOrigin,
-            rotation: candidate.iconRotate,
-            id: {
-              tileId: placement.tileId,
-              layer: placement.compiledId,
-              featureId: candidate.featureId,
-              placementId: `${candidate.labelId}:icon`,
-            },
-          })
-          this.labelCollisionIndex.add(
-            `${candidate.labelId}:icon`,
-            resolvedIconRect,
-            iconPlacementMode,
-            !candidate.iconIgnorePlacement,
-          )
-        }
-
-        if (renderText && textRect && candidate.text && textSprite) {
-          runtime.textBillboardCollection?.add({
-            show: true,
-            position: candidate.position,
-            image: textSprite.image,
-            color: Color.WHITE,
-            width: textSprite.width,
-            height: textSprite.height,
-            pixelOffset: textPixelOffset,
-            horizontalOrigin: origins.horizontalOrigin,
-            verticalOrigin: origins.verticalOrigin,
-            id: {
-              tileId: placement.tileId,
-              layer: placement.compiledId,
-              featureId: candidate.featureId,
-              placementId: `${candidate.labelId}:text`,
-            },
-          })
-          this.labelCollisionIndex.add(
-            `${candidate.labelId}:text`,
-            textRect,
-            textPlacementMode,
-            !candidate.ignorePlacement,
-          )
-        }
-
-        placed = true
-        break
-      }
-
-      if (!placed) {
-        this.symbolDedupeIndex.remove(candidate.labelId)
-      }
-    }
-
-    this.scene.requestRender()
+  private collectStyledSymbolPlacements(): StyledSymbolPlacement[] {
+    return Array.from(this.groups.values()).flatMap(
+      (group) => group.symbolPlacements,
+    )
   }
 }

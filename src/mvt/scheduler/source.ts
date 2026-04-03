@@ -22,7 +22,6 @@ export type CesiumMvtSourceCacheOptions = {
 
 type TileDemandRecord = {
   coord: TileCoord
-  requestedAt: number
   lastTouchedAt: number
   ancestors: string[]
 }
@@ -140,7 +139,6 @@ export class CesiumMvtSourceCache {
     } else {
       this.demandedTiles.set(tileId, {
         coord: tile,
-        requestedAt: now,
         lastTouchedAt: now,
         ancestors: collectAncestorIds(
           this.source.id,
@@ -183,6 +181,7 @@ export class CesiumMvtSourceCache {
     this.clearSweepTimer()
 
     for (const tileId of exitedTileIds) {
+      this.scheduler.cancel(tileId)
       this.scheduler.unpin(tileId)
     }
 
@@ -297,17 +296,18 @@ export class CesiumMvtSourceCache {
 
     for (const [tileId, record] of this.demandedTiles) {
       const expiry = record.lastTouchedAt + this.transitionHoldMs
-      nextActive.add(tileId)
+      if (expiry <= now) {
+        continue
+      }
 
+      nextActive.add(tileId)
       nextDemanded.set(tileId, record)
 
-      if (now < expiry) {
-        nextPinned.add(tileId)
-        for (const ancestorId of record.ancestors) {
-          const currentExpiry = nextFallbackUntil.get(ancestorId)
-          if (currentExpiry === undefined || expiry > currentExpiry) {
-            nextFallbackUntil.set(ancestorId, expiry)
-          }
+      nextPinned.add(tileId)
+      for (const ancestorId of record.ancestors) {
+        const currentExpiry = nextFallbackUntil.get(ancestorId)
+        if (currentExpiry === undefined || expiry > currentExpiry) {
+          nextFallbackUntil.set(ancestorId, expiry)
         }
       }
     }
@@ -359,6 +359,7 @@ export class CesiumMvtSourceCache {
     for (const tileId of previousActive) {
       if (!nextActive.has(tileId)) {
         exitedTileIds.push(tileId)
+        this.scheduler.cancel(tileId)
       }
     }
 

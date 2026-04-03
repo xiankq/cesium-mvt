@@ -24,20 +24,14 @@ export type SymbolPlacementCandidate = {
   haloWidth: number
   haloBlur: number
   pixelOffset: Cartesian2
-  horizontalOrigin: HorizontalOrigin
-  verticalOrigin: VerticalOrigin
   textAnchor: string
   textVariableAnchors: string[]
   textPadding: number
   textLineHeight: number
   textLetterSpacing: number
-  textMaxWidth: number
   textJustify: 'auto' | 'left' | 'center' | 'right'
-  textTransform: 'none' | 'uppercase' | 'lowercase'
   textTranslate: Cartesian2
-  textTranslateAnchor: 'map' | 'viewport'
   textRadialOffset: number
-  allowOverlap: boolean
   ignorePlacement: boolean
   overlapMode: 'never' | 'always' | 'cooperative'
   optional: boolean
@@ -54,11 +48,9 @@ export type SymbolPlacementCandidate = {
   iconVerticalOrigin: VerticalOrigin
   iconOffset: Cartesian2
   iconTranslate: Cartesian2
-  iconTranslateAnchor: 'map' | 'viewport'
   iconPadding: number
   iconTextFit?: 'none' | 'width' | 'height' | 'both'
   iconTextFitPadding: [number, number, number, number]
-  iconAllowOverlap: boolean
   iconIgnorePlacement: boolean
   iconOverlapMode: 'never' | 'always' | 'cooperative'
   iconOptional: boolean
@@ -90,7 +82,7 @@ type TextAnchorOrigin = {
   verticalOrigin: VerticalOrigin
 }
 type TextJustify = SymbolPlacementCandidate['textJustify']
-type TextTransform = SymbolPlacementCandidate['textTransform']
+type TextTransform = 'none' | 'uppercase' | 'lowercase'
 type IconTextFit = NonNullable<SymbolPlacementCandidate['iconTextFit']>
 
 export const DEFAULT_TEXT_FONT_STACK = ['Open Sans Regular', 'Arial Unicode MS Regular']

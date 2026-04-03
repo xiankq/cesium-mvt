@@ -1,11 +1,18 @@
-import type { ImageryLayer, Viewer } from 'cesium'
+import type { ImageryLayer, Request, Viewer } from 'cesium'
+import { UrlTemplateImageryProvider } from 'cesium'
 import { CesiumMvtPrimitiveLayer } from './render/layer'
-import { TileRequestImageryProvider } from './request/provider'
+import { TileImageCache } from './request/image'
+import { createTileDecodeJob } from './request/job'
 import { CesiumMvtSourceCache } from './scheduler/source'
 import { TileScheduler } from './scheduler/scheduler'
 import { resolveMapLibreStyleBackgroundColor } from './style/renderer'
 import type { MapLibreStyleDocument } from './style/document'
-import type { MvtProviderOptions, MvtSchedulerSnapshot } from './types'
+import type {
+  MvtProviderOptions,
+  MvtSchedulerSnapshot,
+  MvtSourceOptions,
+  TileDecodeJob,
+} from './types'
 
 type SchedulerListener = (snapshot: MvtSchedulerSnapshot) => void
 
@@ -14,13 +21,15 @@ export type MvtImageryProviderOptions = MvtProviderOptions & {
   style?: MapLibreStyleDocument
 }
 
-export class MvtImageryProvider {
+export class MvtImageryProvider extends UrlTemplateImageryProvider {
   readonly scheduler: TileScheduler
-  readonly provider: TileRequestImageryProvider
 
   private readonly viewer: Viewer
   private readonly sourceCache: CesiumMvtSourceCache
   private readonly imageryLayer: ImageryLayer
+  private readonly tileRequestSource: MvtSourceOptions
+  private readonly tileImageCache = new TileImageCache()
+  private readonly backgroundTileFillStyle?: string
   private previewLayer?: CesiumMvtPrimitiveLayer
   private destroyed = false
 
@@ -32,41 +41,56 @@ export class MvtImageryProvider {
       maxConcurrentRequests,
       cacheSize,
     } = options
+    const {
+      id,
+      urlTemplate,
+      subdomains,
+      customTags,
+      ...imageryOptions
+    } = source
+    const backgroundColor = style
+      ? resolveMapLibreStyleBackgroundColor(style)
+      : undefined
+
+    super({
+      ...imageryOptions,
+      url: urlTemplate,
+      enablePickFeatures: false,
+      hasAlphaChannel: true,
+    })
 
     this.viewer = viewer
+    this.tileRequestSource = {
+      id,
+      urlTemplate,
+      subdomains,
+      maximumLevel: this.maximumLevel,
+      tilingScheme: this.tilingScheme,
+      tileWidth: this.tileWidth,
+      tileHeight: this.tileHeight,
+      customTags,
+    }
+    this.backgroundTileFillStyle = backgroundColor?.toCssColorString()
     this.scheduler = new TileScheduler(
       source.id,
       maxConcurrentRequests,
       cacheSize,
     )
-    this.provider = new TileRequestImageryProvider({
-      ...source,
-      scheduler: this.scheduler,
-    })
-
-    const backgroundColor = style
-      ? resolveMapLibreStyleBackgroundColor(style)
-      : undefined
-    if (backgroundColor) {
-      viewer.scene.globe.baseColor = backgroundColor
-      viewer.scene.backgroundColor = backgroundColor
-    }
 
     this.sourceCache = new CesiumMvtSourceCache({
       scene: viewer.scene,
       scheduler: this.scheduler,
-      tilingScheme: this.provider.tilingScheme,
+      tilingScheme: this.tilingScheme,
       source,
     })
-    this.provider.setLifecycle(this.sourceCache)
-    this.imageryLayer = viewer.scene.imageryLayers.addImageryProvider(this.provider)
+    this.imageryLayer = viewer.scene.imageryLayers.addImageryProvider(this)
 
     try {
       if (style) {
         this.previewLayer = new CesiumMvtPrimitiveLayer(
           viewer.scene,
           this.scheduler,
-          this.provider.tilingScheme,
+          this.tilingScheme,
           {
             style,
             sourceCache: this.sourceCache,
@@ -83,6 +107,42 @@ export class MvtImageryProvider {
     return this.scheduler.subscribe(listener)
   }
 
+  override requestImage(
+    x: number,
+    y: number,
+    level: number,
+    _request?: Request,
+  ): Promise<HTMLCanvasElement> {
+    const coord = { x, y, level }
+    this.sourceCache.touch(coord)
+
+    const job: TileDecodeJob = createTileDecodeJob(
+      this.tileRequestSource,
+      this.tilingScheme,
+      coord,
+    )
+
+    this.scheduler.schedule(job)
+
+    return Promise.resolve(
+      this.tileImageCache.get(
+        this.tileWidth,
+        this.tileHeight,
+        this.backgroundTileFillStyle,
+      ),
+    )
+  }
+
+  override pickFeatures(
+    _x: number,
+    _y: number,
+    _level: number,
+    _longitude: number,
+    _latitude: number,
+  ): undefined {
+    return undefined
+  }
+
   destroy(): void {
     if (this.destroyed) {
       return
@@ -91,7 +151,7 @@ export class MvtImageryProvider {
     this.destroyed = true
     this.previewLayer?.destroy()
     this.previewLayer = undefined
-    this.provider.setLifecycle(undefined)
+    this.tileImageCache.clear()
     this.sourceCache.destroy()
     this.viewer.scene.imageryLayers.remove(this.imageryLayer, true)
     this.scheduler.destroy()

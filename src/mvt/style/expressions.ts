@@ -315,13 +315,6 @@ export function compileTextJustifyExpression(
   )
 }
 
-export function compileTextTranslateAnchorExpression(
-  value: unknown,
-  spec: StylePropertySpecification,
-): CompiledStyleExpression<'map' | 'viewport'> | undefined {
-  return compileEnumExpression<'map' | 'viewport'>(value, spec, 'map')
-}
-
 export function buildStyleFeatureFilter(layer: {
   filter?: unknown
 }) {
