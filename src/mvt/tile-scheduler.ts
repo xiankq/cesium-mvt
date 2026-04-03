@@ -6,21 +6,40 @@ import type {
   TileDecodeJob,
 } from './types'
 import { VectorTileWorkerClient } from './worker-client'
+import TinyQueue from 'tinyqueue'
 
 type SchedulerListener = (snapshot: MvtSchedulerSnapshot) => void
 type TileListener = (event: TileDecodeEvent) => void
 
+type QueuedTileJob = {
+  job: TileDecodeJob
+  token: number
+  priority: number
+  sequence: number
+}
+
+function compareQueuedTileJobs(left: QueuedTileJob, right: QueuedTileJob): number {
+  const priorityDelta = right.priority - left.priority
+  if (priorityDelta !== 0) {
+    return priorityDelta
+  }
+
+  return left.sequence - right.sequence
+}
+
 export class TileScheduler {
   private readonly worker = new VectorTileWorkerClient()
   private readonly cache: TileCache<string, DecodedTileRecord>
-  private readonly queue: TileDecodeJob[] = []
+  private readonly queue = new TinyQueue<QueuedTileJob>([], compareQueuedTileJobs)
   private readonly queuedIds = new Set<string>()
+  private readonly requestTokens = new Map<string, number>()
   private readonly inflight = new Map<string, Promise<void>>()
   private readonly pinned = new Map<string, number>()
   private readonly listeners = new Set<SchedulerListener>()
   private readonly tileListeners = new Set<TileListener>()
   private readonly state: MvtSchedulerSnapshot
   private readonly maxConcurrentRequests: number
+  private sequence = 0
 
   constructor(
     sourceId: string,
@@ -44,7 +63,7 @@ export class TileScheduler {
   getSnapshot(): MvtSchedulerSnapshot {
     return {
       ...this.state,
-      queued: this.queue.length,
+      queued: this.queuedIds.size,
       inFlight: this.inflight.size,
       cached: this.cache.size,
     }
@@ -104,7 +123,14 @@ export class TileScheduler {
       return
     }
 
-    this.queue.push(job)
+    const token = (this.requestTokens.get(job.id) ?? 0) + 1
+    this.requestTokens.set(job.id, token)
+    this.queue.push({
+      job,
+      token,
+      priority: job.coord.level,
+      sequence: this.sequence += 1,
+    })
     this.queuedIds.add(job.id)
     this.state.requested += 1
     this.state.lastTileId = job.id
@@ -113,21 +139,23 @@ export class TileScheduler {
   }
 
   cancel(tileId: string): boolean {
-    const queueIndex = this.queue.findIndex((job) => job.id === tileId)
-    if (queueIndex === -1) {
+    if (!this.queuedIds.has(tileId)) {
       return false
     }
 
-    this.queue.splice(queueIndex, 1)
     this.queuedIds.delete(tileId)
+    this.requestTokens.set(tileId, (this.requestTokens.get(tileId) ?? 0) + 1)
     this.state.lastTileId = tileId
     this.emit()
     return true
   }
 
   destroy(): void {
-    this.queue.length = 0
+    while (this.queue.length > 0) {
+      this.queue.pop()
+    }
     this.queuedIds.clear()
+    this.requestTokens.clear()
     this.inflight.clear()
     this.pinned.clear()
     this.cache.clear()
@@ -138,8 +166,18 @@ export class TileScheduler {
 
   private async pump(): Promise<void> {
     while (this.inflight.size < this.maxConcurrentRequests && this.queue.length > 0) {
-      const job = this.queue.shift()
-      if (!job) break
+      const queued = this.queue.pop()
+      if (!queued) break
+
+      const { job, token } = queued
+      if (!this.queuedIds.has(job.id)) {
+        continue
+      }
+
+      const currentToken = this.requestTokens.get(job.id)
+      if (currentToken !== token) {
+        continue
+      }
 
       this.queuedIds.delete(job.id)
 

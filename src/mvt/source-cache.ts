@@ -8,6 +8,7 @@ import type {
   TileDecodeEvent,
 } from './types'
 import type { TileScheduler } from './tile-scheduler'
+import { estimateSceneZoom } from './feature-preview-geometry'
 
 export type CesiumMvtSourceCacheOptions = {
   scene: Scene
@@ -65,7 +66,6 @@ export class CesiumMvtSourceCache {
   private readonly demandedTiles = new Map<string, TileDemandRecord>()
   private readonly decodedFallbackUntil = new Map<string, number>()
   private readonly activeTileIds = new Set<string>()
-  private readonly requestedTileIds = new Set<string>()
   private readonly pinnedTileIds = new Set<string>()
   private readonly transitionHoldMs: number
   private readonly autoUpdate: boolean
@@ -133,7 +133,6 @@ export class CesiumMvtSourceCache {
 
     const now = Date.now()
     const tileId = toTileId(this.source.id, tile)
-    this.requestedTileIds.add(tileId)
     const record = this.demandedTiles.get(tileId)
 
     if (record) {
@@ -151,7 +150,10 @@ export class CesiumMvtSourceCache {
       })
     }
 
-    this.latestLevel = tile.level
+    this.latestLevel = Math.max(
+      0,
+      Math.round(estimateSceneZoom(this.scene) ?? tile.level),
+    )
     const snapshot = this.rebuildState(now)
     this.scheduleSweep(now)
     return snapshot
@@ -177,7 +179,6 @@ export class CesiumMvtSourceCache {
     this.demandedTiles.clear()
     this.decodedFallbackUntil.clear()
     this.activeTileIds.clear()
-    this.requestedTileIds.clear()
     this.pinnedTileIds.clear()
     this.clearSweepTimer()
 
@@ -259,7 +260,10 @@ export class CesiumMvtSourceCache {
     }
 
     const now = Date.now()
-    this.latestLevel = event.tile.coord.level
+    this.latestLevel = Math.max(
+      0,
+      Math.round(estimateSceneZoom(this.scene) ?? event.tile.coord.level),
+    )
 
     for (const ancestorId of collectAncestorIds(
       this.source.id,
@@ -283,7 +287,7 @@ export class CesiumMvtSourceCache {
     const previousPinned = new Set(this.pinnedTileIds)
     const nextDemanded = new Map<string, TileDemandRecord>()
     const nextFallbackUntil = new Map<string, number>()
-    const nextActive = new Set<string>(this.requestedTileIds)
+    const nextActive = new Set<string>()
     const nextPinned = new Set<string>()
     const enteredTileIds: string[] = []
     const exitedTileIds: string[] = []
@@ -295,8 +299,9 @@ export class CesiumMvtSourceCache {
       const expiry = record.lastTouchedAt + this.transitionHoldMs
       nextActive.add(tileId)
 
+      nextDemanded.set(tileId, record)
+
       if (now < expiry) {
-        nextDemanded.set(tileId, record)
         nextPinned.add(tileId)
         for (const ancestorId of record.ancestors) {
           const currentExpiry = nextFallbackUntil.get(ancestorId)
@@ -309,10 +314,6 @@ export class CesiumMvtSourceCache {
 
     for (const [tileId, expiry] of this.decodedFallbackUntil) {
       if (expiry <= now) {
-        if (!nextDemanded.has(tileId)) {
-          this.requestedTileIds.delete(tileId)
-          nextActive.delete(tileId)
-        }
         continue
       }
 
@@ -405,7 +406,6 @@ export class CesiumMvtSourceCache {
 
   private handleEvictedTile(tileId: string): void {
     const hadActive = this.activeTileIds.delete(tileId)
-    this.requestedTileIds.delete(tileId)
     this.demandedTiles.delete(tileId)
     this.decodedFallbackUntil.delete(tileId)
 
@@ -438,7 +438,7 @@ export class CesiumMvtSourceCache {
 
     for (const record of this.demandedTiles.values()) {
       const expiry = record.lastTouchedAt + this.transitionHoldMs
-      if (expiry < nextExpiry) {
+      if (expiry > now && expiry < nextExpiry) {
         nextExpiry = expiry
       }
     }

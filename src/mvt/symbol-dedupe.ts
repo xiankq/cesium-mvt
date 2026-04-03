@@ -1,8 +1,10 @@
 import type { ScreenRect } from './screen-space'
 import { collectScreenGridKeys } from './screen-space'
+import murmurhash from 'murmurhash-js'
 
 type StoredSymbol = {
   key: string
+  hash: number
   cells: string[]
 }
 
@@ -50,6 +52,8 @@ export class ScreenSymbolDedupeIndex {
       return true
     }
 
+    const hash = murmurhash(key)
+
     for (const cellKey of this.getCellKeys(rect)) {
       const cell = this.cells.get(cellKey)
       if (!cell) {
@@ -58,7 +62,7 @@ export class ScreenSymbolDedupeIndex {
 
       for (const placementId of cell) {
         const existing = this.placements.get(placementId)
-        if (existing && existing.key === key) {
+        if (existing && existing.hash === hash && existing.key === key) {
           return false
         }
       }
@@ -69,10 +73,12 @@ export class ScreenSymbolDedupeIndex {
 
   add(placementId: string, key: string, rect: ScreenRect): void {
     this.remove(placementId)
+    const hash = murmurhash(key)
 
     const cellKeys = this.getCellKeys(rect)
     this.placements.set(placementId, {
       key,
+      hash,
       cells: cellKeys,
     })
 

@@ -4,7 +4,6 @@ import {
   Cartesian3,
   Color,
   HorizontalOrigin,
-  LabelCollection,
   Scene,
   VerticalOrigin,
 } from 'cesium'
@@ -79,8 +78,8 @@ export type SymbolBucketRuntime = {
   tileId: string
   bucketKey: string
   order: number
-  labelCollection?: LabelCollection
-  billboardCollection?: BillboardCollection
+  textBillboardCollection?: BillboardCollection
+  iconBillboardCollection?: BillboardCollection
   setLabelsVisible: (visible: boolean) => void
   destroy: () => void
 }
@@ -415,6 +414,35 @@ export function estimateLabelScreenRect(
 }
 
 export function estimateIconScreenRect(
+  scene: Scene,
+  position: Cartesian3,
+  width: number,
+  height: number,
+  pixelOffset: Cartesian2,
+  origins: {
+    horizontalOrigin: HorizontalOrigin
+    verticalOrigin: VerticalOrigin
+  },
+  padding = 2,
+): SymbolScreenRect | undefined {
+  const canvasPosition = scene.cartesianToCanvasCoordinates(
+    position,
+    scratchCanvasPosition,
+  )
+
+  if (!canvasPosition) {
+    return undefined
+  }
+
+  const offsetX = canvasPosition.x + pixelOffset.x
+  const offsetY = canvasPosition.y - pixelOffset.y
+  const paddedWidth = Math.max(1, width) + Math.max(0, padding) * 2
+  const paddedHeight = Math.max(1, height) + Math.max(0, padding) * 2
+
+  return estimateRectOrigin(offsetX, offsetY, paddedWidth, paddedHeight, origins)
+}
+
+export function estimateSpriteScreenRect(
   scene: Scene,
   position: Cartesian3,
   width: number,

@@ -5,8 +5,6 @@ import {
   Color,
   GeometryInstance,
   PointPrimitiveCollection,
-  LabelCollection,
-  LabelStyle,
   PolygonGeometry,
   PolygonHierarchy,
   PolylineCollection,
@@ -29,6 +27,7 @@ import type { MapLibreStyleDocument } from './maplibre-style'
 import { MapLibreSpriteAtlas } from './sprite-atlas'
 import { ScreenLabelCollisionIndex } from './label-collision'
 import { ScreenSymbolDedupeIndex } from './symbol-dedupe'
+import { TextSpriteAtlas, buildTextSpriteRequest } from './text-atlas'
 import {
   compileMapLibreStyleRenderer,
   type CompiledMapLibreStyleRenderer,
@@ -52,8 +51,7 @@ import {
   buildSymbolDedupeKey,
   combinePixelOffsets,
   estimateIconScreenRect,
-  estimateLabelScreenRect,
-  fontStackToCss,
+  estimateSpriteScreenRect,
   normalizeSymbolKey,
   parseTextAnchor,
   resolveTextJustifyOrigin,
@@ -149,6 +147,7 @@ export class CesiumMvtPrimitiveLayer {
   private readonly labelCollisionIndex = new ScreenLabelCollisionIndex()
   private readonly symbolDedupeIndex = new ScreenSymbolDedupeIndex()
   private readonly spriteAtlas?: MapLibreSpriteAtlas
+  private readonly textAtlas = new TextSpriteAtlas()
   private readonly sourceCache?: CesiumMvtSourceCache
   private readonly styleRenderer?: CompiledMapLibreStyleRenderer
   private readonly unsubscribeTiles: () => void
@@ -160,7 +159,6 @@ export class CesiumMvtPrimitiveLayer {
   private currentZoom = 0
   private labelsVisible = true
   private atlasRefreshScheduled = false
-  private symbolRebuildScheduled = false
   private destroyed = false
   private cameraLabelsSuspended = false
   private loadingLabelsSuspended = false
@@ -168,6 +166,8 @@ export class CesiumMvtPrimitiveLayer {
   private readonly suspendLabelsDuringCameraMove: boolean
   private readonly suspendLabelsDuringLoading: boolean
   private readonly labelResumeDelayMs: number
+  private readonly symbolRebuildDelayMs = 160
+  private symbolRebuildTimer?: ReturnType<typeof setTimeout>
 
   constructor(
     scene: Scene,
@@ -366,6 +366,7 @@ export class CesiumMvtPrimitiveLayer {
 
   destroy(): void {
     this.destroyed = true
+    this.clearSymbolRebuildTimer()
     this.unsubscribeViewport?.()
     this.unsubscribeTiles()
     this.unsubscribeScheduler?.()
@@ -375,6 +376,7 @@ export class CesiumMvtPrimitiveLayer {
     this.removeCameraMoveEnd = undefined
     this.clearLabelResumeTimer()
     this.destroySymbolBucketRuntimes()
+    this.textAtlas.destroy()
 
     for (const group of this.groups.values()) {
       group.destroy()
@@ -396,8 +398,41 @@ export class CesiumMvtPrimitiveLayer {
   }
 
   private handleViewportEvent = (snapshot: MvtViewportSnapshot): void => {
+    const previousZoom = this.currentZoom
     this.currentZoom = snapshot.zoom
-    this.scheduleSymbolRebuild()
+
+    let tileSetChanged = false
+
+    for (const tileId of snapshot.exitedTileIds) {
+      if (!this.groups.has(tileId)) {
+        continue
+      }
+
+      this.removeTile(tileId, false)
+      tileSetChanged = true
+    }
+
+    for (const tileId of snapshot.enteredTileIds) {
+      if (this.groups.has(tileId)) {
+        continue
+      }
+
+      const tile = this.scheduler.getTile(tileId)
+      if (!tile) {
+        continue
+      }
+
+      if (this.sourceCache && !this.sourceCache.isVisible(tileId)) {
+        continue
+      }
+
+      this.addTile(tile)
+      tileSetChanged = true
+    }
+
+    if (tileSetChanged || previousZoom !== this.currentZoom) {
+      this.scheduleSymbolRebuild()
+    }
   }
 
   private scheduleAtlasRefresh(): void {
@@ -586,7 +621,7 @@ export class CesiumMvtPrimitiveLayer {
     this.scene.requestRender()
   }
 
-  private removeTile(tileId: string): void {
+  private removeTile(tileId: string, scheduleSymbolRebuild = true): void {
     const group = this.groups.get(tileId)
     if (!group) {
       return
@@ -594,7 +629,9 @@ export class CesiumMvtPrimitiveLayer {
 
     group.destroy()
     this.groups.delete(tileId)
-    this.scheduleSymbolRebuild()
+    if (scheduleSymbolRebuild) {
+      this.scheduleSymbolRebuild()
+    }
     this.scene.requestRender()
   }
 
@@ -1270,17 +1307,24 @@ export class CesiumMvtPrimitiveLayer {
   }
 
   private scheduleSymbolRebuild(): void {
-    if (this.symbolRebuildScheduled || this.destroyed) {
+    if (this.destroyed) {
       return
     }
 
-    this.symbolRebuildScheduled = true
-    setTimeout(() => {
-      this.symbolRebuildScheduled = false
+    this.clearSymbolRebuildTimer()
+    this.symbolRebuildTimer = setTimeout(() => {
+      this.symbolRebuildTimer = undefined
       if (!this.destroyed) {
         this.rebuildStyledSymbols()
       }
-    }, 0)
+    }, this.symbolRebuildDelayMs)
+  }
+
+  private clearSymbolRebuildTimer(): void {
+    if (this.symbolRebuildTimer !== undefined) {
+      clearTimeout(this.symbolRebuildTimer)
+      this.symbolRebuildTimer = undefined
+    }
   }
 
   private destroySymbolBucketRuntimes(): void {
@@ -1343,24 +1387,23 @@ export class CesiumMvtPrimitiveLayer {
 
     const layerOrderBase =
       placement.tileLevel * 100_000 + placement.bucketOrder * 100
-    const labelCollection = new LabelCollection({
-      scene: this.scene,
+    const textBillboardCollection = new BillboardCollection({
       show: this.labelsVisible,
     })
     addPrimitiveOrdered(
       this.scene,
       this.primitiveOrderMap,
-      labelCollection,
+      textBillboardCollection,
       layerOrderBase + 90,
     )
 
-    const billboardCollection = new BillboardCollection({
+    const iconBillboardCollection = new BillboardCollection({
       show: this.labelsVisible,
     })
     addPrimitiveOrdered(
       this.scene,
       this.primitiveOrderMap,
-      billboardCollection,
+      iconBillboardCollection,
       layerOrderBase + 80,
     )
 
@@ -1368,15 +1411,15 @@ export class CesiumMvtPrimitiveLayer {
       tileId: placement.tileId,
       bucketKey: placement.bucketKey,
       order: placement.bucketOrder,
-      labelCollection,
-      billboardCollection,
+      textBillboardCollection,
+      iconBillboardCollection,
       setLabelsVisible: (visible: boolean) => {
-        labelCollection.show = visible
-        billboardCollection.show = visible
+        textBillboardCollection.show = visible
+        iconBillboardCollection.show = visible
       },
       destroy: () => {
-        removeAndDestroyPrimitive(this.scene, labelCollection)
-        removeAndDestroyPrimitive(this.scene, billboardCollection)
+        removeAndDestroyPrimitive(this.scene, textBillboardCollection)
+        removeAndDestroyPrimitive(this.scene, iconBillboardCollection)
       },
     }
 
@@ -1444,18 +1487,20 @@ export class CesiumMvtPrimitiveLayer {
           candidate.textSize,
           origins,
         )
-        const textRect = candidate.text
-          ? estimateLabelScreenRect(
+        const textSprite = candidate.text
+          ? this.textAtlas.resolveImage(
+              buildTextSpriteRequest(candidate, candidate.text, textAnchorName),
+            )
+          : undefined
+        const textRect = textSprite
+          ? estimateSpriteScreenRect(
               this.scene,
               candidate.position,
-              candidate.text,
-              candidate.textSize,
-              candidate.textPadding,
-              candidate.haloWidth + candidate.haloBlur,
+              textSprite.width,
+              textSprite.height,
               textPixelOffset,
               origins,
-              candidate.textLineHeight,
-              candidate.textLetterSpacing,
+              0,
             )
           : undefined
 
@@ -1587,7 +1632,7 @@ export class CesiumMvtPrimitiveLayer {
           const haloSpread = candidate.iconHaloWidth + candidate.iconHaloBlur
 
           if (haloSpread > 0 && candidate.iconHaloColor.alpha > 0) {
-            runtime.billboardCollection?.add({
+            runtime.iconBillboardCollection?.add({
               show: true,
               position: candidate.position,
               image: spriteImage,
@@ -1607,7 +1652,7 @@ export class CesiumMvtPrimitiveLayer {
             })
           }
 
-          runtime.billboardCollection?.add({
+          runtime.iconBillboardCollection?.add({
             show: true,
             position: candidate.position,
             image: spriteImage,
@@ -1633,26 +1678,17 @@ export class CesiumMvtPrimitiveLayer {
           )
         }
 
-        if (renderText && textRect && candidate.text) {
-          const textColor = candidate.textColor
-          const outlineColor = candidate.haloColor
-          const outlineWidth = candidate.haloWidth + candidate.haloBlur
-          runtime.labelCollection?.add({
+        if (renderText && textRect && candidate.text && textSprite) {
+          runtime.textBillboardCollection?.add({
             show: true,
             position: candidate.position,
-            text: candidate.text,
-            font: `${candidate.textSize}px ${fontStackToCss(candidate.fontStack)}`,
-            style:
-              outlineWidth > 0 && outlineColor.alpha > 0
-                ? LabelStyle.FILL_AND_OUTLINE
-                : LabelStyle.FILL,
-            fillColor: textColor,
-            outlineColor,
-            outlineWidth,
+            image: textSprite.image,
+            color: Color.WHITE,
+            width: textSprite.width,
+            height: textSprite.height,
             pixelOffset: textPixelOffset,
             horizontalOrigin: origins.horizontalOrigin,
             verticalOrigin: origins.verticalOrigin,
-            showBackground: false,
             id: {
               tileId: placement.tileId,
               layer: placement.compiledId,
