@@ -1,33 +1,34 @@
-import {
+import type {
   Color,
-  type Polyline,
+  Polyline,
   PolylineCollection,
-  type TilingScheme,
-} from 'cesium'
+  TilingScheme,
+} from 'cesium';
 import type {
   DecodedFeatureRecord,
   DecodedTileRecord,
-} from '../types'
+} from '../types';
+import type { TileTransformContext } from './geometry';
 import {
-  createTileTransformContext,
   createPolylineMaterial,
+  createTileTransformContext,
   ensureClosedLoop,
-  type TileTransformContext,
-  toCartesianPositionsWithContext,
-} from './geometry'
 
-export type RenderLineStringPrimitivesOptions = {
-  tilingScheme: TilingScheme
-  tile: DecodedTileRecord
-  extent: number
-  layerId: string
-  feature: DecodedFeatureRecord
-  collection: PolylineCollection | undefined
-  color: Color
-  width: number
-  closedLoop?: boolean
-  onPolyline?: (polyline: Polyline) => void
-  transformContext?: TileTransformContext
+  toCartesianPositionsWithContext,
+} from './geometry';
+
+export interface RenderLineStringPrimitivesOptions {
+  tilingScheme: TilingScheme;
+  tile: DecodedTileRecord;
+  extent: number;
+  layerId: string;
+  feature: DecodedFeatureRecord;
+  collection: PolylineCollection | undefined;
+  color: Color;
+  width: number;
+  closedLoop?: boolean;
+  onPolyline?: (polyline: Polyline) => void;
+  transformContext?: TileTransformContext;
 }
 
 export function renderLineStringPrimitives(
@@ -45,31 +46,31 @@ export function renderLineStringPrimitives(
     closedLoop = false,
     onPolyline,
     transformContext,
-  } = options
+  } = options;
 
   if (!collection) {
-    return 0
+    return 0;
   }
 
-  const resolvedTransformContext =
-    transformContext
-    ?? createTileTransformContext(
-      tilingScheme,
-      tile.coord,
-      extent,
-    )
-  let count = 0
+  const resolvedTransformContext
+    = transformContext
+      ?? createTileTransformContext(
+        tilingScheme,
+        tile.coord,
+        extent,
+      );
+  let count = 0;
   for (const part of feature.geometry) {
     if (part.length < 2) {
-      continue
+      continue;
     }
 
     const positions = toCartesianPositionsWithContext(
       resolvedTransformContext,
       part,
-    )
+    );
     if (positions.length < 2) {
-      continue
+      continue;
     }
 
     const polyline = collection.add({
@@ -83,10 +84,10 @@ export function renderLineStringPrimitives(
         layer: layerId,
         featureId: feature.id,
       },
-    })
-    onPolyline?.(polyline)
-    count += 1
+    });
+    onPolyline?.(polyline);
+    count += 1;
   }
 
-  return count
+  return count;
 }

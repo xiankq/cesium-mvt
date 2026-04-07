@@ -1,11 +1,6 @@
 :root {
   color-scheme: dark;
-  font-family:
-    'PingFang SC',
-    'Hiragino Sans GB',
-    'Microsoft YaHei',
-    system-ui,
-    sans-serif;
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color: #f3fbff;

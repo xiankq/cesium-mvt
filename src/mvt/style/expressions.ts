@@ -1,49 +1,45 @@
+import type { Feature as MapLibreFeature, StylePropertySpecification } from '@maplibre/maplibre-gl-style-spec';
+import type { DecodedFeatureRecord, DecodedLayerRecord, DecodedTileRecord } from '../types';
 import {
   convertFilter,
   createExpression,
   createPropertyExpression,
-  isExpression,
   Formatted,
-  type Feature as MapLibreFeature,
-  type StylePropertySpecification,
-} from '@maplibre/maplibre-gl-style-spec'
-import { Color } from 'cesium'
-import {
-  type DecodedFeatureRecord,
-  type DecodedLayerRecord,
-  type DecodedTileRecord,
-} from '../types'
+  isExpression,
 
-export type CompiledStyleExpression<T> = {
-  zoomDependent: boolean
-  evaluate(feature: DecodedFeatureRecord, zoom: number): T
+} from '@maplibre/maplibre-gl-style-spec';
+import { Color } from 'cesium';
+
+export interface CompiledStyleExpression<T> {
+  zoomDependent: boolean;
+  evaluate: (feature: DecodedFeatureRecord, zoom: number) => T;
 }
 
-export type ResolvedFormattedText = {
-  text: string
-  fontStack?: string[]
-  textColor?: Color
+export interface ResolvedFormattedText {
+  text: string;
+  fontStack?: string[];
+  textColor?: Color;
 }
 
-type StyleFeature = MapLibreFeature
-const warnedStyleEvaluationFailures = new Set<string>()
+type StyleFeature = MapLibreFeature;
+const warnedStyleEvaluationFailures = new Set<string>();
 const filterExpressionSpec = {
   type: 'boolean',
   default: false,
-} as StylePropertySpecification
+} as StylePropertySpecification;
 
 function warnStyleEvaluationFailure(scope: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error)
-  const warningKey = `${scope}:${message}`
+  const message = error instanceof Error ? error.message : String(error);
+  const warningKey = `${scope}:${message}`;
   if (warnedStyleEvaluationFailures.has(warningKey)) {
-    return
+    return;
   }
 
-  warnedStyleEvaluationFailures.add(warningKey)
+  warnedStyleEvaluationFailures.add(warningKey);
   console.warn(
     `[cesium-mvt] Failed to evaluate style ${scope}; using fallback.`,
     error,
-  )
+  );
 }
 
 function toMapLibreFeature(feature: DecodedFeatureRecord): StyleFeature {
@@ -51,91 +47,91 @@ function toMapLibreFeature(feature: DecodedFeatureRecord): StyleFeature {
     type: feature.type,
     id: feature.id,
     properties: feature.properties,
-    geometry: feature.geometry.map((part) =>
+    geometry: feature.geometry.map(part =>
       part.map(([x, y]) => ({
         x,
         y,
       })),
     ),
-  }
+  };
 }
 
 function toCesiumColor(value: unknown, fallback: Color): Color {
   if (value instanceof Color) {
-    return Color.clone(value)
+    return Color.clone(value);
   }
 
   if (
-    value &&
-    typeof value === 'object' &&
-    'r' in value &&
-    'g' in value &&
-    'b' in value
+    value
+    && typeof value === 'object'
+    && 'r' in value
+    && 'g' in value
+    && 'b' in value
   ) {
-    const color = value as { r: number; g: number; b: number; a?: number }
-    return new Color(color.r, color.g, color.b, color.a ?? 1)
+    const color = value as { r: number; g: number; b: number; a?: number };
+    return new Color(color.r, color.g, color.b, color.a ?? 1);
   }
 
   if (typeof value === 'string') {
-    const cesiumColor = Color.fromCssColorString(value)
+    const cesiumColor = Color.fromCssColorString(value);
     if (cesiumColor) {
-      return cesiumColor
+      return cesiumColor;
     }
   }
 
-  return Color.clone(fallback)
+  return Color.clone(fallback);
 }
 
 export function resolveFormattedText(value: unknown): ResolvedFormattedText {
   if (value instanceof Formatted) {
-    const text = value.sections.map((section) => section.text ?? '').join('')
+    const text = value.sections.map(section => section.text ?? '').join('');
 
     const fontStackSection = value.sections.find(
-      (section) => typeof section.fontStack === 'string' && section.fontStack.trim().length > 0,
-    )
-    const textColorSection = value.sections.find((section) => section.textColor !== null && section.textColor !== undefined)
+      section => typeof section.fontStack === 'string' && section.fontStack.trim().length > 0,
+    );
+    const textColorSection = value.sections.find(section => section.textColor !== null && section.textColor !== undefined);
 
     return {
       text,
       fontStack: fontStackSection?.fontStack
         ?.split(',')
-        .map((font) => font.trim())
-        .filter((font) => font.length > 0),
+        .map(font => font.trim())
+        .filter(font => font.length > 0),
       textColor: textColorSection ? toCesiumColor(textColorSection.textColor, Color.WHITE) : undefined,
-    }
+    };
   }
 
   if (typeof value === 'string') {
     return {
       text: value,
-    }
+    };
   }
 
   if (value === null || value === undefined) {
     return {
       text: '',
-    }
+    };
   }
 
   return {
     text: String(value),
-  }
+  };
 }
 
 function formatTextValue(value: unknown): string {
   if (value instanceof Formatted) {
-    return value.toString()
+    return value.toString();
   }
 
   if (Array.isArray(value)) {
-    return value.map((entry) => String(entry)).join('')
+    return value.map(entry => String(entry)).join('');
   }
 
   if (value === null || value === undefined) {
-    return ''
+    return '';
   }
 
-  return String(value)
+  return String(value);
 }
 
 export function compilePropertyExpression<T>(
@@ -144,38 +140,38 @@ export function compilePropertyExpression<T>(
   fallback?: unknown,
   transform?: (input: unknown) => T,
 ): CompiledStyleExpression<T> | undefined {
-  const input =
-    value !== undefined
+  const input
+    = value !== undefined
       ? value
       : fallback !== undefined
         ? fallback
         : spec.default !== undefined
           ? spec.default
-          : undefined
+          : undefined;
 
-  const normalizedInput =
-    Array.isArray(input) && !isExpression(input)
+  const normalizedInput
+    = Array.isArray(input) && !isExpression(input)
       ? ['literal', input]
-      : input
-  const fallbackInput =
-    fallback !== undefined
+      : input;
+  const fallbackInput
+    = fallback !== undefined
       ? fallback
       : spec.default !== undefined
         ? spec.default
-        : undefined
+        : undefined;
 
   if (normalizedInput === undefined) {
-    return undefined
+    return undefined;
   }
 
-  const compiled = createPropertyExpression(normalizedInput, spec)
+  const compiled = createPropertyExpression(normalizedInput, spec);
   if (compiled.result === 'error') {
-    throw new Error(compiled.value.map((issue) => issue.message).join('; '))
+    throw new Error(compiled.value.map(issue => issue.message).join('; '));
   }
 
-  const zoomDependent =
-    compiled.value.kind === 'camera' ||
-    compiled.value.kind === 'composite'
+  const zoomDependent
+    = compiled.value.kind === 'camera'
+      || compiled.value.kind === 'composite';
 
   return {
     zoomDependent,
@@ -185,16 +181,17 @@ export function compilePropertyExpression<T>(
           { zoom },
           toMapLibreFeature(feature),
           {},
-        )
-        return transform ? transform(evaluated) : (evaluated as T)
-      } catch (error) {
-        warnStyleEvaluationFailure('expression', error)
+        );
+        return transform ? transform(evaluated) : (evaluated as T);
+      }
+      catch (error) {
+        warnStyleEvaluationFailure('expression', error);
         return transform
           ? transform(fallbackInput)
-          : (fallbackInput as T)
+          : (fallbackInput as T);
       }
     },
-  }
+  };
 }
 
 export function compileColorExpression(
@@ -206,8 +203,8 @@ export function compileColorExpression(
     value,
     spec,
     fallback,
-    (input) => toCesiumColor(input, Color.fromCssColorString(fallback)),
-  )
+    input => toCesiumColor(input, Color.fromCssColorString(fallback)),
+  );
 }
 
 export function compileNumberExpression(
@@ -216,9 +213,9 @@ export function compileNumberExpression(
   fallback?: number,
 ): CompiledStyleExpression<number> | undefined {
   return compilePropertyExpression<number>(value, spec, fallback, (input) => {
-    const numberValue = Number(input)
-    return Number.isFinite(numberValue) ? numberValue : fallback ?? 0
-  })
+    const numberValue = Number(input);
+    return Number.isFinite(numberValue) ? numberValue : fallback ?? 0;
+  });
 }
 
 export function compileBooleanExpression(
@@ -226,9 +223,8 @@ export function compileBooleanExpression(
   spec: StylePropertySpecification,
   fallback?: boolean,
 ): CompiledStyleExpression<boolean> | undefined {
-  return compilePropertyExpression<boolean>(value, spec, fallback, (input) =>
-    Boolean(input),
-  )
+  return compilePropertyExpression<boolean>(value, spec, fallback, input =>
+    Boolean(input));
 }
 
 export function compileEnumExpression<T extends string>(
@@ -238,7 +234,7 @@ export function compileEnumExpression<T extends string>(
 ): CompiledStyleExpression<T> | undefined {
   return compileStringExpression(value, spec, fallback) as
     | CompiledStyleExpression<T>
-    | undefined
+    | undefined;
 }
 
 export function compileStringExpression(
@@ -246,9 +242,8 @@ export function compileStringExpression(
   spec: StylePropertySpecification,
   fallback?: string,
 ): CompiledStyleExpression<string> | undefined {
-  return compilePropertyExpression<string>(value, spec, fallback, (input) =>
-    formatTextValue(input),
-  )
+  return compilePropertyExpression<string>(value, spec, fallback, input =>
+    formatTextValue(input));
 }
 
 export function compileFontExpression(
@@ -258,22 +253,22 @@ export function compileFontExpression(
 ): CompiledStyleExpression<string[]> | undefined {
   return compilePropertyExpression<string[]>(value, spec, fallback, (input) => {
     if (Array.isArray(input)) {
-      return input.map((font) => String(font)).filter((font) => font.length > 0)
+      return input.map(font => String(font)).filter(font => font.length > 0);
     }
 
     if (typeof input === 'string' && input.trim().length > 0) {
-      return [input.trim()]
+      return [input.trim()];
     }
 
-    return fallback ?? []
-  })
+    return fallback ?? [];
+  });
 }
 
 export function compileTextAnchorExpression(
   value: unknown,
   spec: StylePropertySpecification,
 ): CompiledStyleExpression<string> | undefined {
-  return compileStringExpression(value, spec, 'center')
+  return compileStringExpression(value, spec, 'center');
 }
 
 export function compileTextOffsetExpression(
@@ -286,17 +281,17 @@ export function compileTextOffsetExpression(
     [0, 0],
     (input) => {
       if (!Array.isArray(input) || input.length < 2) {
-        return [0, 0]
+        return [0, 0];
       }
 
-      const x = Number(input[0])
-      const y = Number(input[1])
+      const x = Number(input[0]);
+      const y = Number(input[1]);
       return [
         Number.isFinite(x) ? x : 0,
         Number.isFinite(y) ? y : 0,
-      ]
+      ];
     },
-  )
+  );
 }
 
 export function compileTextOverlapExpression(
@@ -305,7 +300,7 @@ export function compileTextOverlapExpression(
 ): CompiledStyleExpression<'never' | 'always' | 'cooperative'> | undefined {
   return compileStringExpression(value, spec, 'never') as
     | CompiledStyleExpression<'never' | 'always' | 'cooperative'>
-    | undefined
+    | undefined;
 }
 
 export function compileNumberTupleExpression(
@@ -319,7 +314,7 @@ export function compileNumberTupleExpression(
     fallback,
     (input) => {
       if (!Array.isArray(input) || input.length < 4) {
-        return fallback
+        return fallback;
       }
 
       return [
@@ -327,9 +322,9 @@ export function compileNumberTupleExpression(
         Number(input[1]) || 0,
         Number(input[2]) || 0,
         Number(input[3]) || 0,
-      ]
+      ];
     },
-  )
+  );
 }
 
 export function compileTextTransformExpression(
@@ -340,7 +335,7 @@ export function compileTextTransformExpression(
     value,
     spec,
     'none',
-  )
+  );
 }
 
 export function compileTextJustifyExpression(
@@ -351,23 +346,23 @@ export function compileTextJustifyExpression(
     value,
     spec,
     'auto',
-  )
+  );
 }
 
 export function buildStyleFeatureFilter(layer: {
-  filter?: unknown
+  filter?: unknown;
 }) {
   if (layer.filter === null || layer.filter === undefined) {
-    return () => true
+    return () => true;
   }
 
-  const normalizedFilter = convertFilter(layer.filter as never)
+  const normalizedFilter = convertFilter(layer.filter as never);
   const compiledFilter = createExpression(
     normalizedFilter,
     filterExpressionSpec,
-  )
+  );
   if (compiledFilter.result === 'error') {
-    throw new Error(compiledFilter.value.map((issue) => issue.message).join('; '))
+    throw new Error(compiledFilter.value.map(issue => issue.message).join('; '));
   }
 
   return (feature: DecodedFeatureRecord, zoom: number): boolean => {
@@ -379,21 +374,22 @@ export function buildStyleFeatureFilter(layer: {
           undefined,
           undefined,
         ),
-      )
-    } catch (error) {
-      return false
+      );
     }
-  }
+    catch (error) {
+      return false;
+    }
+  };
 }
 
 export function buildStyleLayerVisibility(layer: {
-  minzoom?: number
-  maxzoom?: number
+  minzoom?: number;
+  maxzoom?: number;
   layout?: {
-    visibility?: 'visible' | 'none'
-    [key: string]: unknown
-  }
-  ['source-layer']?: string
+    visibility?: 'visible' | 'none';
+    [key: string]: unknown;
+  };
+  ['source-layer']?: string;
 }) {
   return (
     decodedLayer: DecodedLayerRecord,
@@ -401,21 +397,21 @@ export function buildStyleLayerVisibility(layer: {
     zoom: number,
   ): boolean => {
     if (layer.minzoom !== undefined && zoom < layer.minzoom) {
-      return false
+      return false;
     }
 
     if (layer.maxzoom !== undefined && zoom >= layer.maxzoom) {
-      return false
+      return false;
     }
 
     if (layer['source-layer'] && layer['source-layer'] !== decodedLayer.name) {
-      return false
+      return false;
     }
 
     if (layer.layout && layer.layout.visibility === 'none') {
-      return false
+      return false;
     }
 
-    return decodedLayer.featureCount > 0
-  }
+    return decodedLayer.featureCount > 0;
+  };
 }

@@ -1,19 +1,19 @@
-import { describe, expect, it } from 'vitest'
-import { buildSymbolDedupeKey, fontStackToCss } from '../src/mvt/render/label'
+import { describe, expect, it } from 'vitest';
+import { buildSymbolDedupeKey, fontStackToCss } from '../src/mvt/render/label';
 
 describe('fontStackToCss', () => {
   it('normalizes comma-separated font strings the same way as arrays', () => {
     expect(
       fontStackToCss('Open Sans Regular, Arial Unicode MS Regular'),
-    ).toBe('"Open Sans Regular", "Arial Unicode MS Regular"')
-  })
+    ).toBe('"Open Sans Regular", "Arial Unicode MS Regular"');
+  });
 
   it('strips redundant quotes before rebuilding the CSS font list', () => {
     expect(
       fontStackToCss('"Open Sans Regular", Arial Unicode MS Regular'),
-    ).toBe('"Open Sans Regular", "Arial Unicode MS Regular"')
-  })
-})
+    ).toBe('"Open Sans Regular", "Arial Unicode MS Regular"');
+  });
+});
 
 describe('buildSymbolDedupeKey', () => {
   it('stays stable across level-specific placement drift when feature ids match', () => {
@@ -21,7 +21,7 @@ describe('buildSymbolDedupeKey', () => {
       featureId: 42,
       textKey: 'Main Street',
       iconImageName: undefined,
-    }
+    };
 
     expect(
       buildSymbolDedupeKey(
@@ -41,8 +41,8 @@ describe('buildSymbolDedupeKey', () => {
         } as Parameters<typeof buildSymbolDedupeKey>[1],
         'Main Street',
       ),
-    )
-  })
+    );
+  });
 
   it('falls back to position when feature ids are absent', () => {
     expect(
@@ -67,6 +67,6 @@ describe('buildSymbolDedupeKey', () => {
         } as Parameters<typeof buildSymbolDedupeKey>[1],
         'Cafe',
       ),
-    )
-  })
-})
+    );
+  });
+});

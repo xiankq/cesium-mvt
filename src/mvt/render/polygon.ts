@@ -1,33 +1,37 @@
-import {
+import type {
   Color,
+  TilingScheme,
+} from 'cesium';
+import type {
+  DecodedFeatureRecord,
+  DecodedTileRecord,
+} from '../types';
+import type { TileTransformContext } from './geometry';
+import {
   ColorGeometryInstanceAttribute,
   GeometryInstance,
   PerInstanceColorAppearance,
   PolygonGeometry,
   PolygonHierarchy,
-  type TilingScheme,
-} from 'cesium'
-import type {
-  DecodedFeatureRecord,
-  DecodedTileRecord,
-} from '../types'
+
+} from 'cesium';
 import {
   createTileTransformContext,
   ensureClosedLoop,
   groupPolygonRings,
-  type TileTransformContext,
-  toCartesianPositionsWithContext,
-} from './geometry'
 
-export type RenderPolygonPrimitivesOptions = {
-  tilingScheme: TilingScheme
-  tile: DecodedTileRecord
-  extent: number
-  layerId: string
-  feature: DecodedFeatureRecord
-  instances: GeometryInstance[]
-  color: Color
-  transformContext?: TileTransformContext
+  toCartesianPositionsWithContext,
+} from './geometry';
+
+export interface RenderPolygonPrimitivesOptions {
+  tilingScheme: TilingScheme;
+  tile: DecodedTileRecord;
+  extent: number;
+  layerId: string;
+  feature: DecodedFeatureRecord;
+  instances: GeometryInstance[];
+  color: Color;
+  transformContext?: TileTransformContext;
 }
 
 export function renderPolygonPrimitives(
@@ -42,31 +46,31 @@ export function renderPolygonPrimitives(
     instances,
     color,
     transformContext,
-  } = options
+  } = options;
 
-  const resolvedTransformContext =
-    transformContext
-    ?? createTileTransformContext(
-      tilingScheme,
-      tile.coord,
-      extent,
-    )
-  let count = 0
+  const resolvedTransformContext
+    = transformContext
+      ?? createTileTransformContext(
+        tilingScheme,
+        tile.coord,
+        extent,
+      );
+  let count = 0;
   for (const polygon of groupPolygonRings(feature.geometry)) {
     const outerPositions = toCartesianPositionsWithContext(
       resolvedTransformContext,
       polygon.outer,
-    )
+    );
     if (outerPositions.length < 3) {
-      continue
+      continue;
     }
 
     const holes = polygon.holes
-      .map((ring) =>
+      .map(ring =>
         toCartesianPositionsWithContext(resolvedTransformContext, ring),
       )
-      .filter((positions) => positions.length >= 3)
-      .map((positions) => new PolygonHierarchy(ensureClosedLoop(positions)))
+      .filter(positions => positions.length >= 3)
+      .map(positions => new PolygonHierarchy(ensureClosedLoop(positions)));
 
     const geometry = new PolygonGeometry({
       polygonHierarchy: new PolygonHierarchy(
@@ -74,7 +78,7 @@ export function renderPolygonPrimitives(
         holes,
       ),
       vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
-    })
+    });
 
     instances.push(
       new GeometryInstance({
@@ -88,10 +92,10 @@ export function renderPolygonPrimitives(
           featureId: feature.id,
         },
       }),
-    )
+    );
 
-    count += 1
+    count += 1;
   }
 
-  return count
+  return count;
 }

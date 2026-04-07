@@ -1,14 +1,14 @@
-import type { TilingScheme } from 'cesium'
-import { buildTileUrl } from './template'
-import type { MvtSourceOptions, TileCoord, TileDecodeJob } from '../types'
+import type { TilingScheme } from 'cesium';
+import type { MvtSourceOptions, TileCoord, TileDecodeJob } from '../types';
+import { buildTileUrl } from './template';
 
 export function createTileDecodeJob(
   source: MvtSourceOptions,
   tilingScheme: TilingScheme,
   coord: TileCoord,
 ): TileDecodeJob {
-  const tileWidth = source.tileWidth ?? 256
-  const tileHeight = source.tileHeight ?? tileWidth
+  const tileWidth = source.tileWidth ?? 256;
+  const tileHeight = source.tileHeight ?? tileWidth;
 
   return {
     id: `${source.id}:${coord.level}/${coord.x}/${coord.y}`,
@@ -26,5 +26,5 @@ export function createTileDecodeJob(
       customTags: source.customTags,
     }),
     requestedAt: Date.now(),
-  }
+  };
 }

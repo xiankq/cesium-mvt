@@ -1,70 +1,57 @@
-import { Rectangle } from 'cesium'
-import type { UrlTemplateContext } from '../types'
+import type { UrlTemplateContext } from '../types';
+import { Rectangle } from 'cesium';
 
-function toDegrees(radians: number): string {
-  return String((radians * 180) / Math.PI)
-}
+const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
 
 function normalizeSubdomains(subdomains?: string | string[]): string[] {
-  if (Array.isArray(subdomains)) return subdomains.slice()
+  if (Array.isArray(subdomains))
+    return subdomains.slice();
   if (typeof subdomains === 'string' && subdomains.length > 0) {
-    return subdomains.split('')
+    return subdomains.split('');
   }
-  return ['a', 'b', 'c']
+  return DEFAULT_SUBDOMAINS;
 }
 
-function resolvePadding(
-  urlSchemeZeroPadding: Record<string, string> | undefined,
+function selectSubdomain(subdomains: string[], x: number, y: number, level: number): string {
+  if (subdomains.length === 0)
+    return '';
+  return subdomains[Math.abs(x + y + level) % subdomains.length];
+}
+
+function pad(value: number, padding: number | undefined): string {
+  if (!padding)
+    return String(value);
+  return String(value).padStart(padding, '0');
+}
+
+function getPadding(
   token: string,
+  paddingMap: Record<string, string> | undefined,
 ): number | undefined {
-  const padding = urlSchemeZeroPadding?.[token]
-  return padding ? padding.length : undefined
-}
-
-function padValue(
-  value: number,
-  token: string,
-  urlSchemeZeroPadding: Record<string, string> | undefined,
-): string {
-  const padding = resolvePadding(urlSchemeZeroPadding, token)
-  if (!padding) return String(value)
-
-  return String(value).padStart(padding, '0')
-}
-
-function selectSubdomain(subdomains: string[], x: number, y: number, level: number) {
-  if (subdomains.length === 0) return ''
-  const index = Math.abs(x + y + level) % subdomains.length
-  return subdomains[index]
+  const p = paddingMap?.[token];
+  return p ? p.length : undefined;
 }
 
 function replaceTokens(template: string, context: UrlTemplateContext): string {
-  const tilesX = context.tilingScheme.getNumberOfXTilesAtLevel(context.level)
-  const tilesY = context.tilingScheme.getNumberOfYTilesAtLevel(context.level)
+  const tilesX = context.tilingScheme.getNumberOfXTilesAtLevel(context.level);
+  const tilesY = context.tilingScheme.getNumberOfYTilesAtLevel(context.level);
+  const zeroPad = context.urlSchemeZeroPadding;
+  const deg = (rad: number) => String((rad * 180) / Math.PI);
 
   const replacements: Record<string, string> = {
-    z: padValue(context.level, '{z}', context.urlSchemeZeroPadding),
-    x: padValue(context.x, '{x}', context.urlSchemeZeroPadding),
-    y: padValue(context.y, '{y}', context.urlSchemeZeroPadding),
-    reverseX: padValue(
-      tilesX - context.x - 1,
-      '{reverseX}',
-      context.urlSchemeZeroPadding,
-    ),
-    reverseY: padValue(
-      tilesY - context.y - 1,
-      '{reverseY}',
-      context.urlSchemeZeroPadding,
-    ),
-    reverseZ: padValue(
+    z: pad(context.level, getPadding('{z}', zeroPad)),
+    x: pad(context.x, getPadding('{x}', zeroPad)),
+    y: pad(context.y, getPadding('{y}', zeroPad)),
+    reverseX: pad(tilesX - context.x - 1, getPadding('{reverseX}', zeroPad)),
+    reverseY: pad(tilesY - context.y - 1, getPadding('{reverseY}', zeroPad)),
+    reverseZ: pad(
       context.maximumLevel !== undefined ? context.maximumLevel - context.level : context.level,
-      '{reverseZ}',
-      context.urlSchemeZeroPadding,
+      getPadding('{reverseZ}', zeroPad),
     ),
-    westDegrees: toDegrees(context.rectangle.west),
-    southDegrees: toDegrees(context.rectangle.south),
-    eastDegrees: toDegrees(context.rectangle.east),
-    northDegrees: toDegrees(context.rectangle.north),
+    westDegrees: deg(context.rectangle.west),
+    southDegrees: deg(context.rectangle.south),
+    eastDegrees: deg(context.rectangle.east),
+    northDegrees: deg(context.rectangle.north),
     westProjected: String(context.nativeRectangle.west),
     southProjected: String(context.nativeRectangle.south),
     eastProjected: String(context.nativeRectangle.east),
@@ -72,35 +59,44 @@ function replaceTokens(template: string, context: UrlTemplateContext): string {
     width: String(context.tileWidth),
     height: String(context.tileHeight),
     s: selectSubdomain(context.subdomains, context.x, context.y, context.level),
-  }
+  };
 
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, rawName: string) => {
-    const token = String(rawName)
+  return template.replace(/\{(\w+)\}/g, (match, rawName: string) => {
+    const token = String(rawName);
 
     if (context.customTags?.[token]) {
-      return context.customTags[token](context)
+      try {
+        return context.customTags[token](context);
+      }
+      catch (error) {
+        console.warn(
+          `[cesium-mvt] Custom tag "${token}" threw an error; keeping original token.`,
+          error,
+        );
+        return match;
+      }
     }
 
-    const replacement = replacements[token]
-    return replacement ?? match
-  })
+    const replacement = replacements[token];
+    return replacement ?? match;
+  });
 }
 
 export function buildTileUrl(
   template: string,
   context: Omit<UrlTemplateContext, 'rectangle' | 'nativeRectangle' | 'subdomains'> & {
-    subdomains?: string | string[]
+    subdomains?: string | string[];
   },
 ): string {
-  const rectangle = context.tilingScheme.tileXYToRectangle(context.x, context.y, context.level)
+  const rectangle = context.tilingScheme.tileXYToRectangle(context.x, context.y, context.level);
   const nativeRectangle = context.tilingScheme.rectangleToNativeRectangle(
     Rectangle.clone(rectangle),
-  )
+  );
 
   return replaceTokens(template, {
     ...context,
     rectangle,
     nativeRectangle,
     subdomains: normalizeSubdomains(context.subdomains),
-  })
+  });
 }

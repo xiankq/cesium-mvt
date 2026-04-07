@@ -2,74 +2,74 @@ import type {
   ImageryLayer,
   Scene,
   TilingScheme,
-} from 'cesium'
+} from 'cesium';
 import type {
   DecodedTileRecord,
   MvtSourceOptions,
   MvtViewportListener,
   MvtViewportSnapshot,
   TileCoord,
-} from '../types'
-import type { TileScheduler } from './scheduler'
-import { estimateSceneZoom } from '../render/geometry'
+} from '../types';
+import type { TileScheduler } from './scheduler';
+import { estimateSceneZoom } from '../render/geometry';
 
-export type CesiumMvtSourceCacheOptions = {
-  scene: Scene
-  scheduler: TileScheduler
-  tilingScheme: TilingScheme
-  source: MvtSourceOptions
-  imageryLayer: ImageryLayer
-  autoUpdate?: boolean
-  tilePadding?: number
-  transitionHoldMs?: number
+export interface CesiumMvtSourceCacheOptions {
+  scene: Scene;
+  scheduler: TileScheduler;
+  tilingScheme: TilingScheme;
+  source: MvtSourceOptions;
+  imageryLayer: ImageryLayer;
+  autoUpdate?: boolean;
+  tilePadding?: number;
+  transitionHoldMs?: number;
 }
 
-type RequestedTileRecord = {
-  coord: TileCoord
+interface RequestedTileRecord {
+  coord: TileCoord;
 }
 
-type CesiumImageryRecord = {
-  imageryLayer?: ImageryLayer
-  x: number
-  y: number
-  level: number
+interface CesiumImageryRecord {
+  imageryLayer?: ImageryLayer;
+  x: number;
+  y: number;
+  level: number;
 }
 
-type CesiumTileImageryRecord = {
-  readyImagery?: CesiumImageryRecord
-  loadingImagery?: CesiumImageryRecord
+interface CesiumTileImageryRecord {
+  readyImagery?: CesiumImageryRecord;
+  loadingImagery?: CesiumImageryRecord;
 }
 
-type CesiumSurfaceTileRecord = {
+interface CesiumSurfaceTileRecord {
   data?: {
-    imagery?: CesiumTileImageryRecord[]
-  }
+    imagery?: CesiumTileImageryRecord[];
+  };
 }
 
-type SceneTileState = {
-  desiredTiles: Map<string, TileCoord>
-  visibleTiles: Map<string, TileCoord>
+interface SceneTileState {
+  desiredTiles: Map<string, TileCoord>;
+  visibleTiles: Map<string, TileCoord>;
 }
 
-const STYLE_ZOOM_STEP = 0.25
-const VIEW_SIGNATURE_POSITION_PRECISION = 0.5
-const VIEW_SIGNATURE_ANGLE_PRECISION = 1e-4
+const STYLE_ZOOM_STEP = 0.25;
+const VIEW_SIGNATURE_POSITION_PRECISION = 0.5;
+const VIEW_SIGNATURE_ANGLE_PRECISION = 1e-4;
 
 function toTileId(sourceId: string, tile: TileCoord): string {
-  return `${sourceId}:${tile.level}/${tile.x}/${tile.y}`
+  return `${sourceId}:${tile.level}/${tile.x}/${tile.y}`;
 }
 
 function resolveTileLevel(
   tiles: Iterable<TileCoord>,
   fallback: number,
 ): number {
-  let resolvedLevel = fallback
+  let resolvedLevel = fallback;
 
   for (const tile of tiles) {
-    resolvedLevel = Math.max(resolvedLevel, tile.level)
+    resolvedLevel = Math.max(resolvedLevel, tile.level);
   }
 
-  return resolvedLevel
+  return resolvedLevel;
 }
 
 function toImageryCoord(imagery: CesiumImageryRecord): TileCoord {
@@ -77,7 +77,7 @@ function toImageryCoord(imagery: CesiumImageryRecord): TileCoord {
     x: imagery.x,
     y: imagery.y,
     level: imagery.level,
-  }
+  };
 }
 
 function selectDesiredImagery(
@@ -85,20 +85,20 @@ function selectDesiredImagery(
   loadingImagery: CesiumImageryRecord | undefined,
 ): CesiumImageryRecord | undefined {
   if (!readyImagery) {
-    return loadingImagery
+    return loadingImagery;
   }
 
   if (!loadingImagery) {
-    return readyImagery
+    return readyImagery;
   }
 
   return loadingImagery.level >= readyImagery.level
     ? loadingImagery
-    : readyImagery
+    : readyImagery;
 }
 
 function quantizeZoom(zoom: number): number {
-  return Math.round(zoom / STYLE_ZOOM_STEP) * STYLE_ZOOM_STEP
+  return Math.round(zoom / STYLE_ZOOM_STEP) * STYLE_ZOOM_STEP;
 }
 
 function quantizeViewSignatureValue(
@@ -106,16 +106,16 @@ function quantizeViewSignatureValue(
   precision: number,
 ): number {
   if (!Number.isFinite(value)) {
-    return 0
+    return 0;
   }
 
-  return Math.round(value / precision)
+  return Math.round(value / precision);
 }
 
 export function buildSceneViewSignature(
   scene: Pick<Scene, 'camera'>,
 ): string {
-  const position = scene.camera.positionWC ?? scene.camera.position
+  const position = scene.camera.positionWC ?? scene.camera.position;
 
   return [
     quantizeViewSignatureValue(
@@ -142,7 +142,7 @@ export function buildSceneViewSignature(
       scene.camera.roll,
       VIEW_SIGNATURE_ANGLE_PRECISION,
     ),
-  ].join('|')
+  ].join('|');
 }
 
 export function getRenderedSurfaceTiles(
@@ -150,47 +150,47 @@ export function getRenderedSurfaceTiles(
 ): CesiumSurfaceTileRecord[] | undefined {
   const globe = scene.globe as
     | {
-        _surface?: {
-          _tilesToRender?: CesiumSurfaceTileRecord[]
-        }
-      }
-    | undefined
-  const renderedTiles = globe?._surface?._tilesToRender
-  return Array.isArray(renderedTiles) ? renderedTiles : undefined
+      _surface?: {
+        _tilesToRender?: CesiumSurfaceTileRecord[];
+      };
+    }
+    | undefined;
+  const renderedTiles = globe?._surface?._tilesToRender;
+  return Array.isArray(renderedTiles) ? renderedTiles : undefined;
 }
 
 export class CesiumMvtSourceCache {
-  private readonly defaultTransitionHoldMs = 180
-  private readonly scene: Scene
-  private readonly scheduler: TileScheduler
-  private readonly source: MvtSourceOptions
-  private readonly imageryLayer: ImageryLayer
-  private readonly listeners = new Set<MvtViewportListener>()
-  private readonly activeTileIds = new Set<string>()
-  private readonly pinnedTileIds = new Set<string>()
-  private readonly pendingRequestedTiles = new Map<string, RequestedTileRecord>()
-  private removePostRenderListener?: () => void
-  private snapshot: MvtViewportSnapshot
-  private paused = false
-  private destroyed = false
-  private readonly autoUpdate: boolean
-  private readonly transitionHoldMs: number
-  private latestTileLevel: number
-  private latestZoom: number
-  private pendingVisibleTileIds?: Set<string>
-  private pendingVisibleSince = 0
-  private sceneDirty = true
-  private lastViewSignature?: string
+  private readonly defaultTransitionHoldMs = 180;
+  private readonly scene: Scene;
+  private readonly scheduler: TileScheduler;
+  private readonly source: MvtSourceOptions;
+  private readonly imageryLayer: ImageryLayer;
+  private readonly listeners = new Set<MvtViewportListener>();
+  private readonly activeTileIds = new Set<string>();
+  private readonly pinnedTileIds = new Set<string>();
+  private readonly pendingRequestedTiles = new Map<string, RequestedTileRecord>();
+  private removePostRenderListener?: () => void;
+  private snapshot: MvtViewportSnapshot;
+  private paused = false;
+  private destroyed = false;
+  private readonly autoUpdate: boolean;
+  private readonly transitionHoldMs: number;
+  private latestTileLevel: number;
+  private latestZoom: number;
+  private pendingVisibleTileIds?: Set<string>;
+  private pendingVisibleSince = 0;
+  private sceneDirty = true;
+  private lastViewSignature?: string;
 
   constructor(options: CesiumMvtSourceCacheOptions) {
-    this.scene = options.scene
-    this.scheduler = options.scheduler
-    this.source = options.source
-    this.imageryLayer = options.imageryLayer
-    this.autoUpdate = options.autoUpdate ?? true
-    this.transitionHoldMs = options.transitionHoldMs ?? this.defaultTransitionHoldMs
-    this.latestTileLevel = this.source.minimumLevel ?? 0
-    this.latestZoom = this.latestTileLevel
+    this.scene = options.scene;
+    this.scheduler = options.scheduler;
+    this.source = options.source;
+    this.imageryLayer = options.imageryLayer;
+    this.autoUpdate = options.autoUpdate ?? true;
+    this.transitionHoldMs = options.transitionHoldMs ?? this.defaultTransitionHoldMs;
+    this.latestTileLevel = this.source.minimumLevel ?? 0;
+    this.latestZoom = this.latestTileLevel;
     this.snapshot = {
       sourceId: this.source.id,
       rectangle: undefined,
@@ -199,87 +199,87 @@ export class CesiumMvtSourceCache {
       activeTileIds: [],
       enteredTileIds: [],
       exitedTileIds: [],
-    }
+    };
 
     if (this.autoUpdate) {
-      this.attach()
+      this.attach();
     }
   }
 
   attach(): void {
     if (this.destroyed || this.removePostRenderListener) {
-      return
+      return;
     }
 
-    this.sceneDirty = true
+    this.sceneDirty = true;
     this.removePostRenderListener = this.scene.postRender.addEventListener(
       this.handleScenePostRender,
-    )
-    this.syncSceneTiles()
+    );
+    this.syncSceneTiles();
   }
 
   pause(): void {
-    this.paused = true
+    this.paused = true;
   }
 
   resume(): void {
     if (!this.paused) {
-      return
+      return;
     }
 
-    this.paused = false
-    this.sceneDirty = true
-    this.syncSceneTiles()
+    this.paused = false;
+    this.sceneDirty = true;
+    this.syncSceneTiles();
   }
 
   reload(): void {
-    this.sceneDirty = true
-    this.syncSceneTiles()
+    this.sceneDirty = true;
+    this.syncSceneTiles();
   }
 
   touch(tile: TileCoord): MvtViewportSnapshot | undefined {
     if (this.destroyed || this.paused) {
-      return this.snapshot
+      return this.snapshot;
     }
 
-    const tileId = toTileId(this.source.id, tile)
+    const tileId = toTileId(this.source.id, tile);
     this.pendingRequestedTiles.set(tileId, {
       coord: tile,
-    })
-    this.updateLatestViewState(tile.level)
-    this.sceneDirty = true
-    return this.snapshot
+    });
+    this.updateLatestViewState(tile.level);
+    this.sceneDirty = true;
+    return this.snapshot;
   }
 
   update(): MvtViewportSnapshot | undefined {
     if (this.destroyed || this.paused) {
-      return this.snapshot
+      return this.snapshot;
     }
 
-    this.sceneDirty = true
-    this.syncSceneTiles()
-    return this.snapshot
+    this.sceneDirty = true;
+    this.syncSceneTiles();
+    return this.snapshot;
   }
 
   clearTiles(): void {
     if (this.destroyed) {
-      return
+      return;
     }
 
-    const exitedTileIds = Array.from(this.activeTileIds)
+    const exitedTileIds = Array.from(this.activeTileIds);
 
-    this.pendingRequestedTiles.clear()
-    this.activeTileIds.clear()
-    this.pendingVisibleTileIds = undefined
-    this.pendingVisibleSince = 0
-    this.sceneDirty = true
-    this.lastViewSignature = undefined
+    this.pendingRequestedTiles.clear();
+    this.activeTileIds.clear();
+    this.pendingVisibleTileIds = undefined;
+    this.pendingVisibleSince = 0;
+    this.sceneDirty = true;
+    this.lastViewSignature = undefined;
 
     for (const tileId of this.pinnedTileIds) {
-      this.scheduler.cancel(tileId)
-      this.scheduler.unpin(tileId)
+      this.scheduler.cancel(tileId);
+      this.scheduler.unpin(tileId);
     }
-    this.pinnedTileIds.clear()
+    this.pinnedTileIds.clear();
 
     this.snapshot = {
       sourceId: this.source.id,
@@ -289,123 +289,123 @@ export class CesiumMvtSourceCache {
       activeTileIds: [],
       enteredTileIds: [],
       exitedTileIds,
-    }
+    };
 
-    this.emit()
-    this.scene.requestRender()
+    this.emit();
+    this.scene.requestRender();
   }
 
   remove(): void {
     if (this.destroyed) {
-      return
+      return;
     }
 
-    this.clearTiles()
-    this.removePostRenderListener?.()
-    this.removePostRenderListener = undefined
-    this.listeners.clear()
-    this.destroyed = true
+    this.clearTiles();
+    this.removePostRenderListener?.();
+    this.removePostRenderListener = undefined;
+    this.listeners.clear();
+    this.destroyed = true;
   }
 
   destroy(): void {
-    this.remove()
+    this.remove();
   }
 
   subscribe(listener: MvtViewportListener): () => void {
-    this.listeners.add(listener)
-    listener(this.snapshot)
+    this.listeners.add(listener);
+    listener(this.snapshot);
 
     return () => {
-      this.listeners.delete(listener)
-    }
+      this.listeners.delete(listener);
+    };
   }
 
   getSnapshot(): MvtViewportSnapshot | undefined {
-    return this.snapshot
+    return this.snapshot;
   }
 
   getIds(): string[] {
-    return Array.from(this.activeTileIds)
+    return Array.from(this.activeTileIds);
   }
 
   getTile(tileId: string): DecodedTileRecord | undefined {
-    return this.scheduler.getTile(tileId)
+    return this.scheduler.getTile(tileId);
   }
 
   isVisible(tileId: string): boolean {
-    return this.activeTileIds.has(tileId)
+    return this.activeTileIds.has(tileId);
   }
 
   private handleScenePostRender = (): void => {
     if (this.destroyed || this.paused) {
-      return
+      return;
     }
 
     if (!this.shouldSyncSceneTiles()) {
-      return
+      return;
     }
 
-    this.syncSceneTiles()
-  }
+    this.syncSceneTiles();
+  };
 
   private syncSceneTiles(): void {
-    this.sceneDirty = false
-    this.lastViewSignature = buildSceneViewSignature(this.scene)
+    this.sceneDirty = false;
+    this.lastViewSignature = buildSceneViewSignature(this.scene);
 
-    const previousSnapshot = this.snapshot
-    const previousActive = new Set(this.activeTileIds)
-    const previousPinned = new Set(this.pinnedTileIds)
-    const nextSceneState = this.collectSceneTiles()
+    const previousSnapshot = this.snapshot;
+    const previousActive = new Set(this.activeTileIds);
+    const previousPinned = new Set(this.pinnedTileIds);
+    const nextSceneState = this.collectSceneTiles();
     const nextActive = this.resolveActiveTileIds(
       nextSceneState.visibleTiles,
       previousActive,
-    )
+    );
     const nextPinned = new Set([
       ...nextSceneState.desiredTiles.keys(),
       ...nextActive,
-    ])
-    const enteredTileIds: string[] = []
-    const exitedTileIds: string[] = []
+    ]);
+    const enteredTileIds: string[] = [];
+    const exitedTileIds: string[] = [];
 
     const resolvedLevel = resolveTileLevel(
       nextSceneState.desiredTiles.values(),
       this.latestTileLevel,
-    )
-    this.updateLatestViewState(resolvedLevel)
+    );
+    this.updateLatestViewState(resolvedLevel);
 
     for (const tileId of previousPinned) {
       if (!nextPinned.has(tileId)) {
-        this.scheduler.cancel(tileId)
-        this.scheduler.unpin(tileId)
+        this.scheduler.cancel(tileId);
+        this.scheduler.unpin(tileId);
       }
     }
 
     for (const tileId of nextPinned) {
       if (!previousPinned.has(tileId)) {
-        this.scheduler.pin(tileId)
+        this.scheduler.pin(tileId);
       }
     }
 
     for (const tileId of previousActive) {
       if (!nextActive.has(tileId)) {
-        exitedTileIds.push(tileId)
+        exitedTileIds.push(tileId);
       }
     }
 
     for (const tileId of nextActive) {
       if (!previousActive.has(tileId)) {
-        enteredTileIds.push(tileId)
+        enteredTileIds.push(tileId);
       }
     }
 
-    this.activeTileIds.clear()
+    this.activeTileIds.clear();
     for (const tileId of nextActive) {
-      this.activeTileIds.add(tileId)
+      this.activeTileIds.add(tileId);
     }
 
-    this.pinnedTileIds.clear()
+    this.pinnedTileIds.clear();
     for (const tileId of nextPinned) {
-      this.pinnedTileIds.add(tileId)
+      this.pinnedTileIds.add(tileId);
     }
 
     const nextSnapshot: MvtViewportSnapshot = {
@@ -416,33 +416,33 @@ export class CesiumMvtSourceCache {
       activeTileIds: Array.from(nextActive),
       enteredTileIds,
       exitedTileIds,
-    }
+    };
 
-    const changed =
-      previousSnapshot.zoom !== nextSnapshot.zoom ||
-      previousSnapshot.level !== nextSnapshot.level ||
-      enteredTileIds.length > 0 ||
-      exitedTileIds.length > 0
+    const changed
+      = previousSnapshot.zoom !== nextSnapshot.zoom
+        || previousSnapshot.level !== nextSnapshot.level
+        || enteredTileIds.length > 0
+        || exitedTileIds.length > 0;
 
-    this.snapshot = nextSnapshot
+    this.snapshot = nextSnapshot;
 
     if (changed) {
-      this.emit()
-      this.scene.requestRender()
+      this.emit();
+      this.scene.requestRender();
     }
   }
 
   private collectSceneTiles(): SceneTileState {
-    const desiredTiles = new Map<string, TileCoord>()
-    const candidateVisibleTiles = new Map<string, TileCoord>()
+    const desiredTiles = new Map<string, TileCoord>();
+    const candidateVisibleTiles = new Map<string, TileCoord>();
 
     for (const [tileId, record] of this.pendingRequestedTiles) {
-      desiredTiles.set(tileId, record.coord)
+      desiredTiles.set(tileId, record.coord);
     }
 
-    const renderedTiles = getRenderedSurfaceTiles(this.scene)
+    const renderedTiles = getRenderedSurfaceTiles(this.scene);
     if (!renderedTiles) {
-      this.pendingRequestedTiles.clear()
+      this.pendingRequestedTiles.clear();
       return {
         desiredTiles,
         visibleTiles: normalizeVisibleTileCover(
@@ -450,48 +450,48 @@ export class CesiumMvtSourceCache {
           desiredTiles.values(),
           this.source.minimumLevel ?? 0,
         ),
-      }
+      };
     }
 
     for (const surfaceTile of renderedTiles) {
-      const tileImageryCollection = surfaceTile.data?.imagery ?? []
+      const tileImageryCollection = surfaceTile.data?.imagery ?? [];
       for (const tileImagery of tileImageryCollection) {
-        const readyImagery =
-          tileImagery.readyImagery?.imageryLayer === this.imageryLayer
+        const readyImagery
+          = tileImagery.readyImagery?.imageryLayer === this.imageryLayer
             ? tileImagery.readyImagery
-            : undefined
-        const loadingImagery =
-          tileImagery.loadingImagery?.imageryLayer === this.imageryLayer
+            : undefined;
+        const loadingImagery
+          = tileImagery.loadingImagery?.imageryLayer === this.imageryLayer
             ? tileImagery.loadingImagery
-            : undefined
+            : undefined;
 
         const desiredImagery = selectDesiredImagery(
           readyImagery,
           loadingImagery,
-        )
+        );
         if (!desiredImagery) {
-          continue
+          continue;
         }
 
-        const desiredCoord = toImageryCoord(desiredImagery)
+        const desiredCoord = toImageryCoord(desiredImagery);
         desiredTiles.set(
           toTileId(this.source.id, desiredCoord),
           desiredCoord,
-        )
+        );
 
-        const visibleCoord = this.resolveVisibleTileCoord(desiredCoord)
+        const visibleCoord = this.resolveVisibleTileCoord(desiredCoord);
         if (!visibleCoord) {
-          continue
+          continue;
         }
 
         candidateVisibleTiles.set(
           toTileId(this.source.id, visibleCoord),
           visibleCoord,
-        )
+        );
       }
     }
 
-    this.pendingRequestedTiles.clear()
+    this.pendingRequestedTiles.clear();
     return {
       desiredTiles,
       visibleTiles: normalizeVisibleTileCover(
@@ -499,92 +499,93 @@ export class CesiumMvtSourceCache {
         candidateVisibleTiles.values(),
         this.source.minimumLevel ?? 0,
       ),
-    }
+    };
   }
 
   private updateLatestViewState(tileLevel = this.latestTileLevel): void {
     this.latestTileLevel = Math.max(
       this.source.minimumLevel ?? 0,
       tileLevel,
-    )
+    );
     this.latestZoom = quantizeZoom(
       Math.max(
         0,
         estimateSceneZoom(this.scene) ?? this.latestTileLevel,
       ),
-    )
+    );
   }
 
   private resolveVisibleTileCoord(coord: TileCoord): TileCoord | undefined {
-    const minimumLevel = this.source.minimumLevel ?? 0
-    let current = coord
+    const minimumLevel = this.source.minimumLevel ?? 0;
+    let current = coord;
 
     for (let level = coord.level; level >= minimumLevel; level -= 1) {
-      const tileId = toTileId(this.source.id, current)
+      const tileId = toTileId(this.source.id, current);
       if (this.scheduler.getTile(tileId)) {
-        return current
+        return current;
       }
 
       current = {
         x: Math.floor(current.x / 2),
         y: Math.floor(current.y / 2),
         level: level - 1,
-      }
+      };
     }
 
-    return undefined
+    return undefined;
   }
 
   private resolveActiveTileIds(
     candidateVisibleTiles: ReadonlyMap<string, TileCoord>,
     previousActive: Set<string>,
   ): Set<string> {
-    const candidateVisibleTileIds = new Set(candidateVisibleTiles.keys())
+    const candidateVisibleTileIds = new Set(candidateVisibleTiles.keys());
     if (
-      this.transitionHoldMs <= 0 ||
-      previousActive.size === 0 ||
-      areTileSetsEqual(previousActive, candidateVisibleTileIds)
+      this.transitionHoldMs <= 0
+      || previousActive.size === 0
+      || areTileSetsEqual(previousActive, candidateVisibleTileIds)
     ) {
-      this.pendingVisibleTileIds = undefined
-      this.pendingVisibleSince = 0
-      return candidateVisibleTileIds
+      this.pendingVisibleTileIds = undefined;
+      this.pendingVisibleSince = 0;
+      return candidateVisibleTileIds;
     }
 
-    const now = Date.now()
+    const now = Date.now();
     if (
-      this.pendingVisibleTileIds &&
-      areTileSetsEqual(this.pendingVisibleTileIds, candidateVisibleTileIds)
+      this.pendingVisibleTileIds
+      && areTileSetsEqual(this.pendingVisibleTileIds, candidateVisibleTileIds)
     ) {
       if (now - this.pendingVisibleSince >= this.transitionHoldMs) {
-        this.pendingVisibleTileIds = undefined
-        this.pendingVisibleSince = 0
-        return candidateVisibleTileIds
+        this.pendingVisibleTileIds = undefined;
+        this.pendingVisibleSince = 0;
+        return candidateVisibleTileIds;
       }
-    } else {
-      this.pendingVisibleTileIds = new Set(candidateVisibleTileIds)
-      this.pendingVisibleSince = now
+    }
+    else {
+      this.pendingVisibleTileIds = new Set(candidateVisibleTileIds);
+      this.pendingVisibleSince = now;
     }
 
-    this.scene.requestRender()
-    return previousActive
+    this.scene.requestRender();
+    return previousActive;
   }
 
   private emit(): void {
     for (const listener of this.listeners) {
-      listener(this.snapshot)
+      listener(this.snapshot);
     }
   }
 
   private shouldSyncSceneTiles(): boolean {
     if (
-      this.sceneDirty ||
-      this.pendingRequestedTiles.size > 0 ||
-      this.pendingVisibleTileIds !== undefined
+      this.sceneDirty
+      || this.pendingRequestedTiles.size > 0
+      || this.pendingVisibleTileIds !== undefined
     ) {
-      return true
+      return true;
     }
 
-    return buildSceneViewSignature(this.scene) !== this.lastViewSignature
+    return buildSceneViewSignature(this.scene) !== this.lastViewSignature;
   }
 }
 
@@ -593,25 +594,25 @@ function areTileSetsEqual(
   right: ReadonlySet<string>,
 ): boolean {
   if (left.size !== right.size) {
-    return false
+    return false;
   }
 
   for (const tileId of left) {
     if (!right.has(tileId)) {
-      return false
+      return false;
     }
   }
 
-  return true
+  return true;
 }
 
-type TileCoverNode = {
-  coord: TileCoord
-  id: string
-  present: boolean
-  hasCoverage: boolean
-  fullyCovered: boolean
-  children: Array<TileCoverNode | undefined>
+interface TileCoverNode {
+  coord: TileCoord;
+  id: string;
+  present: boolean;
+  hasCoverage: boolean;
+  fullyCovered: boolean;
+  children: Array<TileCoverNode | undefined>;
 }
 
 export function normalizeVisibleTileCover(
@@ -619,14 +620,14 @@ export function normalizeVisibleTileCover(
   tiles: Iterable<TileCoord>,
   minimumLevel: number,
 ): Map<string, TileCoord> {
-  const nodes = new Map<string, TileCoverNode>()
-  const rootIds = new Set<string>()
+  const nodes = new Map<string, TileCoverNode>();
+  const rootIds = new Set<string>();
 
   const ensureNode = (coord: TileCoord): TileCoverNode => {
-    const id = toTileId(sourceId, coord)
-    const existing = nodes.get(id)
+    const id = toTileId(sourceId, coord);
+    const existing = nodes.get(id);
     if (existing) {
-      return existing
+      return existing;
     }
 
     const created: TileCoverNode = {
@@ -636,64 +637,64 @@ export function normalizeVisibleTileCover(
       hasCoverage: false,
       fullyCovered: false,
       children: [undefined, undefined, undefined, undefined],
-    }
-    nodes.set(id, created)
-    rootIds.add(id)
-    return created
-  }
+    };
+    nodes.set(id, created);
+    rootIds.add(id);
+    return created;
+  };
 
   for (const tile of tiles) {
-    let current = ensureNode(tile)
-    current.present = true
+    let current = ensureNode(tile);
+    current.present = true;
 
     for (let level = tile.level; level > minimumLevel; level -= 1) {
       const parentCoord: TileCoord = {
         x: Math.floor(current.coord.x / 2),
         y: Math.floor(current.coord.y / 2),
         level: current.coord.level - 1,
-      }
-      const parent = ensureNode(parentCoord)
-      parent.children[getChildIndex(current.coord)] = current
-      rootIds.delete(current.id)
-      current = parent
+      };
+      const parent = ensureNode(parentCoord);
+      parent.children[getChildIndex(current.coord)] = current;
+      rootIds.delete(current.id);
+      current = parent;
     }
   }
 
   for (const rootId of rootIds) {
-    const root = nodes.get(rootId)
+    const root = nodes.get(rootId);
     if (root) {
-      computeTileCoverage(root)
+      computeTileCoverage(root);
     }
   }
 
-  const normalized = new Map<string, TileCoord>()
+  const normalized = new Map<string, TileCoord>();
   for (const rootId of rootIds) {
-    const root = nodes.get(rootId)
+    const root = nodes.get(rootId);
     if (root) {
-      collectNormalizedTileCover(root, normalized)
+      collectNormalizedTileCover(root, normalized);
     }
   }
 
-  return normalized
+  return normalized;
 }
 
 function computeTileCoverage(node: TileCoverNode): void {
-  let hasCoverage = node.present
-  let fullyCoveredByChildren = true
+  let hasCoverage = node.present;
+  let fullyCoveredByChildren = true;
 
   for (const child of node.children) {
     if (!child) {
-      fullyCoveredByChildren = false
-      continue
+      fullyCoveredByChildren = false;
+      continue;
     }
 
-    computeTileCoverage(child)
-    hasCoverage = hasCoverage || child.hasCoverage
-    fullyCoveredByChildren = fullyCoveredByChildren && child.fullyCovered
+    computeTileCoverage(child);
+    hasCoverage = hasCoverage || child.hasCoverage;
+    fullyCoveredByChildren = fullyCoveredByChildren && child.fullyCovered;
   }
 
-  node.hasCoverage = hasCoverage
-  node.fullyCovered = node.present || fullyCoveredByChildren
+  node.hasCoverage = hasCoverage;
+  node.fullyCovered = node.present || fullyCoveredByChildren;
 }
 
 function collectNormalizedTileCover(
@@ -701,27 +702,27 @@ function collectNormalizedTileCover(
   result: Map<string, TileCoord>,
 ): void {
   if (!node.hasCoverage) {
-    return
+    return;
   }
 
   const fullyCoveredByChildren = node.children.every(
-    (child) => child?.fullyCovered === true,
-  )
+    child => child?.fullyCovered === true,
+  );
 
   if (node.present && !fullyCoveredByChildren) {
-    result.set(node.id, node.coord)
-    return
+    result.set(node.id, node.coord);
+    return;
   }
 
   for (const child of node.children) {
     if (child?.hasCoverage) {
-      collectNormalizedTileCover(child, result)
+      collectNormalizedTileCover(child, result);
     }
   }
 }
 
 function getChildIndex(coord: TileCoord): number {
-  const xBit = coord.x & 1
-  const yBit = coord.y & 1
-  return yBit * 2 + xBit
+  const xBit = coord.x & 1;
+  const yBit = coord.y & 1;
+  return yBit * 2 + xBit;
 }

@@ -1,6 +1,7 @@
-import { Color } from 'cesium'
-import { describe, expect, it } from 'vitest'
-import { TextSpriteAtlas, type TextSpriteRequest } from '../src/mvt/render/text'
+import type { TextSpriteRequest } from '../src/mvt/render/text';
+import { Color } from 'cesium';
+import { describe, expect, it } from 'vitest';
+import { TextSpriteAtlas } from '../src/mvt/render/text';
 
 function createRequest(
   overrides: Partial<TextSpriteRequest> = {},
@@ -20,10 +21,10 @@ function createRequest(
     textJustify: 'center',
     devicePixelRatio: 1,
     ...overrides,
-  }
+  };
 }
 
-describe('TextSpriteAtlas', () => {
+describe('textSpriteAtlas', () => {
   it('caps buckets, layouts, and retained entry images', () => {
     const atlas = new TextSpriteAtlas({
       pageCssSize: 64,
@@ -31,19 +32,19 @@ describe('TextSpriteAtlas', () => {
       maxLayouts: 3,
       maxEntries: 3,
       maxEntriesPerBucket: 2,
-    })
+    });
 
-    atlas.resolveImage(createRequest({ text: 'Alpha', fontStack: ['A'] }))
-    atlas.resolveImage(createRequest({ text: 'Beta', fontStack: ['A'] }))
-    atlas.resolveImage(createRequest({ text: 'Gamma', fontStack: ['A'] }))
-    atlas.resolveImage(createRequest({ text: 'Delta', fontStack: ['B'] }))
-    atlas.resolveImage(createRequest({ text: 'Epsilon', fontStack: ['C'] }))
+    atlas.resolveImage(createRequest({ text: 'Alpha', fontStack: ['A'] }));
+    atlas.resolveImage(createRequest({ text: 'Beta', fontStack: ['A'] }));
+    atlas.resolveImage(createRequest({ text: 'Gamma', fontStack: ['A'] }));
+    atlas.resolveImage(createRequest({ text: 'Delta', fontStack: ['B'] }));
+    atlas.resolveImage(createRequest({ text: 'Epsilon', fontStack: ['C'] }));
 
-    const stats = atlas.getStats()
-    expect(stats.bucketCount).toBe(2)
-    expect(stats.layoutCount).toBe(3)
-    expect(stats.entryCount).toBeLessThanOrEqual(3)
-  })
+    const stats = atlas.getStats();
+    expect(stats.bucketCount).toBe(2);
+    expect(stats.layoutCount).toBe(3);
+    expect(stats.entryCount).toBeLessThanOrEqual(3);
+  });
 
   it('reuses a bounded scratch page after the bucket fills up', () => {
     const atlas = new TextSpriteAtlas({
@@ -52,21 +53,20 @@ describe('TextSpriteAtlas', () => {
       maxLayouts: 16,
       maxEntries: 8,
       maxEntriesPerBucket: 8,
-    })
+    });
 
     const images = Array.from({ length: 6 }, (_, index) =>
       atlas.resolveImage(
         createRequest({
           text: `T${index}`,
         }),
-      ),
-    )
+      ));
 
-    expect(images.every((image) => image !== undefined)).toBe(true)
+    expect(images.every(image => image !== undefined)).toBe(true);
     expect(atlas.getStats()).toEqual({
       bucketCount: 1,
       layoutCount: 6,
       entryCount: 6,
-    })
-  })
-})
+    });
+  });
+});

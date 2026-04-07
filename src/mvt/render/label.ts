@@ -1,111 +1,113 @@
-import {
+import type {
   BillboardCollection,
-  Cartesian2,
   Cartesian3,
   Color,
-  HorizontalOrigin,
   LabelCollection,
   Scene,
+} from 'cesium';
+import type { ScreenRect } from '../utils/screen-space';
+import type { SpriteAtlasEntry } from './sprite';
+import {
+  Cartesian2,
+  HorizontalOrigin,
   VerticalOrigin,
-} from 'cesium'
-import type { ScreenRect } from '../utils/screen-space'
-import type { SpriteAtlasEntry } from './sprite'
+} from 'cesium';
 
-export type SymbolPlacementCandidate = {
-  labelId: string
-  featureId: number | string | undefined
-  sourceIndex: number
-  position: Cartesian3
-  text?: string
-  textKey?: string
-  textSize: number
-  fontStack: string[]
-  textColor: Color
-  haloColor: Color
-  haloWidth: number
-  haloBlur: number
-  pixelOffset: Cartesian2
-  textAnchor: string
-  textVariableAnchors: string[]
-  textPadding: number
-  textLineHeight: number
-  textLetterSpacing: number
-  textJustify: 'auto' | 'left' | 'center' | 'right'
-  textTranslate: Cartesian2
-  textRadialOffset: number
-  ignorePlacement: boolean
-  overlapMode: 'never' | 'always' | 'cooperative'
-  optional: boolean
-  symbolZOrder: 'auto' | 'viewport-y' | 'source'
-  sortKey: number
-  iconImageName?: string
-  iconSize: number
-  iconColor: Color
-  iconOpacity: number
-  iconHaloColor: Color
-  iconHaloWidth: number
-  iconHaloBlur: number
-  iconAnchor: string
-  iconVerticalOrigin: VerticalOrigin
-  iconOffset: Cartesian2
-  iconTranslate: Cartesian2
-  iconPadding: number
-  iconTextFit?: 'none' | 'width' | 'height' | 'both'
-  iconTextFitPadding: [number, number, number, number]
-  iconIgnorePlacement: boolean
-  iconOverlapMode: 'never' | 'always' | 'cooperative'
-  iconOptional: boolean
-  iconRotate: number
+export interface SymbolPlacementCandidate {
+  labelId: string;
+  featureId: number | string | undefined;
+  sourceIndex: number;
+  position: Cartesian3;
+  text?: string;
+  textKey?: string;
+  textSize: number;
+  fontStack: string[];
+  textColor: Color;
+  haloColor: Color;
+  haloWidth: number;
+  haloBlur: number;
+  pixelOffset: Cartesian2;
+  textAnchor: string;
+  textVariableAnchors: string[];
+  textPadding: number;
+  textLineHeight: number;
+  textLetterSpacing: number;
+  textJustify: 'auto' | 'left' | 'center' | 'right';
+  textTranslate: Cartesian2;
+  textRadialOffset: number;
+  ignorePlacement: boolean;
+  overlapMode: 'never' | 'always' | 'cooperative';
+  optional: boolean;
+  symbolZOrder: 'auto' | 'viewport-y' | 'source';
+  sortKey: number;
+  iconImageName?: string;
+  iconSize: number;
+  iconColor: Color;
+  iconOpacity: number;
+  iconHaloColor: Color;
+  iconHaloWidth: number;
+  iconHaloBlur: number;
+  iconAnchor: string;
+  iconVerticalOrigin: VerticalOrigin;
+  iconOffset: Cartesian2;
+  iconTranslate: Cartesian2;
+  iconPadding: number;
+  iconTextFit?: 'none' | 'width' | 'height' | 'both';
+  iconTextFitPadding: [number, number, number, number];
+  iconIgnorePlacement: boolean;
+  iconOverlapMode: 'never' | 'always' | 'cooperative';
+  iconOptional: boolean;
+  iconRotate: number;
 }
 
-export type StyledSymbolPlacement = {
-  tileId: string
-  tileLevel: number
-  bucketKey: string
-  bucketOrder: number
-  compiledId: string
-  candidate: SymbolPlacementCandidate
+export interface StyledSymbolPlacement {
+  tileId: string;
+  tileLevel: number;
+  bucketKey: string;
+  bucketOrder: number;
+  compiledId: string;
+  candidate: SymbolPlacementCandidate;
 }
 
-export type SymbolBucketRuntime = {
-  tileId: string
-  bucketKey: string
-  order: number
-  textLabelCollection?: LabelCollection
-  iconBillboardCollection?: BillboardCollection
-  setLabelsVisible: (visible: boolean) => void
-  destroy: () => void
+export interface SymbolBucketRuntime {
+  tileId: string;
+  bucketKey: string;
+  order: number;
+  textLabelCollection?: LabelCollection;
+  iconBillboardCollection?: BillboardCollection;
+  setLabelsVisible: (visible: boolean) => void;
+  destroy: () => void;
 }
 
-type SymbolScreenRect = ScreenRect
-type TextAnchorOrigin = {
-  horizontalOrigin: HorizontalOrigin
-  verticalOrigin: VerticalOrigin
+type SymbolScreenRect = ScreenRect;
+interface TextAnchorOrigin {
+  horizontalOrigin: HorizontalOrigin;
+  verticalOrigin: VerticalOrigin;
 }
-type TextJustify = SymbolPlacementCandidate['textJustify']
-type TextTransform = 'none' | 'uppercase' | 'lowercase'
-type IconTextFit = NonNullable<SymbolPlacementCandidate['iconTextFit']>
+type TextJustify = SymbolPlacementCandidate['textJustify'];
+type TextTransform = 'none' | 'uppercase' | 'lowercase';
+type IconTextFit = NonNullable<SymbolPlacementCandidate['iconTextFit']>;
 
-export const DEFAULT_TEXT_FONT_STACK = ['Open Sans Regular', 'Arial Unicode MS Regular']
-const scratchCanvasPosition = new Cartesian2()
+export const DEFAULT_TEXT_FONT_STACK = ['Open Sans Regular', 'Arial Unicode MS Regular'];
+const scratchCanvasPosition = new Cartesian2();
 const DEFAULT_TEXT_ANCHOR_ORIGIN: TextAnchorOrigin = {
   horizontalOrigin: HorizontalOrigin.CENTER,
   verticalOrigin: VerticalOrigin.BOTTOM,
-}
+};
 const TEXT_ANCHOR_ORIGINS: Record<string, TextAnchorOrigin> = {
-  left: {
+  'left': {
     horizontalOrigin: HorizontalOrigin.LEFT,
     verticalOrigin: VerticalOrigin.CENTER,
   },
-  right: {
+  'right': {
     horizontalOrigin: HorizontalOrigin.RIGHT,
     verticalOrigin: VerticalOrigin.CENTER,
   },
-  top: {
+  'top': {
     horizontalOrigin: HorizontalOrigin.CENTER,
     verticalOrigin: VerticalOrigin.TOP,
   },
-  bottom: {
+  'bottom': {
     horizontalOrigin: HorizontalOrigin.CENTER,
     verticalOrigin: VerticalOrigin.BOTTOM,
   },
@@ -125,35 +127,35 @@ const TEXT_ANCHOR_ORIGINS: Record<string, TextAnchorOrigin> = {
     horizontalOrigin: HorizontalOrigin.RIGHT,
     verticalOrigin: VerticalOrigin.BOTTOM,
   },
-  center: DEFAULT_TEXT_ANCHOR_ORIGIN,
-}
+  'center': DEFAULT_TEXT_ANCHOR_ORIGIN,
+};
 const TEXT_JUSTIFY_ORIGINS: Record<Exclude<TextJustify, 'auto'>, HorizontalOrigin> = {
   left: HorizontalOrigin.LEFT,
   center: HorizontalOrigin.CENTER,
   right: HorizontalOrigin.RIGHT,
-}
+};
 const TEXT_TRANSFORMERS: Record<TextTransform, (text: string) => string> = {
-  none: (text) => text,
-  uppercase: (text) => text.toLocaleUpperCase(),
-  lowercase: (text) => text.toLocaleLowerCase(),
-}
+  none: text => text,
+  uppercase: text => text.toLocaleUpperCase(),
+  lowercase: text => text.toLocaleLowerCase(),
+};
 const HORIZONTAL_ORIGIN_RADIAL_FACTORS: Partial<Record<HorizontalOrigin, number>> = {
   [HorizontalOrigin.LEFT]: 1,
   [HorizontalOrigin.RIGHT]: -1,
-}
+};
 const VERTICAL_ORIGIN_RADIAL_FACTORS: Partial<Record<VerticalOrigin, number>> = {
   [VerticalOrigin.TOP]: 1,
   [VerticalOrigin.BOTTOM]: -1,
-}
+};
 type IconDimensionResolver = (input: {
-  intrinsicWidth: number
-  intrinsicHeight: number
-  targetWidth: number
-  targetHeight: number
+  intrinsicWidth: number;
+  intrinsicHeight: number;
+  targetWidth: number;
+  targetHeight: number;
 }) => {
-  width: number
-  height: number
-}
+  width: number;
+  height: number;
+};
 const ICON_TEXT_FIT_DIMENSION_RESOLVERS: Record<
   Exclude<IconTextFit, 'none'>,
   IconDimensionResolver
@@ -170,13 +172,13 @@ const ICON_TEXT_FIT_DIMENSION_RESOLVERS: Record<
     width: targetWidth,
     height: targetHeight,
   }),
-}
+};
 
 export function parseTextAnchor(anchor: string): {
-  horizontalOrigin: HorizontalOrigin
-  verticalOrigin: VerticalOrigin
+  horizontalOrigin: HorizontalOrigin;
+  verticalOrigin: VerticalOrigin;
 } {
-  return TEXT_ANCHOR_ORIGINS[anchor] ?? DEFAULT_TEXT_ANCHOR_ORIGIN
+  return TEXT_ANCHOR_ORIGINS[anchor] ?? DEFAULT_TEXT_ANCHOR_ORIGIN;
 }
 
 export function resolveTextJustifyOrigin(
@@ -184,14 +186,48 @@ export function resolveTextJustifyOrigin(
   justify: 'auto' | 'left' | 'center' | 'right',
 ): HorizontalOrigin {
   return TEXT_JUSTIFY_ORIGINS[justify as Exclude<TextJustify, 'auto'>]
-    ?? parseTextAnchor(anchor).horizontalOrigin
+    ?? parseTextAnchor(anchor).horizontalOrigin;
 }
 
 export function applyTextTransform(
   text: string,
   transform: 'none' | 'uppercase' | 'lowercase',
 ): string {
-  return (TEXT_TRANSFORMERS[transform] ?? TEXT_TRANSFORMERS.none)(text)
+  return (TEXT_TRANSFORMERS[transform] ?? TEXT_TRANSFORMERS.none)(text);
+}
+
+function isWideCharacter(ch: string): boolean {
+  const code = ch.codePointAt(0);
+  if (code === undefined)
+    return false;
+  // CJK Unified Ideographs, CJK Extensions, CJK Radicals, Hangul, Hiragana, Katakana
+  return (
+    (code >= 0x2E80 && code <= 0x9FFF)
+    || (code >= 0xAC00 && code <= 0xD7AF)
+    || (code >= 0xF900 && code <= 0xFAFF)
+    || (code >= 0xFE30 && code <= 0xFE6F)
+    || (code >= 0xFF00 && code <= 0xFFEF)
+    || (code >= 0x1F200 && code <= 0x1F2FF)
+    || (code >= 0x20000 && code <= 0x2FA1F)
+    || (code >= 0x3000 && code <= 0x303F)
+  );
+}
+
+function estimateTextWidthPixels(
+  text: string,
+  latinWidth: number,
+  letterSpacing: number,
+): number {
+  let width = 0;
+  let index = 0;
+  for (const ch of text) {
+    width += isWideCharacter(ch) ? latinWidth * 2 : latinWidth;
+    if (index < text.length - 1) {
+      width += letterSpacing;
+    }
+    index += 1;
+  }
+  return width;
 }
 
 export function wrapSymbolText(
@@ -201,74 +237,92 @@ export function wrapSymbolText(
   letterSpacing = 0,
 ): string {
   if (!Number.isFinite(maxWidthEm) || maxWidthEm <= 0) {
-    return text
+    return text;
   }
 
-  const maxLinePixels = maxWidthEm * textSize
+  const maxLinePixels = maxWidthEm * textSize;
   if (!Number.isFinite(maxLinePixels) || maxLinePixels <= 0) {
-    return text
+    return text;
   }
 
-  const estimatedGlyphWidth = Math.max(0.45, 0.56 + letterSpacing * 0.15) * textSize
-  const maxChars = Math.max(1, Math.floor(maxLinePixels / estimatedGlyphWidth))
-  if (maxChars <= 1) {
-    return text
-  }
+  const latinGlyphWidth = Math.max(0.45, 0.56 + letterSpacing * 0.15) * textSize;
+  const letterSpacingPx = letterSpacing * textSize;
 
-  const paragraphs = text.replace(/\r\n/g, '\n').split('\n')
-  const wrapped: string[] = []
+  const paragraphs = text.replace(/\r\n/g, '\n').split('\n');
+  const wrapped: string[] = [];
 
   for (const paragraph of paragraphs) {
-    const trimmed = paragraph.trim()
+    const trimmed = paragraph.trim();
     if (trimmed.length === 0) {
-      wrapped.push('')
-      continue
+      wrapped.push('');
+      continue;
     }
 
-    const words = trimmed.split(/\s+/)
-    if (words.length === 1 && words[0].length <= maxChars) {
-      wrapped.push(words[0])
-      continue
+    const words = trimmed.split(/\s+/);
+    if (
+      words.length === 1
+      && estimateTextWidthPixels(words[0], latinGlyphWidth, letterSpacingPx) <= maxLinePixels
+    ) {
+      wrapped.push(words[0]);
+      continue;
     }
 
-    let line = ''
+    let line = '';
+    let lineWidth = 0;
+
     for (const word of words) {
-      if (word.length > maxChars) {
-        if (line.length > 0) {
-          wrapped.push(line)
-          line = ''
+      const wordWidth = estimateTextWidthPixels(word, latinGlyphWidth, letterSpacingPx);
+
+      if (wordWidth > maxLinePixels) {
+        if (lineWidth > 0) {
+          wrapped.push(line);
+          line = '';
+          lineWidth = 0;
         }
 
-        let chunk = ''
-        for (const character of word) {
-          chunk += character
-          if (chunk.length >= maxChars) {
-            wrapped.push(chunk)
-            chunk = ''
+        let chunk = '';
+        let chunkWidth = 0;
+        for (const ch of word) {
+          const chWidth = isWideCharacter(ch) ? latinGlyphWidth * 2 : latinGlyphWidth;
+          chunkWidth += chWidth;
+          chunk += ch;
+          if (chunkWidth >= maxLinePixels) {
+            wrapped.push(chunk);
+            chunk = '';
+            chunkWidth = 0;
           }
         }
 
         if (chunk.length > 0) {
-          line = chunk
+          line = chunk;
+          lineWidth = chunkWidth;
         }
-        continue
+        continue;
       }
 
-      const candidate = line.length > 0 ? `${line} ${word}` : word
-      if (candidate.length > maxChars && line.length > 0) {
-        wrapped.push(line)
-        line = word
-      } else {
-        line = candidate
+      const spaceWidth = lineWidth > 0 ? letterSpacingPx : 0;
+      const candidateWidth = lineWidth + spaceWidth + wordWidth;
+      if (candidateWidth > maxLinePixels && lineWidth > 0) {
+        wrapped.push(line);
+        line = word;
+        lineWidth = wordWidth;
+      }
+      else {
+        if (spaceWidth > 0) {
+          line += ' ';
+          lineWidth += spaceWidth;
+        }
+        line += word;
+        lineWidth += wordWidth;
       }
     }
 
     if (line.length > 0) {
-      wrapped.push(line)
+      wrapped.push(line);
     }
   }
 
-  return wrapped.join('\n')
+  return wrapped.join('\n');
 }
 
 export function textOffsetToPixelOffset(
@@ -276,10 +330,10 @@ export function textOffsetToPixelOffset(
   textSize: number,
 ): Cartesian2 {
   if (!offset) {
-    return new Cartesian2(0, 0)
+    return new Cartesian2(0, 0);
   }
 
-  return new Cartesian2(offset[0] * textSize, offset[1] * textSize)
+  return new Cartesian2(offset[0] * textSize, offset[1] * textSize);
 }
 
 export function combinePixelOffsets(
@@ -287,10 +341,10 @@ export function combinePixelOffsets(
   translate: Cartesian2 | undefined,
 ): Cartesian2 {
   if (!translate) {
-    return Cartesian2.clone(base, new Cartesian2())
+    return Cartesian2.clone(base, new Cartesian2());
   }
 
-  return Cartesian2.add(base, translate, new Cartesian2())
+  return Cartesian2.add(base, translate, new Cartesian2());
 }
 
 export function resolveTextPixelOffset(
@@ -299,24 +353,24 @@ export function resolveTextPixelOffset(
   radialOffset: number,
   textSize: number,
   origins: {
-    horizontalOrigin: HorizontalOrigin
-    verticalOrigin: VerticalOrigin
+    horizontalOrigin: HorizontalOrigin;
+    verticalOrigin: VerticalOrigin;
   },
 ): Cartesian2 {
-  const offset = Cartesian2.clone(baseOffset, new Cartesian2())
+  const offset = Cartesian2.clone(baseOffset, new Cartesian2());
 
   if (translate) {
-    offset.x += translate.x
-    offset.y += translate.y
+    offset.x += translate.x;
+    offset.y += translate.y;
   }
 
   if (radialOffset !== 0) {
-    const radius = radialOffset * textSize
-    offset.x += radius * (HORIZONTAL_ORIGIN_RADIAL_FACTORS[origins.horizontalOrigin] ?? 0)
-    offset.y += radius * (VERTICAL_ORIGIN_RADIAL_FACTORS[origins.verticalOrigin] ?? 0)
+    const radius = radialOffset * textSize;
+    offset.x += radius * (HORIZONTAL_ORIGIN_RADIAL_FACTORS[origins.horizontalOrigin] ?? 0);
+    offset.y += radius * (VERTICAL_ORIGIN_RADIAL_FACTORS[origins.verticalOrigin] ?? 0);
   }
 
-  return offset
+  return offset;
 }
 
 function estimateRectOrigin(
@@ -325,38 +379,38 @@ function estimateRectOrigin(
   width: number,
   height: number,
   origins: {
-    horizontalOrigin: HorizontalOrigin
-    verticalOrigin: VerticalOrigin
+    horizontalOrigin: HorizontalOrigin;
+    verticalOrigin: VerticalOrigin;
   },
 ): SymbolScreenRect {
-  let left = offsetX
-  let right = offsetX
+  let left = offsetX;
+  let right = offsetX;
   switch (origins.horizontalOrigin) {
     case HorizontalOrigin.LEFT:
-      right = left + width
-      break
+      right = left + width;
+      break;
     case HorizontalOrigin.RIGHT:
-      left = right - width
-      break
+      left = right - width;
+      break;
     default:
-      left = offsetX - width / 2
-      right = offsetX + width / 2
-      break
+      left = offsetX - width / 2;
+      right = offsetX + width / 2;
+      break;
   }
 
-  let top = offsetY
-  let bottom = offsetY
+  let top = offsetY;
+  let bottom = offsetY;
   switch (origins.verticalOrigin) {
     case VerticalOrigin.TOP:
-      bottom = top + height
-      break
+      bottom = top + height;
+      break;
     case VerticalOrigin.BOTTOM:
-      top = bottom - height
-      break
+      top = bottom - height;
+      break;
     default:
-      top = offsetY - height / 2
-      bottom = offsetY + height / 2
-      break
+      top = offsetY - height / 2;
+      bottom = offsetY + height / 2;
+      break;
   }
 
   return {
@@ -364,125 +418,52 @@ function estimateRectOrigin(
     top,
     right,
     bottom,
-  }
+  };
 }
 
-export function estimateLabelScreenRect(
-  scene: Scene,
-  position: Cartesian3,
-  text: string,
-  textSize: number,
-  padding: number,
-  haloWidth: number,
-  pixelOffset: Cartesian2,
-  origins: {
-    horizontalOrigin: HorizontalOrigin
-    verticalOrigin: VerticalOrigin
-  },
-  lineHeight = 1.2,
-  letterSpacing = 0,
-): SymbolScreenRect | undefined {
-  const canvasPosition = scene.cartesianToCanvasCoordinates(
-    position,
-    scratchCanvasPosition,
-  )
-
-  if (!canvasPosition) {
-    return undefined
-  }
-
-  const offsetX = canvasPosition.x + pixelOffset.x
-  const offsetY = canvasPosition.y - pixelOffset.y
-  const lines = text.split(/\r?\n/)
-  const longestLine = Math.max(
-    1,
-    ...lines.map((line) => line.trim().length),
-  )
-  const estimatedLineHeight = Math.max(1, textSize * lineHeight)
-  const estimatedWidth = Math.max(
-    textSize,
-    longestLine * textSize * Math.max(0.5, 0.62 + letterSpacing * 0.15),
-  )
-  const estimatedHeight = Math.max(textSize, lines.length * estimatedLineHeight)
-  const paddingPx = Math.max(0, padding) + Math.max(0, haloWidth) + 2
-  const width = estimatedWidth + paddingPx * 2
-  const height = estimatedHeight + paddingPx * 2
-
-  return estimateRectOrigin(offsetX, offsetY, width, height, origins)
-}
-
-export function estimateIconScreenRect(
+export function estimateScreenRect(
   scene: Scene,
   position: Cartesian3,
   width: number,
   height: number,
   pixelOffset: Cartesian2,
   origins: {
-    horizontalOrigin: HorizontalOrigin
-    verticalOrigin: VerticalOrigin
+    horizontalOrigin: HorizontalOrigin;
+    verticalOrigin: VerticalOrigin;
   },
   padding = 2,
 ): SymbolScreenRect | undefined {
   const canvasPosition = scene.cartesianToCanvasCoordinates(
     position,
     scratchCanvasPosition,
-  )
+  );
 
   if (!canvasPosition) {
-    return undefined
+    return undefined;
   }
 
-  const offsetX = canvasPosition.x + pixelOffset.x
-  const offsetY = canvasPosition.y - pixelOffset.y
-  const paddedWidth = Math.max(1, width) + Math.max(0, padding) * 2
-  const paddedHeight = Math.max(1, height) + Math.max(0, padding) * 2
+  const offsetX = canvasPosition.x + pixelOffset.x;
+  const offsetY = canvasPosition.y - pixelOffset.y;
+  const paddedWidth = Math.max(1, width) + Math.max(0, padding) * 2;
+  const paddedHeight = Math.max(1, height) + Math.max(0, padding) * 2;
 
-  return estimateRectOrigin(offsetX, offsetY, paddedWidth, paddedHeight, origins)
-}
-
-export function estimateSpriteScreenRect(
-  scene: Scene,
-  position: Cartesian3,
-  width: number,
-  height: number,
-  pixelOffset: Cartesian2,
-  origins: {
-    horizontalOrigin: HorizontalOrigin
-    verticalOrigin: VerticalOrigin
-  },
-  padding = 2,
-): SymbolScreenRect | undefined {
-  const canvasPosition = scene.cartesianToCanvasCoordinates(
-    position,
-    scratchCanvasPosition,
-  )
-
-  if (!canvasPosition) {
-    return undefined
-  }
-
-  const offsetX = canvasPosition.x + pixelOffset.x
-  const offsetY = canvasPosition.y - pixelOffset.y
-  const paddedWidth = Math.max(1, width) + Math.max(0, padding) * 2
-  const paddedHeight = Math.max(1, height) + Math.max(0, padding) * 2
-
-  return estimateRectOrigin(offsetX, offsetY, paddedWidth, paddedHeight, origins)
+  return estimateRectOrigin(offsetX, offsetY, paddedWidth, paddedHeight, origins);
 }
 
 export function normalizeSymbolKey(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 export function formatSymbolPositionKey(
   position: Cartesian3,
   precisionMeters = 8,
 ): string {
-  const precision = Math.max(1, precisionMeters)
+  const precision = Math.max(1, precisionMeters);
   return [
     Math.round(position.x / precision),
     Math.round(position.y / precision),
     Math.round(position.z / precision),
-  ].join(':')
+  ].join(':');
 }
 
 export function buildSymbolDedupeKey(
@@ -490,14 +471,14 @@ export function buildSymbolDedupeKey(
   candidate: SymbolPlacementCandidate,
   text: string | undefined,
 ): string {
-  const textKey = candidate.textKey ? normalizeSymbolKey(candidate.textKey) : text ? normalizeSymbolKey(text) : ''
-  const iconKey = candidate.iconImageName ? candidate.iconImageName.trim() : ''
-  const sourceKey = textKey.length > 0 ? textKey : iconKey
-  const featureKey =
-    candidate.featureId !== undefined
+  const textKey = candidate.textKey ? normalizeSymbolKey(candidate.textKey) : text ? normalizeSymbolKey(text) : '';
+  const iconKey = candidate.iconImageName ? candidate.iconImageName.trim() : '';
+  const sourceKey = textKey.length > 0 ? textKey : iconKey;
+  const featureKey
+    = candidate.featureId !== undefined
       ? String(candidate.featureId)
-      : formatSymbolPositionKey(candidate.position)
-  return `${layerId}:${sourceKey}:${featureKey}`
+      : formatSymbolPositionKey(candidate.position);
+  return `${layerId}:${sourceKey}:${featureKey}`;
 }
 
 export function unionScreenRects(
@@ -509,7 +490,7 @@ export function unionScreenRects(
     top: Math.min(a.top, b.top),
     right: Math.max(a.right, b.right),
     bottom: Math.max(a.bottom, b.bottom),
-  }
+  };
 }
 
 export function resolveIconImageDimensions(
@@ -519,31 +500,31 @@ export function resolveIconImageDimensions(
   iconTextFit: 'none' | 'width' | 'height' | 'both',
   iconTextFitPadding: [number, number, number, number],
 ): {
-  width: number
-  height: number
+  width: number;
+  height: number;
 } {
   const intrinsicWidth = Math.max(
     1,
     (spriteEntry.width / Math.max(1, spriteEntry.pixelRatio)) * Math.max(0.1, iconSize),
-  )
+  );
   const intrinsicHeight = Math.max(
     1,
     (spriteEntry.height / Math.max(1, spriteEntry.pixelRatio)) * Math.max(0.1, iconSize),
-  )
+  );
 
   if (!textRect || iconTextFit === 'none') {
     return {
       width: intrinsicWidth,
       height: intrinsicHeight,
-    }
+    };
   }
 
-  const textWidth = Math.max(1, Math.abs(textRect.right - textRect.left))
-  const textHeight = Math.max(1, Math.abs(textRect.bottom - textRect.top))
-  const targetWidth = textWidth + Math.max(0, iconTextFitPadding[3]) + Math.max(0, iconTextFitPadding[1])
-  const targetHeight = textHeight + Math.max(0, iconTextFitPadding[0]) + Math.max(0, iconTextFitPadding[2])
+  const textWidth = Math.max(1, Math.abs(textRect.right - textRect.left));
+  const textHeight = Math.max(1, Math.abs(textRect.bottom - textRect.top));
+  const targetWidth = textWidth + Math.max(0, iconTextFitPadding[3]) + Math.max(0, iconTextFitPadding[1]);
+  const targetHeight = textHeight + Math.max(0, iconTextFitPadding[0]) + Math.max(0, iconTextFitPadding[2]);
 
-  const resolveDimensions = ICON_TEXT_FIT_DIMENSION_RESOLVERS[iconTextFit]
+  const resolveDimensions = ICON_TEXT_FIT_DIMENSION_RESOLVERS[iconTextFit];
   return resolveDimensions
     ? resolveDimensions({
         intrinsicWidth,
@@ -554,40 +535,40 @@ export function resolveIconImageDimensions(
     : {
         width: intrinsicWidth,
         height: intrinsicHeight,
-      }
+      };
 }
 
 export function fontStackToCss(
   fontStack: unknown,
   fallback = DEFAULT_TEXT_FONT_STACK.join(', '),
 ): string {
-  const names = normalizeFontStack(fontStack)
+  const names = normalizeFontStack(fontStack);
   if (names.length > 0) {
-    return names.map(formatFontFamilyName).join(', ')
+    return names.map(formatFontFamilyName).join(', ');
   }
 
-  const fallbackNames = normalizeFontStack(fallback)
+  const fallbackNames = normalizeFontStack(fallback);
   if (fallbackNames.length > 0) {
-    return fallbackNames.map(formatFontFamilyName).join(', ')
+    return fallbackNames.map(formatFontFamilyName).join(', ');
   }
 
-  return DEFAULT_TEXT_FONT_STACK.map(formatFontFamilyName).join(', ')
+  return DEFAULT_TEXT_FONT_STACK.map(formatFontFamilyName).join(', ');
 }
 
 function normalizeFontStack(fontStack: unknown): string[] {
   const names = Array.isArray(fontStack)
-    ? fontStack.map((font) => String(font))
+    ? fontStack.map(font => String(font))
     : typeof fontStack === 'string'
       ? fontStack.split(',')
-      : []
+      : [];
 
   return names
-    .map((font) => font.trim().replace(/^['"]+|['"]+$/g, ''))
-    .filter((font) => font.length > 0)
+    .map(font => font.trim().replace(/^['"]+|['"]+$/g, ''))
+    .filter(font => font.length > 0);
 }
 
 function formatFontFamilyName(font: string): string {
   return /[,"\s]/.test(font)
     ? `"${font.replace(/"/g, '\\"')}"`
-    : font
+    : font;
 }

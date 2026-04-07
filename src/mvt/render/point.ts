@@ -1,32 +1,33 @@
-import {
+import type {
   Color,
-  type PointPrimitive,
+  PointPrimitive,
   PointPrimitiveCollection,
-  type TilingScheme,
-} from 'cesium'
+  TilingScheme,
+} from 'cesium';
 import type {
   DecodedFeatureRecord,
   DecodedTileRecord,
-} from '../types'
+} from '../types';
+import type { TileTransformContext } from './geometry';
 import {
   createTileTransformContext,
-  type TileTransformContext,
   tilePointToCartesianWithContext,
-} from './geometry'
 
-export type RenderPointPrimitivesOptions = {
-  tilingScheme: TilingScheme
-  tile: DecodedTileRecord
-  extent: number
-  layerId: string
-  feature: DecodedFeatureRecord
-  collection: PointPrimitiveCollection | undefined
-  color: Color
-  outlineColor: Color
-  pixelSize: number
-  outlineWidth?: number
-  onPoint?: (point: PointPrimitive) => void
-  transformContext?: TileTransformContext
+} from './geometry';
+
+export interface RenderPointPrimitivesOptions {
+  tilingScheme: TilingScheme;
+  tile: DecodedTileRecord;
+  extent: number;
+  layerId: string;
+  feature: DecodedFeatureRecord;
+  collection: PointPrimitiveCollection | undefined;
+  color: Color;
+  outlineColor: Color;
+  pixelSize: number;
+  outlineWidth?: number;
+  onPoint?: (point: PointPrimitive) => void;
+  transformContext?: TileTransformContext;
 }
 
 export function renderPointPrimitives(
@@ -45,26 +46,26 @@ export function renderPointPrimitives(
     outlineWidth,
     onPoint,
     transformContext,
-  } = options
+  } = options;
 
   if (!collection) {
-    return 0
+    return 0;
   }
 
-  const resolvedTransformContext =
-    transformContext
-    ?? createTileTransformContext(
-      tilingScheme,
-      tile.coord,
-      extent,
-    )
-  let count = 0
+  const resolvedTransformContext
+    = transformContext
+      ?? createTileTransformContext(
+        tilingScheme,
+        tile.coord,
+        extent,
+      );
+  let count = 0;
   for (const part of feature.geometry) {
     for (const point of part) {
       const position = tilePointToCartesianWithContext(
         resolvedTransformContext,
         point,
-      )
+      );
 
       const pointPrimitive = collection.add({
         show: true,
@@ -78,11 +79,11 @@ export function renderPointPrimitives(
           layer: layerId,
           featureId: feature.id,
         },
-      })
-      onPoint?.(pointPrimitive)
-      count += 1
+      });
+      onPoint?.(pointPrimitive);
+      count += 1;
     }
   }
 
-  return count
+  return count;
 }

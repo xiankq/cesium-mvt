@@ -1,137 +1,141 @@
-import {
-  Color,
+import type {
   GeometryInstance,
-  Material,
-  type PointPrimitive,
-  PointPrimitiveCollection,
-  type Polyline,
-  PolylineCollection,
-  PerInstanceColorAppearance,
-  Primitive,
-  type Scene,
-  type TilingScheme,
-} from 'cesium'
+  PointPrimitive,
+  Polyline,
+  Scene,
+  TilingScheme,
+} from 'cesium';
+import type { TileScheduler } from '../scheduler/scheduler';
+import type { CesiumMvtSourceCache } from '../scheduler/source';
+import type { MapLibreStyleDocument } from '../style/document';
+import type { CompiledMapLibreStyleRenderer, CompiledStyleLayer, CompiledStyleRefreshMode } from '../style/renderer';
 import type {
   DecodedFeatureRecord,
   DecodedLayerRecord,
   DecodedTileRecord,
   MvtSchedulerSnapshot,
   MvtViewportSnapshot,
-} from '../types'
-import type { TileDecodeEvent } from '../types'
-import type { TileScheduler } from '../scheduler/scheduler'
-import type { CesiumMvtSourceCache } from '../scheduler/source'
-import type { MapLibreStyleDocument } from '../style/document'
-import { MapLibreSpriteAtlas } from './sprite'
+  TileDecodeEvent,
+} from '../types';
+import type { StyledSymbolPlacement } from './label';
 import {
+  Color,
+  Material,
+  PerInstanceColorAppearance,
+
+  PointPrimitiveCollection,
+
+  PolylineCollection,
+  Primitive,
+
+} from 'cesium';
+import {
+
   compileMapLibreStyleRenderer,
-  type CompiledStyleLayer,
-  type CompiledStyleRefreshMode,
-  type CompiledMapLibreStyleRenderer,
-} from '../style/renderer'
+} from '../style/renderer';
 import {
   addPrimitiveOrdered,
   applyOpacity,
-  createTileTransformContext,
   createPolylineMaterial,
+  createTileTransformContext,
   estimateSceneZoom,
   evaluateStyleLayerSortKey,
   removeAndDestroyPrimitive,
-} from './geometry'
-import { renderLineStringPrimitives } from './line-string'
-import type { StyledSymbolPlacement } from './label'
-import { renderPointPrimitives } from './point'
-import { renderPolygonPrimitives } from './polygon'
-import { createStyledSymbolPlacement, SymbolRenderer } from './symbol'
+} from './geometry';
+import { renderLineStringPrimitives } from './line-string';
+import { renderPointPrimitives } from './point';
+import { renderPolygonPrimitives } from './polygon';
+import { MapLibreSpriteAtlas } from './sprite';
+import { createStyledSymbolPlacement, SymbolRenderer } from './symbol';
 
-export type CesiumMvtPrimitiveLayerOptions = {
-  style?: MapLibreStyleDocument
-  pointColor?: Color
-  lineColor?: Color
-  polygonFillColor?: Color
-  polygonOutlineColor?: Color
-  pointOutlineColor?: Color
-  pointPixelSize?: number
-  lineWidth?: number
-  polygonOutlineWidth?: number
-  showPoints?: boolean
-  showLines?: boolean
-  showPolygonFills?: boolean
-  showPolygonOutlines?: boolean
-  showLabels?: boolean
-  suspendLabelsDuringCameraMove?: boolean
-  suspendLabelsDuringLoading?: boolean
-  labelResumeDelayMs?: number
-  sourceCache?: CesiumMvtSourceCache
-  layerFilter?: (layer: DecodedLayerRecord, tile: DecodedTileRecord) => boolean
+export interface CesiumMvtPrimitiveLayerOptions {
+  style?: MapLibreStyleDocument;
+  pointColor?: Color;
+  lineColor?: Color;
+  polygonFillColor?: Color;
+  polygonOutlineColor?: Color;
+  pointOutlineColor?: Color;
+  pointPixelSize?: number;
+  lineWidth?: number;
+  polygonOutlineWidth?: number;
+  showPoints?: boolean;
+  showLines?: boolean;
+  showPolygonFills?: boolean;
+  showPolygonOutlines?: boolean;
+  showLabels?: boolean;
+  suspendLabelsDuringCameraMove?: boolean;
+  suspendLabelsDuringLoading?: boolean;
+  labelResumeDelayMs?: number;
+  sourceCache?: CesiumMvtSourceCache;
+  layerFilter?: (layer: DecodedLayerRecord, tile: DecodedTileRecord) => boolean;
   featureFilter?: (
     feature: DecodedFeatureRecord,
     layer: DecodedLayerRecord,
     tile: DecodedTileRecord,
-  ) => boolean
+  ) => boolean;
 }
 
 type ResolvedCesiumMvtPrimitiveLayerOptions = Omit<
   CesiumMvtPrimitiveLayerOptions,
   'sourceCache' | 'style'
 > & {
-  style?: MapLibreStyleDocument
+  style?: MapLibreStyleDocument;
+};
+
+interface TilePrimitiveGroup {
+  mode: 'generic' | 'styled';
+  refreshState: TileZoomRefreshState;
+  pointCount: number;
+  lineCount: number;
+  polygonCount: number;
+  labelCount: number;
+  iconCount: number;
+  symbolPlacements: StyledSymbolPlacement[];
+  paintBindings: StyledPaintBinding[];
+  destroy: () => void;
 }
 
-type TilePrimitiveGroup = {
-  mode: 'generic' | 'styled'
-  refreshState: TileZoomRefreshState
-  pointCount: number
-  lineCount: number
-  polygonCount: number
-  labelCount: number
-  iconCount: number
-  symbolPlacements: StyledSymbolPlacement[]
-  paintBindings: StyledPaintBinding[]
-  destroy: () => void
+interface StyledFeatureEntry {
+  feature: DecodedFeatureRecord;
+  featureIndex: number;
+  sortKey: number;
 }
 
-type StyledFeatureEntry = {
-  feature: DecodedFeatureRecord
-  featureIndex: number
-  sortKey: number
+interface TileZoomRefreshState {
+  full: boolean;
+  paint: boolean;
+  symbols: boolean;
 }
 
-type TileZoomRefreshState = {
-  full: boolean
-  paint: boolean
-  symbols: boolean
+interface LinePaintBinding {
+  type: 'line';
+  compiled: Extract<CompiledStyleLayer, { type: 'line' }>;
+  feature: DecodedFeatureRecord;
+  polyline: Polyline;
 }
 
-type LinePaintBinding = {
-  type: 'line'
-  compiled: Extract<CompiledStyleLayer, { type: 'line' }>
-  feature: DecodedFeatureRecord
-  polyline: Polyline
+interface CirclePaintBinding {
+  type: 'circle';
+  compiled: Extract<CompiledStyleLayer, { type: 'circle' }>;
+  feature: DecodedFeatureRecord;
+  pointPrimitive: PointPrimitive;
 }
 
-type CirclePaintBinding = {
-  type: 'circle'
-  compiled: Extract<CompiledStyleLayer, { type: 'circle' }>
-  feature: DecodedFeatureRecord
-  pointPrimitive: PointPrimitive
-}
+type StyledPaintBinding = LinePaintBinding | CirclePaintBinding;
 
-type StyledPaintBinding = LinePaintBinding | CirclePaintBinding
-
-const DEFAULT_POINT_COLOR = Color.fromCssColorString('#67d7ff')
-const DEFAULT_LINE_COLOR = Color.fromCssColorString('#8c9eff')
-const DEFAULT_POLYGON_FILL_COLOR = Color.fromCssColorString('#173b78')
-DEFAULT_POLYGON_FILL_COLOR.alpha = 0.28
-const DEFAULT_POLYGON_OUTLINE_COLOR = Color.fromCssColorString('#7c5cff')
-const DEFAULT_POINT_OUTLINE_COLOR = Color.fromCssColorString('#06131f')
+const DEFAULT_POINT_COLOR = Color.fromCssColorString('#67d7ff');
+const DEFAULT_LINE_COLOR = Color.fromCssColorString('#8c9eff');
+const DEFAULT_POLYGON_FILL_COLOR = Color.fromCssColorString('#173b78');
+DEFAULT_POLYGON_FILL_COLOR.alpha = 0.28;
+const DEFAULT_POLYGON_OUTLINE_COLOR = Color.fromCssColorString('#7c5cff');
+const DEFAULT_POINT_OUTLINE_COLOR = Color.fromCssColorString('#06131f');
 
 function createTileZoomRefreshState(): TileZoomRefreshState {
   return {
     full: false,
     paint: false,
     symbols: false,
-  }
+  };
 }
 
 function mergeRefreshState(
@@ -140,82 +144,83 @@ function mergeRefreshState(
 ): TileZoomRefreshState {
   switch (refreshMode) {
     case 'full':
-      state.full = true
-      break
+      state.full = true;
+      break;
     case 'paint':
-      state.paint = true
-      break
+      state.paint = true;
+      break;
     case 'symbols':
-      state.symbols = true
-      break
+      state.symbols = true;
+      break;
     default:
-      break
+      break;
   }
 
-  return state
+  return state;
 }
 
 export class CesiumMvtPrimitiveLayer {
-  private readonly scene: Scene
-  private readonly scheduler: TileScheduler
-  private readonly tilingScheme: TilingScheme
+  private readonly scene: Scene;
+  private readonly scheduler: TileScheduler;
+  private readonly tilingScheme: TilingScheme;
   private readonly options: ResolvedCesiumMvtPrimitiveLayerOptions & {
-    pointColor: Color
-    lineColor: Color
-    polygonFillColor: Color
-    polygonOutlineColor: Color
-    pointOutlineColor: Color
-    pointPixelSize: number
-    lineWidth: number
-    polygonOutlineWidth: number
-    showPoints: boolean
-    showLines: boolean
-    showPolygonFills: boolean
-    showPolygonOutlines: boolean
-    showLabels: boolean
-    layerFilter: (layer: DecodedLayerRecord, tile: DecodedTileRecord) => boolean
+    pointColor: Color;
+    lineColor: Color;
+    polygonFillColor: Color;
+    polygonOutlineColor: Color;
+    pointOutlineColor: Color;
+    pointPixelSize: number;
+    lineWidth: number;
+    polygonOutlineWidth: number;
+    showPoints: boolean;
+    showLines: boolean;
+    showPolygonFills: boolean;
+    showPolygonOutlines: boolean;
+    showLabels: boolean;
+    layerFilter: (layer: DecodedLayerRecord, tile: DecodedTileRecord) => boolean;
     featureFilter: (
       feature: DecodedFeatureRecord,
       layer: DecodedLayerRecord,
       tile: DecodedTileRecord,
-    ) => boolean
-  }
-  private readonly groups = new Map<string, TilePrimitiveGroup>()
-  private readonly primitiveOrderMap = new WeakMap<object, number>()
-  private readonly sharedPointCollections = new Map<string, PointPrimitiveCollection>()
-  private readonly sharedLineCollections = new Map<string, PolylineCollection>()
-  private readonly spriteAtlas?: MapLibreSpriteAtlas
-  private readonly symbolRenderer: SymbolRenderer
-  private readonly sourceCache?: CesiumMvtSourceCache
-  private readonly styleRenderer?: CompiledMapLibreStyleRenderer
-  private readonly unsubscribeTiles: () => void
-  private readonly unsubscribeScheduler?: () => void
-  private readonly unsubscribeViewport?: () => void
-  private removeCameraMoveStart?: () => void
-  private removeCameraMoveEnd?: () => void
-  private currentZoom = 0
-  private labelsVisible = true
-  private atlasRefreshScheduled = false
-  private destroyed = false
-  private cameraLabelsSuspended = false
-  private loadingLabelsSuspended = false
-  private labelResumeTimer?: ReturnType<typeof setTimeout>
-  private readonly suspendLabelsDuringCameraMove: boolean
-  private readonly suspendLabelsDuringLoading: boolean
-  private readonly labelResumeDelayMs: number
-  private readonly symbolRebuildDelayMs = 160
-  private readonly visibleTileRefreshDelayMs = 120
-  private readonly movingViewportUpdateDelayMs = 80
-  private readonly deferViewportUpdatesDuringCameraMove = true
-  private symbolRebuildTimer?: ReturnType<typeof setTimeout>
-  private visibleTileRefreshTimer?: ReturnType<typeof setTimeout>
-  private viewportUpdateTimer?: ReturnType<typeof setTimeout>
-  private symbolLayoutDirty = false
-  private symbolLayoutDirtyWhileHidden = false
-  private cameraMoving = false
-  private suppressedTileEventsDuringCameraMove = false
-  private pendingViewportSnapshot?: MvtViewportSnapshot
-  private pendingViewportRequiresTileRefresh = false
+    ) => boolean;
+  };
+
+  private readonly groups = new Map<string, TilePrimitiveGroup>();
+  private readonly primitiveOrderMap = new WeakMap<object, number>();
+  private readonly sharedPointCollections = new Map<string, PointPrimitiveCollection>();
+  private readonly sharedLineCollections = new Map<string, PolylineCollection>();
+  private readonly spriteAtlas?: MapLibreSpriteAtlas;
+  private readonly symbolRenderer: SymbolRenderer;
+  private readonly sourceCache?: CesiumMvtSourceCache;
+  private readonly styleRenderer?: CompiledMapLibreStyleRenderer;
+  private readonly unsubscribeTiles: () => void;
+  private readonly unsubscribeScheduler?: () => void;
+  private readonly unsubscribeViewport?: () => void;
+  private removeCameraMoveStart?: () => void;
+  private removeCameraMoveEnd?: () => void;
+  private currentZoom = 0;
+  private labelsVisible = true;
+  private atlasRefreshScheduled = false;
+  private destroyed = false;
+  private cameraLabelsSuspended = false;
+  private loadingLabelsSuspended = false;
+  private labelResumeTimer?: ReturnType<typeof setTimeout>;
+  private readonly suspendLabelsDuringCameraMove: boolean;
+  private readonly suspendLabelsDuringLoading: boolean;
+  private readonly labelResumeDelayMs: number;
+  private readonly symbolRebuildDelayMs = 160;
+  private readonly visibleTileRefreshDelayMs = 120;
+  private readonly movingViewportUpdateDelayMs = 80;
+  private readonly deferViewportUpdatesDuringCameraMove = true;
+  private symbolRebuildTimer?: ReturnType<typeof setTimeout>;
+  private visibleTileRefreshTimer?: ReturnType<typeof setTimeout>;
+  private viewportUpdateTimer?: ReturnType<typeof setTimeout>;
+  private symbolLayoutDirty = false;
+  private symbolLayoutDirtyWhileHidden = false;
+  private cameraMoving = false;
+  private suppressedTileEventsDuringCameraMove = false;
+  private pendingViewportSnapshot?: MvtViewportSnapshot;
+  private pendingViewportRequiresTileRefresh = false;
 
   constructor(
     scene: Scene,
@@ -223,9 +228,9 @@ export class CesiumMvtPrimitiveLayer {
     tilingScheme: TilingScheme,
     options: CesiumMvtPrimitiveLayerOptions = {},
   ) {
-    this.scene = scene
-    this.scheduler = scheduler
-    this.tilingScheme = tilingScheme
+    this.scene = scene;
+    this.scheduler = scheduler;
+    this.tilingScheme = tilingScheme;
     this.options = {
       style: options.style,
       pointColor: options.pointColor ?? DEFAULT_POINT_COLOR,
@@ -243,29 +248,29 @@ export class CesiumMvtPrimitiveLayer {
       showLabels: options.showLabels ?? true,
       layerFilter: options.layerFilter ?? (() => true),
       featureFilter: options.featureFilter ?? (() => true),
-    }
-    this.suspendLabelsDuringCameraMove = options.suspendLabelsDuringCameraMove ?? false
-    this.suspendLabelsDuringLoading = options.suspendLabelsDuringLoading ?? false
-    this.labelResumeDelayMs = options.labelResumeDelayMs ?? 160
+    };
+    this.suspendLabelsDuringCameraMove = options.suspendLabelsDuringCameraMove ?? false;
+    this.suspendLabelsDuringLoading = options.suspendLabelsDuringLoading ?? false;
+    this.labelResumeDelayMs = options.labelResumeDelayMs ?? 160;
 
-    this.sourceCache = options.sourceCache
-    this.styleRenderer = options.style ? compileMapLibreStyleRenderer(options.style) : undefined
+    this.sourceCache = options.sourceCache;
+    this.styleRenderer = options.style ? compileMapLibreStyleRenderer(options.style) : undefined;
     this.spriteAtlas = options.style?.sprite
       ? new MapLibreSpriteAtlas(options.style.sprite)
-      : undefined
+      : undefined;
     this.symbolRenderer = new SymbolRenderer(
       scene,
       this.primitiveOrderMap,
       this.spriteAtlas,
-    )
+    );
 
-    this.unsubscribeTiles = scheduler.subscribeTiles(this.handleTileEvent)
+    this.unsubscribeTiles = scheduler.subscribeTiles(this.handleTileEvent);
     this.unsubscribeScheduler = this.suspendLabelsDuringLoading
       ? scheduler.subscribe(this.handleSchedulerSnapshot)
-      : undefined
+      : undefined;
 
     if (this.sourceCache) {
-      this.unsubscribeViewport = this.sourceCache.subscribe(this.handleViewportEvent)
+      this.unsubscribeViewport = this.sourceCache.subscribe(this.handleViewportEvent);
     }
 
     if (this.spriteAtlas) {
@@ -273,253 +278,254 @@ export class CesiumMvtPrimitiveLayer {
         .load()
         .then(() => {
           if (this.destroyed) {
-            return
+            return;
           }
-          this.scheduleAtlasRefresh()
+          this.scheduleAtlasRefresh();
         })
         .catch(() => {
           // Sprite loading is best-effort; symbol rendering can continue without icons.
-        })
+        });
     }
 
     if (this.sourceCache || (this.options.showLabels && this.suspendLabelsDuringCameraMove)) {
       this.removeCameraMoveStart = this.scene.camera.moveStart.addEventListener(() => {
-        this.handleCameraMoveStateChange(true)
-      })
+        this.handleCameraMoveStateChange(true);
+      });
       this.removeCameraMoveEnd = this.scene.camera.moveEnd.addEventListener(() => {
-        this.handleCameraMoveStateChange(false)
-      })
+        this.handleCameraMoveStateChange(false);
+      });
     }
 
     for (const tile of scheduler.getCachedTiles()) {
       if (this.sourceCache && !this.sourceCache.isVisible(tile.id)) {
-        continue
+        continue;
       }
-      this.addTile(tile)
+      this.addTile(tile);
     }
   }
 
   get tileCount(): number {
-    return this.groups.size
+    return this.groups.size;
   }
 
   private handleSchedulerSnapshot = (snapshot: MvtSchedulerSnapshot): void => {
     if (!this.suspendLabelsDuringLoading || !this.options.showLabels) {
-      return
+      return;
     }
 
-    const busy = snapshot.queued > 0 || snapshot.inFlight > 0
+    const busy = snapshot.queued > 0 || snapshot.inFlight > 0;
     if (busy) {
-      this.setLoadingLabelSuspended(true)
-      return
+      this.setLoadingLabelSuspended(true);
+      return;
     }
 
-    this.setLoadingLabelSuspended(false)
-  }
+    this.setLoadingLabelSuspended(false);
+  };
 
   private setCameraLabelSuspended(suspended: boolean): void {
     if (this.cameraLabelsSuspended === suspended) {
-      return
+      return;
     }
 
-    this.cameraLabelsSuspended = suspended
+    this.cameraLabelsSuspended = suspended;
     if (suspended) {
-      this.clearLabelResumeTimer()
-      this.refreshLabelVisibility()
-      return
+      this.clearLabelResumeTimer();
+      this.refreshLabelVisibility();
+      return;
     }
 
-    this.refreshLabelVisibility(true)
+    this.refreshLabelVisibility(true);
   }
 
   private setLoadingLabelSuspended(suspended: boolean): void {
     if (this.loadingLabelsSuspended === suspended) {
-      return
+      return;
     }
 
-    this.loadingLabelsSuspended = suspended
+    this.loadingLabelsSuspended = suspended;
     if (suspended) {
-      this.clearLabelResumeTimer()
-      this.refreshLabelVisibility()
-      return
+      this.clearLabelResumeTimer();
+      this.refreshLabelVisibility();
+      return;
     }
 
-    this.refreshLabelVisibility()
+    this.refreshLabelVisibility();
   }
 
   private refreshLabelVisibility(forceImmediate = false): void {
     if (!this.options.showLabels) {
-      this.clearLabelResumeTimer()
-      this.setLabelsVisible(false)
-      return
+      this.clearLabelResumeTimer();
+      this.setLabelsVisible(false);
+      return;
     }
 
-    const nextVisible =
-      !this.cameraLabelsSuspended && !this.loadingLabelsSuspended
+    const nextVisible
+      = !this.cameraLabelsSuspended && !this.loadingLabelsSuspended;
 
     if (!nextVisible) {
-      this.clearLabelResumeTimer()
-      this.setLabelsVisible(false)
-      return
+      this.clearLabelResumeTimer();
+      this.setLabelsVisible(false);
+      return;
     }
 
     if (this.labelsVisible) {
-      return
+      return;
     }
 
     if (forceImmediate) {
-      this.setLabelsVisible(true, true)
-      return
+      this.setLabelsVisible(true, true);
+      return;
     }
 
-    this.scheduleLabelResume()
+    this.scheduleLabelResume();
   }
 
   private scheduleLabelResume(): void {
     if (this.labelResumeTimer !== undefined) {
-      return
+      return;
     }
 
     this.labelResumeTimer = setTimeout(() => {
-      this.labelResumeTimer = undefined
+      this.labelResumeTimer = undefined;
       if (
-        this.options.showLabels &&
-        !this.cameraLabelsSuspended &&
-        !this.loadingLabelsSuspended
+        this.options.showLabels
+        && !this.cameraLabelsSuspended
+        && !this.loadingLabelsSuspended
       ) {
-        this.setLabelsVisible(true)
+        this.setLabelsVisible(true);
       }
-    }, this.labelResumeDelayMs)
+    }, this.labelResumeDelayMs);
   }
 
   private clearLabelResumeTimer(): void {
     if (this.labelResumeTimer !== undefined) {
-      clearTimeout(this.labelResumeTimer)
-      this.labelResumeTimer = undefined
+      clearTimeout(this.labelResumeTimer);
+      this.labelResumeTimer = undefined;
     }
   }
 
   private setLabelsVisible(visible: boolean, forceSymbolRebuild = false): void {
-    const nextVisible = this.options.showLabels && visible
+    const nextVisible = this.options.showLabels && visible;
     if (this.labelsVisible === nextVisible) {
-      return
+      return;
     }
 
-    this.labelsVisible = nextVisible
-    const revealExistingRuntimes = nextVisible && !this.symbolLayoutDirtyWhileHidden
-    this.symbolRenderer.setVisible(revealExistingRuntimes)
+    this.labelsVisible = nextVisible;
+    const revealExistingRuntimes = nextVisible && !this.symbolLayoutDirtyWhileHidden;
+    this.symbolRenderer.setVisible(revealExistingRuntimes);
 
     if (!nextVisible) {
-      this.clearSymbolRebuildTimer()
+      this.clearSymbolRebuildTimer();
       if (this.symbolLayoutDirty) {
-        this.symbolLayoutDirtyWhileHidden = true
+        this.symbolLayoutDirtyWhileHidden = true;
       }
-      this.scene.requestRender()
-      return
+      this.scene.requestRender();
+      return;
     }
 
     if (
-      this.symbolRenderer.runtimeCount === 0 ||
-      this.symbolLayoutDirty ||
-      this.symbolLayoutDirtyWhileHidden
+      this.symbolRenderer.runtimeCount === 0
+      || this.symbolLayoutDirty
+      || this.symbolLayoutDirtyWhileHidden
     ) {
-      this.scheduleSymbolRebuild(forceSymbolRebuild)
+      this.scheduleSymbolRebuild(forceSymbolRebuild);
     }
 
-    this.scene.requestRender()
+    this.scene.requestRender();
   }
 
   destroy(): void {
-    this.destroyed = true
-    this.clearSymbolRebuildTimer()
-    this.clearVisibleTileRefreshTimer()
-    this.clearViewportUpdateTimer()
-    this.unsubscribeViewport?.()
-    this.unsubscribeTiles()
-    this.unsubscribeScheduler?.()
-    this.removeCameraMoveStart?.()
-    this.removeCameraMoveStart = undefined
-    this.removeCameraMoveEnd?.()
-    this.removeCameraMoveEnd = undefined
-    this.clearLabelResumeTimer()
-    this.symbolRenderer.destroy()
+    this.destroyed = true;
+    this.clearSymbolRebuildTimer();
+    this.clearVisibleTileRefreshTimer();
+    this.clearViewportUpdateTimer();
+    this.unsubscribeViewport?.();
+    this.unsubscribeTiles();
+    this.unsubscribeScheduler?.();
+    this.removeCameraMoveStart?.();
+    this.removeCameraMoveStart = undefined;
+    this.removeCameraMoveEnd?.();
+    this.removeCameraMoveEnd = undefined;
+    this.clearLabelResumeTimer();
+    this.symbolRenderer.destroy();
 
     for (const group of this.groups.values()) {
-      group.destroy()
+      group.destroy();
     }
-    this.groups.clear()
+    this.groups.clear();
     for (const collection of this.sharedPointCollections.values()) {
-      removeAndDestroyPrimitive(this.scene, collection)
+      removeAndDestroyPrimitive(this.scene, collection);
     }
-    this.sharedPointCollections.clear()
+    this.sharedPointCollections.clear();
     for (const collection of this.sharedLineCollections.values()) {
-      removeAndDestroyPrimitive(this.scene, collection)
+      removeAndDestroyPrimitive(this.scene, collection);
     }
-    this.sharedLineCollections.clear()
+    this.sharedLineCollections.clear();
   }
 
   private handleTileEvent = (event: TileDecodeEvent): void => {
     if (this.cameraMoving) {
-      this.suppressedTileEventsDuringCameraMove = true
+      this.suppressedTileEventsDuringCameraMove = true;
       if (!this.deferViewportUpdatesDuringCameraMove) {
-        this.scheduleViewportUpdate(true)
+        this.scheduleViewportUpdate(true);
       }
-      return
+      return;
     }
 
     if (this.visibleTileRefreshTimer !== undefined) {
-      this.suppressedTileEventsDuringCameraMove = true
-      return
+      this.suppressedTileEventsDuringCameraMove = true;
+      return;
     }
 
     if (event.type === 'decoded') {
       if (this.sourceCache && !this.sourceCache.isVisible(event.tile.id)) {
-        return
+        return;
       }
-      this.addTile(event.tile)
-    } else {
-      this.removeTile(event.tileId)
+      this.addTile(event.tile);
     }
-  }
+    else {
+      this.removeTile(event.tileId);
+    }
+  };
 
   private handleViewportEvent = (snapshot: MvtViewportSnapshot): void => {
     if (this.cameraMoving) {
-      this.currentZoom = snapshot.zoom
-      this.pendingViewportSnapshot = snapshot
+      this.currentZoom = snapshot.zoom;
+      this.pendingViewportSnapshot = snapshot;
       if (!this.deferViewportUpdatesDuringCameraMove) {
-        this.scheduleViewportUpdate()
+        this.scheduleViewportUpdate();
       }
-      return
+      return;
     }
 
-    this.applyViewportSnapshot(snapshot)
-  }
+    this.applyViewportSnapshot(snapshot);
+  };
 
   private handleCameraMoveStateChange(moving: boolean): void {
     if (this.cameraMoving === moving) {
-      return
+      return;
     }
 
-    this.cameraMoving = moving
+    this.cameraMoving = moving;
     if (this.options.showLabels && this.suspendLabelsDuringCameraMove) {
-      this.setCameraLabelSuspended(moving)
+      this.setCameraLabelSuspended(moving);
     }
 
     if (moving) {
-      return
+      return;
     }
 
-    const pendingViewportSnapshot = this.pendingViewportSnapshot
-    const suppressedTileEvents = this.suppressedTileEventsDuringCameraMove
+    const pendingViewportSnapshot = this.pendingViewportSnapshot;
+    const suppressedTileEvents = this.suppressedTileEventsDuringCameraMove;
 
     if (pendingViewportSnapshot) {
-      this.flushViewportUpdate(true)
-      return
+      this.flushViewportUpdate(true);
+      return;
     }
 
     if (suppressedTileEvents) {
-      this.suppressedTileEventsDuringCameraMove = false
-      this.scheduleVisibleTileRefresh()
+      this.suppressedTileEventsDuringCameraMove = false;
+      this.scheduleVisibleTileRefresh();
     }
   }
 
@@ -527,235 +533,235 @@ export class CesiumMvtPrimitiveLayer {
     snapshot: MvtViewportSnapshot,
     forceTileRefresh = false,
   ): void {
-    const previousZoom = this.currentZoom
-    this.currentZoom = snapshot.zoom
-    const zoomChanged = previousZoom !== this.currentZoom
+    const previousZoom = this.currentZoom;
+    this.currentZoom = snapshot.zoom;
+    const zoomChanged = previousZoom !== this.currentZoom;
 
-    let tileSetChanged = false
+    let tileSetChanged = false;
 
     for (const tileId of snapshot.exitedTileIds) {
       if (!this.groups.has(tileId)) {
-        continue
+        continue;
       }
 
-      this.removeTile(tileId, false)
-      tileSetChanged = true
+      this.removeTile(tileId, false);
+      tileSetChanged = true;
     }
 
     for (const tileId of snapshot.enteredTileIds) {
       if (this.groups.has(tileId)) {
-        continue
+        continue;
       }
 
-      const tile = this.scheduler.getTile(tileId)
+      const tile = this.scheduler.getTile(tileId);
       if (!tile) {
-        continue
+        continue;
       }
 
       if (this.sourceCache && !this.sourceCache.isVisible(tileId)) {
-        continue
+        continue;
       }
 
-      this.addTile(tile)
-      tileSetChanged = true
+      this.addTile(tile);
+      tileSetChanged = true;
     }
 
     if (forceTileRefresh || (zoomChanged && this.styleRenderer)) {
-      this.scheduleVisibleTileRefresh()
-      return
+      this.scheduleVisibleTileRefresh();
+      return;
     }
 
     if (tileSetChanged || zoomChanged) {
-      this.scheduleSymbolRebuild()
+      this.scheduleSymbolRebuild();
     }
   }
 
   private scheduleAtlasRefresh(): void {
     if (this.atlasRefreshScheduled || this.destroyed) {
-      return
+      return;
     }
 
-    this.atlasRefreshScheduled = true
+    this.atlasRefreshScheduled = true;
     setTimeout(() => {
-      this.atlasRefreshScheduled = false
+      this.atlasRefreshScheduled = false;
       if (this.destroyed || !this.spriteAtlas?.isReady) {
-        return
+        return;
       }
 
-      this.scheduleSymbolRebuild(true)
-    }, 0)
+      this.scheduleSymbolRebuild(true);
+    }, 0);
   }
 
   private scheduleViewportUpdate(forceTileRefresh = false): void {
     if (this.destroyed) {
-      return
+      return;
     }
 
     if (forceTileRefresh) {
-      this.pendingViewportRequiresTileRefresh = true
+      this.pendingViewportRequiresTileRefresh = true;
     }
 
     if (this.viewportUpdateTimer !== undefined) {
-      return
+      return;
     }
 
     this.viewportUpdateTimer = setTimeout(() => {
-      this.viewportUpdateTimer = undefined
-      this.flushViewportUpdate()
-    }, this.movingViewportUpdateDelayMs)
+      this.viewportUpdateTimer = undefined;
+      this.flushViewportUpdate();
+    }, this.movingViewportUpdateDelayMs);
   }
 
   private clearViewportUpdateTimer(): void {
     if (this.viewportUpdateTimer !== undefined) {
-      clearTimeout(this.viewportUpdateTimer)
-      this.viewportUpdateTimer = undefined
+      clearTimeout(this.viewportUpdateTimer);
+      this.viewportUpdateTimer = undefined;
     }
   }
 
   private flushViewportUpdate(forceImmediate = false): void {
-    this.clearViewportUpdateTimer()
+    this.clearViewportUpdateTimer();
 
     if (this.destroyed) {
-      return
+      return;
     }
 
-    const pendingViewportSnapshot = this.pendingViewportSnapshot
-    const forceTileRefresh =
-      this.pendingViewportRequiresTileRefresh ||
-      this.suppressedTileEventsDuringCameraMove
+    const pendingViewportSnapshot = this.pendingViewportSnapshot;
+    const forceTileRefresh
+      = this.pendingViewportRequiresTileRefresh
+        || this.suppressedTileEventsDuringCameraMove;
 
-    this.pendingViewportSnapshot = undefined
-    this.pendingViewportRequiresTileRefresh = false
-    this.suppressedTileEventsDuringCameraMove = false
+    this.pendingViewportSnapshot = undefined;
+    this.pendingViewportRequiresTileRefresh = false;
+    this.suppressedTileEventsDuringCameraMove = false;
 
     if (pendingViewportSnapshot) {
       this.applyViewportSnapshot(
         pendingViewportSnapshot,
         forceImmediate || forceTileRefresh,
-      )
-      return
+      );
+      return;
     }
 
     if (forceTileRefresh) {
-      this.scheduleVisibleTileRefresh(forceImmediate)
+      this.scheduleVisibleTileRefresh(forceImmediate);
     }
   }
 
   private scheduleVisibleTileRefresh(forceImmediate = false): void {
     if (this.destroyed) {
-      return
+      return;
     }
 
     if (forceImmediate) {
-      this.clearVisibleTileRefreshTimer()
-      this.flushVisibleTileRefresh()
-      return
+      this.clearVisibleTileRefreshTimer();
+      this.flushVisibleTileRefresh();
+      return;
     }
 
     if (this.visibleTileRefreshTimer !== undefined) {
-      return
+      return;
     }
 
     this.visibleTileRefreshTimer = setTimeout(() => {
-      this.visibleTileRefreshTimer = undefined
-      this.flushVisibleTileRefresh()
-    }, this.visibleTileRefreshDelayMs)
+      this.visibleTileRefreshTimer = undefined;
+      this.flushVisibleTileRefresh();
+    }, this.visibleTileRefreshDelayMs);
   }
 
   private clearVisibleTileRefreshTimer(): void {
     if (this.visibleTileRefreshTimer !== undefined) {
-      clearTimeout(this.visibleTileRefreshTimer)
-      this.visibleTileRefreshTimer = undefined
+      clearTimeout(this.visibleTileRefreshTimer);
+      this.visibleTileRefreshTimer = undefined;
     }
   }
 
   private flushVisibleTileRefresh(): void {
     if (this.destroyed) {
-      return
+      return;
     }
 
-    this.refreshVisibleTiles()
+    this.refreshVisibleTiles();
   }
 
   private refreshVisibleTiles(): void {
     if (!this.styleRenderer) {
-      const cachedTiles = this.scheduler.getCachedTiles()
+      const cachedTiles = this.scheduler.getCachedTiles();
 
       for (const group of this.groups.values()) {
-        group.destroy()
+        group.destroy();
       }
-      this.groups.clear()
+      this.groups.clear();
 
       for (const tile of cachedTiles) {
         if (this.sourceCache && !this.sourceCache.isVisible(tile.id)) {
-          continue
+          continue;
         }
 
-        this.addTile(tile)
+        this.addTile(tile);
       }
 
-      this.scene.requestRender()
-      return
+      this.scene.requestRender();
+      return;
     }
 
-    const zoom =
-      estimateSceneZoom(this.scene) ??
-      this.currentZoom ??
-      this.sourceCache?.getSnapshot()?.level ??
-      0
+    const zoom
+      = estimateSceneZoom(this.scene)
+        ?? this.currentZoom
+        ?? this.sourceCache?.getSnapshot()?.level
+        ?? 0;
     const visibleTileIds = new Set(
       this.sourceCache
         ? this.sourceCache.getIds()
-        : this.scheduler.getCachedTiles().map((tile) => tile.id),
-    )
+        : this.scheduler.getCachedTiles().map(tile => tile.id),
+    );
 
-    let symbolRefreshNeeded = false
+    let symbolRefreshNeeded = false;
 
     for (const tileId of visibleTileIds) {
-      const tile = this.scheduler.getTile(tileId)
+      const tile = this.scheduler.getTile(tileId);
       if (!tile) {
-        continue
+        continue;
       }
 
-      const group = this.groups.get(tileId)
+      const group = this.groups.get(tileId);
       if (!group) {
-        this.addTile(tile, zoom)
-        continue
+        this.addTile(tile, zoom);
+        continue;
       }
 
       if (group.refreshState.full) {
-        symbolRefreshNeeded = symbolRefreshNeeded || group.refreshState.symbols
-        group.destroy()
-        this.groups.delete(tileId)
-        this.addTile(tile, zoom)
-        continue
+        symbolRefreshNeeded = symbolRefreshNeeded || group.refreshState.symbols;
+        group.destroy();
+        this.groups.delete(tileId);
+        this.addTile(tile, zoom);
+        continue;
       }
 
       if (group.refreshState.paint) {
-        this.applyPaintBindings(group.paintBindings, zoom)
+        this.applyPaintBindings(group.paintBindings, zoom);
       }
 
       if (group.refreshState.symbols) {
-        symbolRefreshNeeded = true
+        symbolRefreshNeeded = true;
         if (group.mode === 'generic') {
-          group.destroy()
-          this.groups.delete(tileId)
-          this.addTile(tile, zoom)
-          continue
+          group.destroy();
+          this.groups.delete(tileId);
+          this.addTile(tile, zoom);
+          continue;
         }
 
-        group.symbolPlacements = this.collectStyledTileSymbolPlacements(tile, zoom)
-        group.labelCount = group.symbolPlacements.length
+        group.symbolPlacements = this.collectStyledTileSymbolPlacements(tile, zoom);
+        group.labelCount = group.symbolPlacements.length;
         group.iconCount = group.symbolPlacements.filter(
-          (placement) => !!placement.candidate.iconImageName,
-        ).length
+          placement => !!placement.candidate.iconImageName,
+        ).length;
       }
     }
 
     if (symbolRefreshNeeded) {
-      this.scheduleSymbolRebuild()
+      this.scheduleSymbolRebuild();
     }
-    this.scene.requestRender()
+    this.scene.requestRender();
   }
 
   private getCandidateDecodedLayers(
@@ -764,11 +770,11 @@ export class CesiumMvtPrimitiveLayer {
     sourceLayer?: string,
   ): DecodedLayerRecord[] {
     if (sourceLayer) {
-      const decodedLayer = decodedLayersByName.get(sourceLayer)
-      return decodedLayer ? [decodedLayer] : []
+      const decodedLayer = decodedLayersByName.get(sourceLayer);
+      return decodedLayer ? [decodedLayer] : [];
     }
 
-    return tile.layers
+    return tile.layers;
   }
 
   private collectTileRefreshState(
@@ -776,30 +782,30 @@ export class CesiumMvtPrimitiveLayer {
     decodedLayersByName: Map<string, DecodedLayerRecord>,
   ): TileZoomRefreshState {
     if (!this.styleRenderer) {
-      return createTileZoomRefreshState()
+      return createTileZoomRefreshState();
     }
 
-    const refreshState = createTileZoomRefreshState()
+    const refreshState = createTileZoomRefreshState();
 
     for (const compiled of this.styleRenderer.layers) {
       if (compiled.zoomRefreshMode === 'none') {
-        continue
+        continue;
       }
 
       const appliesToTile = this.getCandidateDecodedLayers(
         tile,
         decodedLayersByName,
         compiled.sourceLayer,
-      ).some((layer) => this.options.layerFilter(layer, tile))
+      ).some(layer => this.options.layerFilter(layer, tile));
 
       if (!appliesToTile) {
-        continue
+        continue;
       }
 
-      mergeRefreshState(refreshState, compiled.zoomRefreshMode)
+      mergeRefreshState(refreshState, compiled.zoomRefreshMode);
     }
 
-    return refreshState
+    return refreshState;
   }
 
   private applyPaintBindings(bindings: StyledPaintBinding[], zoom: number): void {
@@ -807,49 +813,50 @@ export class CesiumMvtPrimitiveLayer {
       switch (binding.type) {
         case 'line': {
           const lineColor = applyOpacity(
-            binding.compiled.line.color?.evaluate(binding.feature, zoom) ??
-              this.options.lineColor,
+            binding.compiled.line.color?.evaluate(binding.feature, zoom)
+            ?? this.options.lineColor,
             binding.compiled.line.opacity?.evaluate(binding.feature, zoom),
-          )
-          const lineWidth =
-            binding.compiled.line.width?.evaluate(binding.feature, zoom) ??
-            this.options.lineWidth
-          binding.polyline.width = lineWidth
-          const material = binding.polyline.material
+          );
+          const lineWidth
+            = binding.compiled.line.width?.evaluate(binding.feature, zoom)
+              ?? this.options.lineWidth;
+          binding.polyline.width = lineWidth;
+          const material = binding.polyline.material;
           if (material.type === Material.ColorType) {
             material.uniforms.color = Color.clone(
               lineColor,
               material.uniforms.color,
-            )
-          } else {
-            binding.polyline.material = createPolylineMaterial(lineColor)
+            );
           }
-          break
+          else {
+            binding.polyline.material = createPolylineMaterial(lineColor);
+          }
+          break;
         }
         case 'circle': {
-          const style = binding.compiled.circle
-          const circleOpacity = style.opacity?.evaluate(binding.feature, zoom)
-          const strokeOpacity = style.strokeOpacity?.evaluate(binding.feature, zoom) ?? 1
+          const style = binding.compiled.circle;
+          const circleOpacity = style.opacity?.evaluate(binding.feature, zoom);
+          const strokeOpacity = style.strokeOpacity?.evaluate(binding.feature, zoom) ?? 1;
           const circleColor = applyOpacity(
-            style.color?.evaluate(binding.feature, zoom) ??
-              this.options.pointColor,
+            style.color?.evaluate(binding.feature, zoom)
+            ?? this.options.pointColor,
             circleOpacity,
-          )
+          );
           const strokeColor = applyOpacity(
-            style.strokeColor?.evaluate(binding.feature, zoom) ??
-              this.options.pointOutlineColor,
+            style.strokeColor?.evaluate(binding.feature, zoom)
+            ?? this.options.pointOutlineColor,
             strokeOpacity,
-          )
-          const radius = style.radius?.evaluate(binding.feature, zoom) ?? 5
-          binding.pointPrimitive.color = circleColor
-          binding.pointPrimitive.outlineColor = strokeColor
-          binding.pointPrimitive.pixelSize = Math.max(1, Math.round(radius * 2))
-          binding.pointPrimitive.outlineWidth =
-            style.strokeWidth?.evaluate(binding.feature, zoom) ?? 0
-          break
+          );
+          const radius = style.radius?.evaluate(binding.feature, zoom) ?? 5;
+          binding.pointPrimitive.color = circleColor;
+          binding.pointPrimitive.outlineColor = strokeColor;
+          binding.pointPrimitive.pixelSize = Math.max(1, Math.round(radius * 2));
+          binding.pointPrimitive.outlineWidth
+            = style.strokeWidth?.evaluate(binding.feature, zoom) ?? 0;
+          break;
         }
         default:
-          break
+          break;
       }
     }
   }
@@ -868,26 +875,26 @@ export class CesiumMvtPrimitiveLayer {
       }))
       .filter(
         ({ feature }) =>
-          this.options.featureFilter(feature, layer, tile) &&
-          compiled.filter(feature, zoom),
+          this.options.featureFilter(feature, layer, tile)
+          && compiled.filter(feature, zoom),
       )
       .sort((left, right) => {
-        const delta = left.sortKey - right.sortKey
+        const delta = left.sortKey - right.sortKey;
         if (delta !== 0) {
-          return delta
+          return delta;
         }
 
-        return left.featureIndex - right.featureIndex
-      })
+        return left.featureIndex - right.featureIndex;
+      });
   }
 
   private addTile(tile: DecodedTileRecord, zoomOverride?: number): void {
     if (this.styleRenderer) {
-      this.addStyledTile(tile, zoomOverride)
-      return
+      this.addStyledTile(tile, zoomOverride);
+      return;
     }
 
-    this.addGenericTile(tile)
+    this.addGenericTile(tile);
   }
 
   private addGenericTile(
@@ -895,48 +902,48 @@ export class CesiumMvtPrimitiveLayer {
     refreshState: TileZoomRefreshState = createTileZoomRefreshState(),
   ): void {
     if (this.groups.has(tile.id)) {
-      return
+      return;
     }
 
-    const tileOrderBase = tile.coord.level * 100_000
+    const tileOrderBase = tile.coord.level * 100_000;
     const pointCollection = this.options.showPoints
       ? this.getOrCreateSharedPointCollection(
           `generic:${tile.coord.level}:points`,
           tileOrderBase + 0,
         )
-      : undefined
+      : undefined;
     const lineCollection = this.options.showLines || this.options.showPolygonOutlines
       ? this.getOrCreateSharedLineCollection(
           `generic:${tile.coord.level}:lines`,
           tileOrderBase + 10,
         )
-      : undefined
-    const polygonInstances: GeometryInstance[] = []
-    let polygonPrimitive: Primitive | undefined
-    const pointRemovers: Array<() => void> = []
-    const lineRemovers: Array<() => void> = []
+      : undefined;
+    const polygonInstances: GeometryInstance[] = [];
+    let polygonPrimitive: Primitive | undefined;
+    const pointRemovers: Array<() => void> = [];
+    const lineRemovers: Array<() => void> = [];
 
-    const pointColor = this.options.pointColor
-    const polygonFillColor = this.options.polygonFillColor
-    const pointOutlineColor = this.options.pointOutlineColor
+    const pointColor = this.options.pointColor;
+    const polygonFillColor = this.options.polygonFillColor;
+    const pointOutlineColor = this.options.pointOutlineColor;
 
-    let pointCount = 0
-    let lineCount = 0
-    let polygonCount = 0
+    let pointCount = 0;
+    let lineCount = 0;
+    let polygonCount = 0;
 
     for (const layer of tile.layers) {
       if (!this.options.layerFilter(layer, tile)) {
-        continue
+        continue;
       }
 
       const transformContext = createTileTransformContext(
         this.tilingScheme,
         tile.coord,
         layer.extent,
-      )
+      );
       for (const feature of layer.features) {
         if (!this.options.featureFilter(feature, layer, tile)) {
-          continue
+          continue;
         }
 
         switch (feature.type) {
@@ -954,11 +961,11 @@ export class CesiumMvtPrimitiveLayer {
               transformContext,
               onPoint: (pointPrimitive) => {
                 pointRemovers.push(() => {
-                  pointCollection?.remove(pointPrimitive)
-                })
+                  pointCollection?.remove(pointPrimitive);
+                });
               },
-            })
-            break
+            });
+            break;
           case 'LineString':
             lineCount += renderLineStringPrimitives({
               tilingScheme: this.tilingScheme,
@@ -972,11 +979,11 @@ export class CesiumMvtPrimitiveLayer {
               transformContext,
               onPolyline: (polyline) => {
                 lineRemovers.push(() => {
-                  lineCollection?.remove(polyline)
-                })
+                  lineCollection?.remove(polyline);
+                });
               },
-            })
-            break
+            });
+            break;
           case 'Polygon':
             polygonCount += renderPolygonPrimitives({
               tilingScheme: this.tilingScheme,
@@ -987,7 +994,7 @@ export class CesiumMvtPrimitiveLayer {
               instances: polygonInstances,
               color: polygonFillColor,
               transformContext,
-            })
+            });
             lineCount += renderLineStringPrimitives({
               tilingScheme: this.tilingScheme,
               tile,
@@ -1001,13 +1008,13 @@ export class CesiumMvtPrimitiveLayer {
               transformContext,
               onPolyline: (polyline) => {
                 lineRemovers.push(() => {
-                  lineCollection?.remove(polyline)
-                })
+                  lineCollection?.remove(polyline);
+                });
               },
-            })
-            break
+            });
+            break;
           default:
-            break
+            break;
         }
       }
     }
@@ -1022,13 +1029,13 @@ export class CesiumMvtPrimitiveLayer {
         asynchronous: true,
         allowPicking: false,
         releaseGeometryInstances: true,
-      })
+      });
       addPrimitiveOrdered(
         this.scene,
         this.primitiveOrderMap,
         polygonPrimitive,
         tileOrderBase + 20,
-      )
+      );
     }
 
     const group: TilePrimitiveGroup = {
@@ -1043,131 +1050,131 @@ export class CesiumMvtPrimitiveLayer {
       paintBindings: [],
       destroy: () => {
         for (const removePoint of pointRemovers) {
-          removePoint()
+          removePoint();
         }
         for (const removeLine of lineRemovers) {
-          removeLine()
+          removeLine();
         }
-        removeAndDestroyPrimitive(this.scene, polygonPrimitive)
+        removeAndDestroyPrimitive(this.scene, polygonPrimitive);
       },
-    }
+    };
 
-    this.groups.set(tile.id, group)
-    this.scene.requestRender()
+    this.groups.set(tile.id, group);
+    this.scene.requestRender();
   }
 
   private removeTile(tileId: string, scheduleSymbolRebuild = true): void {
-    const group = this.groups.get(tileId)
+    const group = this.groups.get(tileId);
     if (!group) {
-      return
+      return;
     }
 
-    group.destroy()
-    this.groups.delete(tileId)
+    group.destroy();
+    this.groups.delete(tileId);
     if (scheduleSymbolRebuild) {
-      this.scheduleSymbolRebuild()
+      this.scheduleSymbolRebuild();
     }
-    this.scene.requestRender()
+    this.scene.requestRender();
   }
 
   private addStyledTile(tile: DecodedTileRecord, zoomOverride?: number): void {
     if (this.groups.has(tile.id) || !this.styleRenderer) {
-      return
+      return;
     }
 
-    const zoom =
-      zoomOverride ??
-      estimateSceneZoom(this.scene) ??
-      this.currentZoom ??
-      tile.coord.level
-    const destroyers: Array<() => void> = []
-    const styledSymbolPlacements: StyledSymbolPlacement[] = []
-    const paintBindings: StyledPaintBinding[] = []
-    const pointRemovers: Array<() => void> = []
-    const lineRemovers: Array<() => void> = []
-    let pointCount = 0
-    let lineCount = 0
-    let polygonCount = 0
-    let labelCount = 0
-    let iconCount = 0
-    let handledStyledLayer = false
+    const zoom
+      = zoomOverride
+        ?? estimateSceneZoom(this.scene)
+        ?? this.currentZoom
+        ?? tile.coord.level;
+    const destroyers: Array<() => void> = [];
+    const styledSymbolPlacements: StyledSymbolPlacement[] = [];
+    const paintBindings: StyledPaintBinding[] = [];
+    const pointRemovers: Array<() => void> = [];
+    const lineRemovers: Array<() => void> = [];
+    let pointCount = 0;
+    let lineCount = 0;
+    let polygonCount = 0;
+    let labelCount = 0;
+    let iconCount = 0;
+    let handledStyledLayer = false;
 
     const decodedLayersByName = new Map(
-      tile.layers.map((layer) => [layer.name, layer]),
-    )
-    const refreshState = this.collectTileRefreshState(tile, decodedLayersByName)
+      tile.layers.map(layer => [layer.name, layer]),
+    );
+    const refreshState = this.collectTileRefreshState(tile, decodedLayersByName);
 
     for (const compiled of this.styleRenderer.layers) {
       const candidateLayers = this.getCandidateDecodedLayers(
         tile,
         decodedLayersByName,
         compiled.sourceLayer,
-      )
+      );
 
       for (const layer of candidateLayers) {
         if (!this.options.layerFilter(layer, tile)) {
-          continue
+          continue;
         }
 
         if (!compiled.matches(layer, tile, zoom)) {
-          continue
+          continue;
         }
 
-        handledStyledLayer = true
-        let pointCollection: PointPrimitiveCollection | undefined
-        let lineCollection: PolylineCollection | undefined
-        const polygonInstances: GeometryInstance[] = []
-        let bucketPointCount = 0
-        let bucketLineCount = 0
-        let bucketPolygonCount = 0
-        const bucketSymbolPlacements: StyledSymbolPlacement[] = []
+        handledStyledLayer = true;
+        let pointCollection: PointPrimitiveCollection | undefined;
+        let lineCollection: PolylineCollection | undefined;
+        const polygonInstances: GeometryInstance[] = [];
+        let bucketPointCount = 0;
+        let bucketLineCount = 0;
+        let bucketPolygonCount = 0;
+        const bucketSymbolPlacements: StyledSymbolPlacement[] = [];
         const transformContext = createTileTransformContext(
           this.tilingScheme,
           tile.coord,
           layer.extent,
-        )
-        const layerOrderBase = tile.coord.level * 100_000 + compiled.order * 100
+        );
+        const layerOrderBase = tile.coord.level * 100_000 + compiled.order * 100;
 
         const ensurePointCollection = () => {
           if (!pointCollection) {
             pointCollection = this.getOrCreateSharedPointCollection(
               `styled:${tile.coord.level}:point:${compiled.id}`,
               layerOrderBase + 10,
-            )
+            );
           }
-          return pointCollection
-        }
+          return pointCollection;
+        };
 
         const ensureLineCollection = () => {
           if (!lineCollection) {
             lineCollection = this.getOrCreateSharedLineCollection(
               `styled:${tile.coord.level}:line:${compiled.id}`,
               layerOrderBase + 20,
-            )
+            );
           }
-          return lineCollection
-        }
+          return lineCollection;
+        };
 
         const sortedFeatures = this.collectSortedStyledFeatures(
           compiled,
           layer,
           tile,
           zoom,
-        )
+        );
 
         for (const { feature, featureIndex } of sortedFeatures) {
           switch (compiled.type) {
             case 'fill': {
-              const style = compiled.fill
+              const style = compiled.fill;
               if (!this.options.showPolygonFills) {
-                break
+                break;
               }
 
-              const baseFillColor =
-                style.color?.evaluate(feature, zoom) ??
-                this.options.polygonFillColor
-              const fillOpacity = style.opacity?.evaluate(feature, zoom)
-              const fillColor = applyOpacity(baseFillColor, fillOpacity)
+              const baseFillColor
+                = style.color?.evaluate(feature, zoom)
+                  ?? this.options.polygonFillColor;
+              const fillOpacity = style.opacity?.evaluate(feature, zoom);
+              const fillColor = applyOpacity(baseFillColor, fillOpacity);
 
               bucketPolygonCount += renderPolygonPrimitives({
                 tilingScheme: this.tilingScheme,
@@ -1178,20 +1185,20 @@ export class CesiumMvtPrimitiveLayer {
                 instances: polygonInstances,
                 color: fillColor,
                 transformContext,
-              })
+              });
 
-              const fillAntialias =
-                style.antialias?.evaluate(feature, zoom) ?? true
+              const fillAntialias
+                = style.antialias?.evaluate(feature, zoom) ?? true;
               if (
-                this.options.showPolygonOutlines &&
-                fillAntialias &&
-                style.outlineColor !== undefined
+                this.options.showPolygonOutlines
+                && fillAntialias
+                && style.outlineColor !== undefined
               ) {
-                const outlineCollection = ensureLineCollection()
+                const outlineCollection = ensureLineCollection();
                 const outlineColor = applyOpacity(
                   style.outlineColor.evaluate(feature, zoom),
                   fillOpacity,
-                )
+                );
                 bucketLineCount += renderLineStringPrimitives({
                   tilingScheme: this.tilingScheme,
                   tile,
@@ -1205,26 +1212,26 @@ export class CesiumMvtPrimitiveLayer {
                   transformContext,
                   onPolyline: (polyline) => {
                     lineRemovers.push(() => {
-                      outlineCollection.remove(polyline)
-                    })
+                      outlineCollection.remove(polyline);
+                    });
                   },
-                })
+                });
               }
-              break
+              break;
             }
             case 'line': {
-              const style = compiled.line
+              const style = compiled.line;
               if (!this.options.showLines) {
-                break
+                break;
               }
 
               const lineColor = applyOpacity(
-                style.color?.evaluate(feature, zoom) ??
-                  this.options.lineColor,
+                style.color?.evaluate(feature, zoom)
+                ?? this.options.lineColor,
                 style.opacity?.evaluate(feature, zoom),
-              )
-              const lineWidth = style.width?.evaluate(feature, zoom)
-              const collection = ensureLineCollection()
+              );
+              const lineWidth = style.width?.evaluate(feature, zoom);
+              const collection = ensureLineCollection();
               bucketLineCount += renderLineStringPrimitives({
                 tilingScheme: this.tilingScheme,
                 tile,
@@ -1239,45 +1246,45 @@ export class CesiumMvtPrimitiveLayer {
                   compiled.zoomRefreshMode === 'paint'
                     ? (polyline) => {
                         lineRemovers.push(() => {
-                          collection.remove(polyline)
-                        })
+                          collection.remove(polyline);
+                        });
                         paintBindings.push({
                           type: 'line',
                           compiled,
                           feature,
                           polyline,
-                        })
+                        });
                       }
                     : (polyline) => {
                         lineRemovers.push(() => {
-                          collection.remove(polyline)
-                        })
+                          collection.remove(polyline);
+                        });
                       },
-              })
-              break
+              });
+              break;
             }
             case 'circle': {
-              const style = compiled.circle
+              const style = compiled.circle;
               if (!this.options.showPoints) {
-                break
+                break;
               }
 
-              const circleOpacity = style.opacity?.evaluate(feature, zoom)
-              const strokeOpacity = style.strokeOpacity?.evaluate(feature, zoom) ?? 1
+              const circleOpacity = style.opacity?.evaluate(feature, zoom);
+              const strokeOpacity = style.strokeOpacity?.evaluate(feature, zoom) ?? 1;
               const circleColor = applyOpacity(
-                style.color?.evaluate(feature, zoom) ??
-                  this.options.pointColor,
+                style.color?.evaluate(feature, zoom)
+                ?? this.options.pointColor,
                 circleOpacity,
-              )
+              );
               const strokeColor = applyOpacity(
-                style.strokeColor?.evaluate(feature, zoom) ??
-                  this.options.pointOutlineColor,
+                style.strokeColor?.evaluate(feature, zoom)
+                ?? this.options.pointOutlineColor,
                 strokeOpacity,
-              )
-              const radius = style.radius?.evaluate(feature, zoom) ?? 5
-              const pixelSize = Math.max(1, Math.round(radius * 2))
-              const outlineWidth = style.strokeWidth?.evaluate(feature, zoom) ?? 0
-              const collection = ensurePointCollection()
+              );
+              const radius = style.radius?.evaluate(feature, zoom) ?? 5;
+              const pixelSize = Math.max(1, Math.round(radius * 2));
+              const outlineWidth = style.strokeWidth?.evaluate(feature, zoom) ?? 0;
+              const collection = ensurePointCollection();
               bucketPointCount += renderPointPrimitives({
                 tilingScheme: this.tilingScheme,
                 tile,
@@ -1294,26 +1301,26 @@ export class CesiumMvtPrimitiveLayer {
                   compiled.zoomRefreshMode === 'paint'
                     ? (pointPrimitive) => {
                         pointRemovers.push(() => {
-                          collection.remove(pointPrimitive)
-                        })
+                          collection.remove(pointPrimitive);
+                        });
                         paintBindings.push({
                           type: 'circle',
                           compiled,
                           feature,
                           pointPrimitive,
-                        })
+                        });
                       }
                     : (pointPrimitive) => {
                         pointRemovers.push(() => {
-                          collection.remove(pointPrimitive)
-                        })
+                          collection.remove(pointPrimitive);
+                        });
                       },
-              })
-              break
+              });
+              break;
             }
             case 'symbol': {
               if (!this.options.showLabels) {
-                break
+                break;
               }
 
               const placement = createStyledSymbolPlacement({
@@ -1324,23 +1331,23 @@ export class CesiumMvtPrimitiveLayer {
                 compiled,
                 zoom,
                 transformContext,
-              })
+              });
               if (placement) {
-                bucketSymbolPlacements.push(placement)
+                bucketSymbolPlacements.push(placement);
               }
 
-              break
+              break;
             }
             default:
-              break
+              break;
           }
         }
 
         if (bucketSymbolPlacements.length > 0) {
-          styledSymbolPlacements.push(...bucketSymbolPlacements)
+          styledSymbolPlacements.push(...bucketSymbolPlacements);
         }
 
-        let polygonPrimitive: Primitive | undefined
+        let polygonPrimitive: Primitive | undefined;
         if (this.options.showPolygonFills && polygonInstances.length > 0) {
           polygonPrimitive = new Primitive({
             geometryInstances: polygonInstances,
@@ -1351,39 +1358,39 @@ export class CesiumMvtPrimitiveLayer {
             asynchronous: true,
             allowPicking: false,
             releaseGeometryInstances: true,
-          })
+          });
           addPrimitiveOrdered(
             this.scene,
             this.primitiveOrderMap,
             polygonPrimitive,
             layerOrderBase + 0,
-          )
+          );
         }
 
         if (
-          bucketPointCount > 0 ||
-          bucketLineCount > 0 ||
-          bucketPolygonCount > 0 ||
-          bucketSymbolPlacements.length > 0
+          bucketPointCount > 0
+          || bucketLineCount > 0
+          || bucketPolygonCount > 0
+          || bucketSymbolPlacements.length > 0
         ) {
-          pointCount += bucketPointCount
-          lineCount += bucketLineCount
-          polygonCount += bucketPolygonCount
-          labelCount += bucketSymbolPlacements.length
+          pointCount += bucketPointCount;
+          lineCount += bucketLineCount;
+          polygonCount += bucketPolygonCount;
+          labelCount += bucketSymbolPlacements.length;
           iconCount += bucketSymbolPlacements.filter(
-            (placement) => !!placement.candidate.iconImageName,
-          ).length
+            placement => !!placement.candidate.iconImageName,
+          ).length;
 
           destroyers.push(() => {
-            removeAndDestroyPrimitive(this.scene, polygonPrimitive)
-          })
+            removeAndDestroyPrimitive(this.scene, polygonPrimitive);
+          });
         }
       }
     }
 
     if (!handledStyledLayer) {
-      this.addGenericTile(tile, refreshState)
-      return
+      this.addGenericTile(tile, refreshState);
+      return;
     }
 
     const group: TilePrimitiveGroup = {
@@ -1398,66 +1405,66 @@ export class CesiumMvtPrimitiveLayer {
       paintBindings,
       destroy: () => {
         for (const removePoint of pointRemovers) {
-          removePoint()
+          removePoint();
         }
         for (const removeLine of lineRemovers) {
-          removeLine()
+          removeLine();
         }
         for (const destroy of destroyers) {
-          destroy()
+          destroy();
         }
       },
-    }
+    };
 
-    this.groups.set(tile.id, group)
+    this.groups.set(tile.id, group);
     if (styledSymbolPlacements.length > 0) {
-      this.scheduleSymbolRebuild()
+      this.scheduleSymbolRebuild();
     }
-    this.scene.requestRender()
+    this.scene.requestRender();
   }
 
   private getOrCreateSharedPointCollection(
     key: string,
     order: number,
   ): PointPrimitiveCollection {
-    const existing = this.sharedPointCollections.get(key)
+    const existing = this.sharedPointCollections.get(key);
     if (existing) {
-      return existing
+      return existing;
     }
 
     const created = new PointPrimitiveCollection({
       show: true,
-    })
+    });
     addPrimitiveOrdered(
       this.scene,
       this.primitiveOrderMap,
       created,
       order,
-    )
-    this.sharedPointCollections.set(key, created)
-    return created
+    );
+    this.sharedPointCollections.set(key, created);
+    return created;
   }
 
   private getOrCreateSharedLineCollection(
     key: string,
     order: number,
   ): PolylineCollection {
-    const existing = this.sharedLineCollections.get(key)
+    const existing = this.sharedLineCollections.get(key);
     if (existing) {
-      return existing
+      return existing;
     }
 
     const created = new PolylineCollection({
       show: true,
-    })
+    });
     addPrimitiveOrdered(
       this.scene,
       this.primitiveOrderMap,
       created,
       order,
-    )
-    this.sharedLineCollections.set(key, created)
-    return created
+    );
+    this.sharedLineCollections.set(key, created);
+    return created;
   }
 
   private collectStyledTileSymbolPlacements(
@@ -1465,45 +1472,45 @@ export class CesiumMvtPrimitiveLayer {
     zoom: number,
   ): StyledSymbolPlacement[] {
     if (!this.styleRenderer || !this.options.showLabels) {
-      return []
+      return [];
     }
 
-    const placements: StyledSymbolPlacement[] = []
+    const placements: StyledSymbolPlacement[] = [];
     const decodedLayersByName = new Map(
-      tile.layers.map((layer) => [layer.name, layer]),
-    )
+      tile.layers.map(layer => [layer.name, layer]),
+    );
 
     for (const compiled of this.styleRenderer.layers) {
       if (compiled.type !== 'symbol') {
-        continue
+        continue;
       }
 
       const candidateLayers = this.getCandidateDecodedLayers(
         tile,
         decodedLayersByName,
         compiled.sourceLayer,
-      )
+      );
 
       for (const layer of candidateLayers) {
         if (!this.options.layerFilter(layer, tile)) {
-          continue
+          continue;
         }
 
         if (!compiled.matches(layer, tile, zoom)) {
-          continue
+          continue;
         }
 
         const transformContext = createTileTransformContext(
           this.tilingScheme,
           tile.coord,
           layer.extent,
-        )
+        );
         const sortedFeatures = this.collectSortedStyledFeatures(
           compiled,
           layer,
           tile,
           zoom,
-        )
+        );
 
         for (const { feature, featureIndex } of sortedFeatures) {
           const placement = createStyledSymbolPlacement({
@@ -1514,73 +1521,73 @@ export class CesiumMvtPrimitiveLayer {
             compiled,
             zoom,
             transformContext,
-          })
+          });
           if (placement) {
-            placements.push(placement)
+            placements.push(placement);
           }
         }
       }
     }
 
-    return placements
+    return placements;
   }
 
   private scheduleSymbolRebuild(forceImmediate = false): void {
     if (this.destroyed || !this.options.showLabels || !this.styleRenderer) {
-      return
+      return;
     }
 
-    this.symbolLayoutDirty = true
+    this.symbolLayoutDirty = true;
     if (!this.labelsVisible) {
-      this.symbolLayoutDirtyWhileHidden = true
-      this.clearSymbolRebuildTimer()
-      return
+      this.symbolLayoutDirtyWhileHidden = true;
+      this.clearSymbolRebuildTimer();
+      return;
     }
 
     if (forceImmediate) {
-      this.clearSymbolRebuildTimer()
-      this.flushSymbolRebuild()
-      return
+      this.clearSymbolRebuildTimer();
+      this.flushSymbolRebuild();
+      return;
     }
 
     if (this.symbolRebuildTimer !== undefined) {
-      return
+      return;
     }
 
     this.symbolRebuildTimer = setTimeout(() => {
-      this.symbolRebuildTimer = undefined
-      this.flushSymbolRebuild()
-    }, this.symbolRebuildDelayMs)
+      this.symbolRebuildTimer = undefined;
+      this.flushSymbolRebuild();
+    }, this.symbolRebuildDelayMs);
   }
 
   private clearSymbolRebuildTimer(): void {
     if (this.symbolRebuildTimer !== undefined) {
-      clearTimeout(this.symbolRebuildTimer)
-      this.symbolRebuildTimer = undefined
+      clearTimeout(this.symbolRebuildTimer);
+      this.symbolRebuildTimer = undefined;
     }
   }
 
   private flushSymbolRebuild(): void {
     if (this.destroyed || !this.symbolLayoutDirty) {
-      return
+      return;
     }
 
     if (!this.labelsVisible) {
-      this.symbolLayoutDirtyWhileHidden = true
-      return
+      this.symbolLayoutDirtyWhileHidden = true;
+      return;
     }
 
-    this.symbolLayoutDirty = false
-    this.symbolLayoutDirtyWhileHidden = false
+    this.symbolLayoutDirty = false;
+    this.symbolLayoutDirtyWhileHidden = false;
     this.symbolRenderer.rebuild(
       this.collectStyledSymbolPlacements(),
       this.labelsVisible,
-    )
+    );
   }
 
   private collectStyledSymbolPlacements(): StyledSymbolPlacement[] {
     return Array.from(this.groups.values()).flatMap(
-      (group) => group.symbolPlacements,
-    )
+      group => group.symbolPlacements,
+    );
   }
 }

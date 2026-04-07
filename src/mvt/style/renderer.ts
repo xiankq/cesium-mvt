@@ -1,19 +1,21 @@
-import {
-  latest,
-  type LayerSpecification,
-  type StyleSpecification,
-} from '@maplibre/maplibre-gl-style-spec'
-import { Color } from 'cesium'
+import type { LayerSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type {
   DecodedFeatureRecord,
   DecodedLayerRecord,
   DecodedTileRecord,
-} from '../types'
+} from '../types';
+import type { CompiledStyleExpression } from './expressions';
+import {
+  latest,
+
+} from '@maplibre/maplibre-gl-style-spec';
+import { Color } from 'cesium';
 import {
   buildStyleFeatureFilter,
   buildStyleLayerVisibility,
   compileBooleanExpression,
   compileColorExpression,
+
   compileEnumExpression,
   compileFontExpression,
   compileNumberExpression,
@@ -25,158 +27,157 @@ import {
   compileTextOffsetExpression,
   compileTextOverlapExpression,
   compileTextTransformExpression,
-  type CompiledStyleExpression,
-} from './expressions'
+} from './expressions';
 
-export { resolveFormattedText } from './expressions'
-export type { CompiledStyleExpression, ResolvedFormattedText } from './expressions'
+export { resolveFormattedText } from './expressions';
+export type { CompiledStyleExpression, ResolvedFormattedText } from './expressions';
 
-type SupportedStyleLayerType = 'fill' | 'line' | 'circle' | 'symbol'
-export type CompiledStyleRefreshMode = 'none' | 'paint' | 'symbols' | 'full'
+type SupportedStyleLayerType = 'fill' | 'line' | 'circle' | 'symbol';
+export type CompiledStyleRefreshMode = 'none' | 'paint' | 'symbols' | 'full';
 type SupportedLayerSpecification = LayerSpecification & {
-  type: SupportedStyleLayerType
-  filter?: unknown
-  'source-layer'?: string
-  layout?: {
-    visibility?: 'visible' | 'none'
-    [key: string]: unknown
-  }
-  paint?: {
-    [key: string]: unknown
-  }
-  minzoom?: number
-  maxzoom?: number
+  'type': SupportedStyleLayerType;
+  'filter'?: unknown;
+  'source-layer'?: string;
+  'layout'?: {
+    visibility?: 'visible' | 'none';
+    [key: string]: unknown;
+  };
+  'paint'?: {
+    [key: string]: unknown;
+  };
+  'minzoom'?: number;
+  'maxzoom'?: number;
+};
+
+interface CompiledFillStyle {
+  color?: CompiledStyleExpression<Color>;
+  opacity?: CompiledStyleExpression<number>;
+  outlineColor?: CompiledStyleExpression<Color>;
+  antialias?: CompiledStyleExpression<boolean>;
+  sortKey?: CompiledStyleExpression<number>;
 }
 
-type CompiledFillStyle = {
-  color?: CompiledStyleExpression<Color>
-  opacity?: CompiledStyleExpression<number>
-  outlineColor?: CompiledStyleExpression<Color>
-  antialias?: CompiledStyleExpression<boolean>
-  sortKey?: CompiledStyleExpression<number>
+interface CompiledLineStyle {
+  color?: CompiledStyleExpression<Color>;
+  width?: CompiledStyleExpression<number>;
+  opacity?: CompiledStyleExpression<number>;
+  sortKey?: CompiledStyleExpression<number>;
 }
 
-type CompiledLineStyle = {
-  color?: CompiledStyleExpression<Color>
-  width?: CompiledStyleExpression<number>
-  opacity?: CompiledStyleExpression<number>
-  sortKey?: CompiledStyleExpression<number>
+interface CompiledCircleStyle {
+  color?: CompiledStyleExpression<Color>;
+  radius?: CompiledStyleExpression<number>;
+  strokeColor?: CompiledStyleExpression<Color>;
+  strokeWidth?: CompiledStyleExpression<number>;
+  opacity?: CompiledStyleExpression<number>;
+  strokeOpacity?: CompiledStyleExpression<number>;
+  sortKey?: CompiledStyleExpression<number>;
 }
 
-type CompiledCircleStyle = {
-  color?: CompiledStyleExpression<Color>
-  radius?: CompiledStyleExpression<number>
-  strokeColor?: CompiledStyleExpression<Color>
-  strokeWidth?: CompiledStyleExpression<number>
-  opacity?: CompiledStyleExpression<number>
-  strokeOpacity?: CompiledStyleExpression<number>
-  sortKey?: CompiledStyleExpression<number>
+interface CompiledSymbolStyle {
+  textField?: CompiledStyleExpression<unknown>;
+  textSize?: CompiledStyleExpression<number>;
+  textMaxWidth?: CompiledStyleExpression<number>;
+  textLineHeight?: CompiledStyleExpression<number>;
+  textJustify?: CompiledStyleExpression<'auto' | 'left' | 'center' | 'right'>;
+  textTransform?: CompiledStyleExpression<'none' | 'uppercase' | 'lowercase'>;
+  textLetterSpacing?: CompiledStyleExpression<number>;
+  textColor?: CompiledStyleExpression<Color>;
+  textHaloColor?: CompiledStyleExpression<Color>;
+  textHaloWidth?: CompiledStyleExpression<number>;
+  textHaloBlur?: CompiledStyleExpression<number>;
+  textOpacity?: CompiledStyleExpression<number>;
+  textFont?: CompiledStyleExpression<string[]>;
+  textAnchor?: CompiledStyleExpression<string>;
+  textOffset?: CompiledStyleExpression<[number, number]>;
+  textTranslate?: CompiledStyleExpression<[number, number]>;
+  textRadialOffset?: CompiledStyleExpression<number>;
+  textAllowOverlap?: CompiledStyleExpression<boolean>;
+  textOverlap?: CompiledStyleExpression<'never' | 'always' | 'cooperative'>;
+  textIgnorePlacement?: CompiledStyleExpression<boolean>;
+  textPadding?: CompiledStyleExpression<number>;
+  textOptional?: CompiledStyleExpression<boolean>;
+  textVariableAnchor?: CompiledStyleExpression<string[]>;
+  symbolSortKey?: CompiledStyleExpression<number>;
+  symbolZOrder?: CompiledStyleExpression<'auto' | 'viewport-y' | 'source'>;
+  iconAnchor?: CompiledStyleExpression<string>;
+  iconOffset?: CompiledStyleExpression<[number, number]>;
+  iconRotate?: CompiledStyleExpression<number>;
+  iconTranslate?: CompiledStyleExpression<[number, number]>;
+  iconAllowOverlap?: CompiledStyleExpression<boolean>;
+  iconOverlap?: CompiledStyleExpression<'never' | 'always' | 'cooperative'>;
+  iconIgnorePlacement?: CompiledStyleExpression<boolean>;
+  iconOptional?: CompiledStyleExpression<boolean>;
+  iconPadding?: CompiledStyleExpression<number>;
+  iconTextFitPadding?: CompiledStyleExpression<[number, number, number, number]>;
+  iconImage?: CompiledStyleExpression<string>;
+  iconColor?: CompiledStyleExpression<Color>;
+  iconOpacity?: CompiledStyleExpression<number>;
+  iconHaloColor?: CompiledStyleExpression<Color>;
+  iconHaloWidth?: CompiledStyleExpression<number>;
+  iconHaloBlur?: CompiledStyleExpression<number>;
+  iconSize?: CompiledStyleExpression<number>;
+  iconTextFit?: CompiledStyleExpression<'none' | 'width' | 'height' | 'both'>;
 }
 
-type CompiledSymbolStyle = {
-  textField?: CompiledStyleExpression<unknown>
-  textSize?: CompiledStyleExpression<number>
-  textMaxWidth?: CompiledStyleExpression<number>
-  textLineHeight?: CompiledStyleExpression<number>
-  textJustify?: CompiledStyleExpression<'auto' | 'left' | 'center' | 'right'>
-  textTransform?: CompiledStyleExpression<'none' | 'uppercase' | 'lowercase'>
-  textLetterSpacing?: CompiledStyleExpression<number>
-  textColor?: CompiledStyleExpression<Color>
-  textHaloColor?: CompiledStyleExpression<Color>
-  textHaloWidth?: CompiledStyleExpression<number>
-  textHaloBlur?: CompiledStyleExpression<number>
-  textOpacity?: CompiledStyleExpression<number>
-  textFont?: CompiledStyleExpression<string[]>
-  textAnchor?: CompiledStyleExpression<string>
-  textOffset?: CompiledStyleExpression<[number, number]>
-  textTranslate?: CompiledStyleExpression<[number, number]>
-  textRadialOffset?: CompiledStyleExpression<number>
-  textAllowOverlap?: CompiledStyleExpression<boolean>
-  textOverlap?: CompiledStyleExpression<'never' | 'always' | 'cooperative'>
-  textIgnorePlacement?: CompiledStyleExpression<boolean>
-  textPadding?: CompiledStyleExpression<number>
-  textOptional?: CompiledStyleExpression<boolean>
-  textVariableAnchor?: CompiledStyleExpression<string[]>
-  symbolSortKey?: CompiledStyleExpression<number>
-  symbolZOrder?: CompiledStyleExpression<'auto' | 'viewport-y' | 'source'>
-  iconAnchor?: CompiledStyleExpression<string>
-  iconOffset?: CompiledStyleExpression<[number, number]>
-  iconRotate?: CompiledStyleExpression<number>
-  iconTranslate?: CompiledStyleExpression<[number, number]>
-  iconAllowOverlap?: CompiledStyleExpression<boolean>
-  iconOverlap?: CompiledStyleExpression<'never' | 'always' | 'cooperative'>
-  iconIgnorePlacement?: CompiledStyleExpression<boolean>
-  iconOptional?: CompiledStyleExpression<boolean>
-  iconPadding?: CompiledStyleExpression<number>
-  iconTextFitPadding?: CompiledStyleExpression<[number, number, number, number]>
-  iconImage?: CompiledStyleExpression<string>
-  iconColor?: CompiledStyleExpression<Color>
-  iconOpacity?: CompiledStyleExpression<number>
-  iconHaloColor?: CompiledStyleExpression<Color>
-  iconHaloWidth?: CompiledStyleExpression<number>
-  iconHaloBlur?: CompiledStyleExpression<number>
-  iconSize?: CompiledStyleExpression<number>
-  iconTextFit?: CompiledStyleExpression<'none' | 'width' | 'height' | 'both'>
-}
-
-type CompiledStyleLayerBase<TType extends SupportedStyleLayerType> = {
-  id: string
-  type: TType
-  order: number
-  sourceLayer?: string
-  minzoom?: number
-  maxzoom?: number
-  visible: boolean
-  zoomRefreshMode: CompiledStyleRefreshMode
-  filter: (feature: DecodedFeatureRecord, zoom: number) => boolean
+interface CompiledStyleLayerBase<TType extends SupportedStyleLayerType> {
+  id: string;
+  type: TType;
+  order: number;
+  sourceLayer?: string;
+  minzoom?: number;
+  maxzoom?: number;
+  visible: boolean;
+  zoomRefreshMode: CompiledStyleRefreshMode;
+  filter: (feature: DecodedFeatureRecord, zoom: number) => boolean;
   matches: (
     layer: DecodedLayerRecord,
     tile: DecodedTileRecord,
     zoom: number,
-  ) => boolean
+  ) => boolean;
 }
 
 export type CompiledFillLayer = CompiledStyleLayerBase<'fill'> & {
-  fill: CompiledFillStyle
-}
+  fill: CompiledFillStyle;
+};
 
 export type CompiledLineLayer = CompiledStyleLayerBase<'line'> & {
-  line: CompiledLineStyle
-}
+  line: CompiledLineStyle;
+};
 
 export type CompiledCircleLayer = CompiledStyleLayerBase<'circle'> & {
-  circle: CompiledCircleStyle
-}
+  circle: CompiledCircleStyle;
+};
 
 export type CompiledSymbolLayer = CompiledStyleLayerBase<'symbol'> & {
-  symbol: CompiledSymbolStyle
+  symbol: CompiledSymbolStyle;
+};
+
+export type CompiledStyleLayer
+  = | CompiledFillLayer
+    | CompiledLineLayer
+    | CompiledCircleLayer
+    | CompiledSymbolLayer;
+
+export interface CompiledMapLibreStyleRenderer {
+  layers: CompiledStyleLayer[];
+  layersBySourceLayer: Map<string, CompiledStyleLayer[]>;
 }
 
-export type CompiledStyleLayer =
-  | CompiledFillLayer
-  | CompiledLineLayer
-  | CompiledCircleLayer
-  | CompiledSymbolLayer
-
-export type CompiledMapLibreStyleRenderer = {
-  layers: CompiledStyleLayer[]
-  layersBySourceLayer: Map<string, CompiledStyleLayer[]>
-}
-
-const paintFillSpec = latest['paint_fill']
-const paintLineSpec = latest['paint_line']
-const paintCircleSpec = latest['paint_circle']
-const paintSymbolSpec = latest['paint_symbol']
-const paintBackgroundSpec = latest['paint_background']
-const layoutFillSpec = latest['layout_fill']
-const layoutLineSpec = latest['layout_line']
-const layoutCircleSpec = latest['layout_circle']
-const layoutSymbolSpec = latest['layout_symbol']
-const defaultTextFontStack =
-  (layoutSymbolSpec['text-font'].default as string[] | undefined) ?? [
+const paintFillSpec = latest.paint_fill;
+const paintLineSpec = latest.paint_line;
+const paintCircleSpec = latest.paint_circle;
+const paintSymbolSpec = latest.paint_symbol;
+const paintBackgroundSpec = latest.paint_background;
+const layoutFillSpec = latest.layout_fill;
+const layoutLineSpec = latest.layout_line;
+const layoutCircleSpec = latest.layout_circle;
+const layoutSymbolSpec = latest.layout_symbol;
+const defaultTextFontStack
+  = (layoutSymbolSpec['text-font'].default as string[] | undefined) ?? [
     'Open Sans Regular',
     'Arial Unicode MS Regular',
-  ]
+  ];
 
 const backgroundStyleFeature: DecodedFeatureRecord = {
   id: undefined,
@@ -184,16 +185,16 @@ const backgroundStyleFeature: DecodedFeatureRecord = {
   bbox: [0, 0, 0, 0],
   properties: {},
   geometry: [],
-}
+};
 
 function createCompiledLayerBase<TType extends SupportedStyleLayerType>(
   layer: SupportedLayerSpecification & { type: TType },
   order: number,
 ): CompiledStyleLayerBase<TType> {
-  const visible = layer.layout?.visibility !== 'none'
-  const sourceLayer = layer['source-layer']
-  const matches = buildStyleLayerVisibility(layer)
-  const filter = buildStyleFeatureFilter(layer)
+  const visible = layer.layout?.visibility !== 'none';
+  const sourceLayer = layer['source-layer'];
+  const matches = buildStyleLayerVisibility(layer);
+  const filter = buildStyleFeatureFilter(layer);
 
   return {
     id: layer.id,
@@ -206,39 +207,39 @@ function createCompiledLayerBase<TType extends SupportedStyleLayerType>(
     zoomRefreshMode: 'none',
     filter,
     matches: (decodedLayer, tile, zoom) => visible && matches(decodedLayer, tile, zoom),
-  }
+  };
 }
 
 function styleValueUsesZoom(value: unknown): boolean {
   if (value === 'zoom') {
-    return true
+    return true;
   }
 
   if (Array.isArray(value)) {
-    return value.some((entry) => styleValueUsesZoom(entry))
+    return value.some(entry => styleValueUsesZoom(entry));
   }
 
   if (value && typeof value === 'object') {
-    return Object.values(value).some((entry) => styleValueUsesZoom(entry))
+    return Object.values(value).some(entry => styleValueUsesZoom(entry));
   }
 
-  return false
+  return false;
 }
 
 function expressionsUseZoom(
   ...expressions: Array<CompiledStyleExpression<unknown> | undefined>
 ): boolean {
-  return expressions.some((expression) => expression?.zoomDependent === true)
+  return expressions.some(expression => expression?.zoomDependent === true);
 }
 
 function layerMembershipUsesZoom(
   layer: SupportedLayerSpecification,
 ): boolean {
   return (
-    layer.minzoom !== undefined ||
-    layer.maxzoom !== undefined ||
-    styleValueUsesZoom(layer.filter)
-  )
+    layer.minzoom !== undefined
+    || layer.maxzoom !== undefined
+    || styleValueUsesZoom(layer.filter)
+  );
 }
 
 function resolveZoomRefreshMode(
@@ -247,22 +248,22 @@ function resolveZoomRefreshMode(
   zoomPaintDependent: boolean,
 ): CompiledStyleRefreshMode {
   if (zoomLayoutDependent) {
-    return layerType === 'symbol' ? 'symbols' : 'full'
+    return layerType === 'symbol' ? 'symbols' : 'full';
   }
 
   if (!zoomPaintDependent) {
-    return 'none'
+    return 'none';
   }
 
   switch (layerType) {
     case 'line':
     case 'circle':
-      return 'paint'
+      return 'paint';
     case 'symbol':
-      return 'symbols'
+      return 'symbols';
     case 'fill':
     default:
-      return 'full'
+      return 'full';
   }
 }
 
@@ -297,7 +298,7 @@ function compileFillStyle(
       layer.layout?.['fill-sort-key'],
       layoutFillSpec['fill-sort-key'],
     ),
-  }
+  };
 }
 
 function compileLineStyle(
@@ -323,7 +324,7 @@ function compileLineStyle(
       layer.layout?.['line-sort-key'],
       layoutLineSpec['line-sort-key'],
     ),
-  }
+  };
 }
 
 function compileCircleStyle(
@@ -364,7 +365,7 @@ function compileCircleStyle(
       layer.layout?.['circle-sort-key'],
       layoutCircleSpec['circle-sort-key'],
     ),
-  }
+  };
 }
 
 function compileSymbolStyle(
@@ -504,14 +505,14 @@ function compileSymbolStyle(
             undefined,
             (input) => {
               if (Array.isArray(input)) {
-                return input.map((value) => String(value))
+                return input.map(value => String(value));
               }
 
               if (typeof input === 'string' && input.length > 0) {
-                return [input]
+                return [input];
               }
 
-              return []
+              return [];
             },
           )
         : undefined,
@@ -634,7 +635,7 @@ function compileSymbolStyle(
             'none',
           )
         : undefined,
-  }
+  };
 }
 
 function createCompiledLayer(
@@ -643,18 +644,18 @@ function createCompiledLayer(
 ): CompiledStyleLayer | undefined {
   switch (layer.type) {
     case 'fill': {
-      const supportedLayer = layer as SupportedLayerSpecification & { type: 'fill' }
-      const base = createCompiledLayerBase(supportedLayer, order)
-      const fill = compileFillStyle(supportedLayer)
-      const zoomLayoutDependent =
-        layerMembershipUsesZoom(supportedLayer)
-        || expressionsUseZoom(fill.sortKey)
+      const supportedLayer = layer as SupportedLayerSpecification & { type: 'fill' };
+      const base = createCompiledLayerBase(supportedLayer, order);
+      const fill = compileFillStyle(supportedLayer);
+      const zoomLayoutDependent
+        = layerMembershipUsesZoom(supportedLayer)
+          || expressionsUseZoom(fill.sortKey);
       const zoomPaintDependent = expressionsUseZoom(
         fill.color,
         fill.opacity,
         fill.outlineColor,
         fill.antialias,
-      )
+      );
       return {
         ...base,
         zoomRefreshMode: resolveZoomRefreshMode(
@@ -663,20 +664,20 @@ function createCompiledLayer(
           zoomPaintDependent,
         ),
         fill,
-      }
+      };
     }
     case 'line': {
-      const supportedLayer = layer as SupportedLayerSpecification & { type: 'line' }
-      const base = createCompiledLayerBase(supportedLayer, order)
-      const line = compileLineStyle(supportedLayer)
-      const zoomLayoutDependent =
-        layerMembershipUsesZoom(supportedLayer)
-        || expressionsUseZoom(line.sortKey)
+      const supportedLayer = layer as SupportedLayerSpecification & { type: 'line' };
+      const base = createCompiledLayerBase(supportedLayer, order);
+      const line = compileLineStyle(supportedLayer);
+      const zoomLayoutDependent
+        = layerMembershipUsesZoom(supportedLayer)
+          || expressionsUseZoom(line.sortKey);
       const zoomPaintDependent = expressionsUseZoom(
         line.color,
         line.width,
         line.opacity,
-      )
+      );
       return {
         ...base,
         zoomRefreshMode: resolveZoomRefreshMode(
@@ -685,15 +686,15 @@ function createCompiledLayer(
           zoomPaintDependent,
         ),
         line,
-      }
+      };
     }
     case 'circle': {
-      const supportedLayer = layer as SupportedLayerSpecification & { type: 'circle' }
-      const base = createCompiledLayerBase(supportedLayer, order)
-      const circle = compileCircleStyle(supportedLayer)
-      const zoomLayoutDependent =
-        layerMembershipUsesZoom(supportedLayer)
-        || expressionsUseZoom(circle.sortKey)
+      const supportedLayer = layer as SupportedLayerSpecification & { type: 'circle' };
+      const base = createCompiledLayerBase(supportedLayer, order);
+      const circle = compileCircleStyle(supportedLayer);
+      const zoomLayoutDependent
+        = layerMembershipUsesZoom(supportedLayer)
+          || expressionsUseZoom(circle.sortKey);
       const zoomPaintDependent = expressionsUseZoom(
         circle.radius,
         circle.color,
@@ -701,7 +702,7 @@ function createCompiledLayer(
         circle.strokeColor,
         circle.opacity,
         circle.strokeOpacity,
-      )
+      );
       return {
         ...base,
         zoomRefreshMode: resolveZoomRefreshMode(
@@ -710,59 +711,59 @@ function createCompiledLayer(
           zoomPaintDependent,
         ),
         circle,
-      }
+      };
     }
     case 'symbol': {
-      const supportedLayer = layer as SupportedLayerSpecification & { type: 'symbol' }
-      const base = createCompiledLayerBase(supportedLayer, order)
-      const symbol = compileSymbolStyle(supportedLayer)
-      const zoomLayoutDependent =
-        layerMembershipUsesZoom(supportedLayer)
-        || expressionsUseZoom(
-        symbol.textField,
-        symbol.textSize,
-        symbol.textMaxWidth,
-        symbol.textLineHeight,
-        symbol.textJustify,
-        symbol.textTransform,
-        symbol.textLetterSpacing,
-        symbol.textColor,
-        symbol.textHaloColor,
-        symbol.textHaloWidth,
-        symbol.textHaloBlur,
-        symbol.textOpacity,
-        symbol.textFont,
-        symbol.textAnchor,
-        symbol.textOffset,
-        symbol.textTranslate,
-        symbol.textRadialOffset,
-        symbol.textAllowOverlap,
-        symbol.textOverlap,
-        symbol.textIgnorePlacement,
-        symbol.textPadding,
-        symbol.textOptional,
-        symbol.textVariableAnchor,
-        symbol.symbolSortKey,
-        symbol.symbolZOrder,
-        symbol.iconAnchor,
-        symbol.iconOffset,
-        symbol.iconRotate,
-        symbol.iconTranslate,
-        symbol.iconAllowOverlap,
-        symbol.iconOverlap,
-        symbol.iconIgnorePlacement,
-        symbol.iconOptional,
-        symbol.iconPadding,
-        symbol.iconTextFitPadding,
-        symbol.iconImage,
-        symbol.iconColor,
-        symbol.iconOpacity,
-        symbol.iconHaloColor,
-        symbol.iconHaloWidth,
-        symbol.iconHaloBlur,
-        symbol.iconSize,
-        symbol.iconTextFit,
-      )
+      const supportedLayer = layer as SupportedLayerSpecification & { type: 'symbol' };
+      const base = createCompiledLayerBase(supportedLayer, order);
+      const symbol = compileSymbolStyle(supportedLayer);
+      const zoomLayoutDependent
+        = layerMembershipUsesZoom(supportedLayer)
+          || expressionsUseZoom(
+            symbol.textField,
+            symbol.textSize,
+            symbol.textMaxWidth,
+            symbol.textLineHeight,
+            symbol.textJustify,
+            symbol.textTransform,
+            symbol.textLetterSpacing,
+            symbol.textColor,
+            symbol.textHaloColor,
+            symbol.textHaloWidth,
+            symbol.textHaloBlur,
+            symbol.textOpacity,
+            symbol.textFont,
+            symbol.textAnchor,
+            symbol.textOffset,
+            symbol.textTranslate,
+            symbol.textRadialOffset,
+            symbol.textAllowOverlap,
+            symbol.textOverlap,
+            symbol.textIgnorePlacement,
+            symbol.textPadding,
+            symbol.textOptional,
+            symbol.textVariableAnchor,
+            symbol.symbolSortKey,
+            symbol.symbolZOrder,
+            symbol.iconAnchor,
+            symbol.iconOffset,
+            symbol.iconRotate,
+            symbol.iconTranslate,
+            symbol.iconAllowOverlap,
+            symbol.iconOverlap,
+            symbol.iconIgnorePlacement,
+            symbol.iconOptional,
+            symbol.iconPadding,
+            symbol.iconTextFitPadding,
+            symbol.iconImage,
+            symbol.iconColor,
+            symbol.iconOpacity,
+            symbol.iconHaloColor,
+            symbol.iconHaloWidth,
+            symbol.iconHaloBlur,
+            symbol.iconSize,
+            symbol.iconTextFit,
+          );
       return {
         ...base,
         zoomRefreshMode: resolveZoomRefreshMode(
@@ -771,33 +772,34 @@ function createCompiledLayer(
           false,
         ),
         symbol,
-      }
+      };
     }
     default:
-      return undefined
+      return undefined;
   }
 }
 
 export function compileMapLibreStyleRenderer(
   style: StyleSpecification,
 ): CompiledMapLibreStyleRenderer {
-  const layers: CompiledStyleLayer[] = []
-  const layersBySourceLayer = new Map<string, CompiledStyleLayer[]>()
+  const layers: CompiledStyleLayer[] = [];
+  const layersBySourceLayer = new Map<string, CompiledStyleLayer[]>();
 
   for (const [order, layer] of (style.layers ?? []).entries()) {
-    const compiled = createCompiledLayer(layer, order)
+    const compiled = createCompiledLayer(layer, order);
     if (!compiled) {
-      continue
+      continue;
     }
 
-    layers.push(compiled)
+    layers.push(compiled);
 
     if (compiled.sourceLayer) {
-      const existing = layersBySourceLayer.get(compiled.sourceLayer)
+      const existing = layersBySourceLayer.get(compiled.sourceLayer);
       if (existing) {
-        existing.push(compiled)
-      } else {
-        layersBySourceLayer.set(compiled.sourceLayer, [compiled])
+        existing.push(compiled);
+      }
+      else {
+        layersBySourceLayer.set(compiled.sourceLayer, [compiled]);
       }
     }
   }
@@ -805,15 +807,16 @@ export function compileMapLibreStyleRenderer(
   return {
     layers,
     layersBySourceLayer,
-  }
+  };
 }
 
 export function getStyledLayersForSourceLayer(
   renderer: CompiledMapLibreStyleRenderer | undefined,
   sourceLayer: string,
 ): CompiledStyleLayer[] {
-  if (!renderer) return []
-  return renderer.layersBySourceLayer.get(sourceLayer) ?? []
+  if (!renderer)
+    return [];
+  return renderer.layersBySourceLayer.get(sourceLayer) ?? [];
 }
 
 export function resolveMapLibreStyleBackgroundColor(
@@ -823,34 +826,34 @@ export function resolveMapLibreStyleBackgroundColor(
   const backgroundLayer = [...(style.layers ?? [])]
     .reverse()
     .find((layer): layer is LayerSpecification & {
-      type: 'background'
+      type: 'background';
       paint?: {
-        [key: string]: unknown
-      }
-    } => layer.type === 'background')
+        [key: string]: unknown;
+      };
+    } => layer.type === 'background');
 
   if (!backgroundLayer) {
-    return undefined
+    return undefined;
   }
 
   const colorExpression = compileColorExpression(
     backgroundLayer.paint?.['background-color'],
     paintBackgroundSpec['background-color'],
     '#000000',
-  )
+  );
   const opacityExpression = compileNumberExpression(
     backgroundLayer.paint?.['background-opacity'],
     paintBackgroundSpec['background-opacity'],
     1,
-  )
+  );
 
-  const backgroundColor = colorExpression?.evaluate(backgroundStyleFeature, zoom)
+  const backgroundColor = colorExpression?.evaluate(backgroundStyleFeature, zoom);
   if (!backgroundColor) {
-    return undefined
+    return undefined;
   }
 
-  const opacity = opacityExpression?.evaluate(backgroundStyleFeature, zoom) ?? 1
-  const next = Color.clone(backgroundColor)
-  next.alpha = Math.min(Math.max(next.alpha * opacity, 0), 1)
-  return next
+  const opacity = opacityExpression?.evaluate(backgroundStyleFeature, zoom) ?? 1;
+  const next = Color.clone(backgroundColor);
+  next.alpha = Math.min(Math.max(next.alpha * opacity, 0), 1);
+  return next;
 }
