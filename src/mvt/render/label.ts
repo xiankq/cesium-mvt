@@ -4,6 +4,7 @@ import {
   Cartesian3,
   Color,
   HorizontalOrigin,
+  LabelCollection,
   Scene,
   VerticalOrigin,
 } from 'cesium'
@@ -70,7 +71,7 @@ export type SymbolBucketRuntime = {
   tileId: string
   bucketKey: string
   order: number
-  textBillboardCollection?: BillboardCollection
+  textLabelCollection?: LabelCollection
   iconBillboardCollection?: BillboardCollection
   setLabelsVisible: (visible: boolean) => void
   destroy: () => void

@@ -2,7 +2,10 @@ import {
   BillboardCollection,
   Cartesian2,
   Color,
+  LabelCollection,
+  LabelStyle,
   type Billboard,
+  type Label,
   type Scene,
 } from 'cesium'
 import type {
@@ -30,6 +33,7 @@ import {
   combinePixelOffsets,
   estimateIconScreenRect,
   estimateSpriteScreenRect,
+  fontStackToCss,
   normalizeSymbolKey,
   parseTextAnchor,
   resolveTextJustifyOrigin,
@@ -84,9 +88,33 @@ type ManagedBillboard = {
   imageKey: string
 }
 
+type TextLabelSpec = {
+  key: string
+  text: string
+  font: string
+  position: StyledSymbolPlacement['candidate']['position']
+  fillColor: Color
+  outlineColor: Color
+  outlineWidth: number
+  style: LabelStyle
+  pixelOffset: Cartesian2
+  horizontalOrigin: ReturnType<typeof parseTextAnchor>['horizontalOrigin']
+  verticalOrigin: ReturnType<typeof parseTextAnchor>['verticalOrigin']
+  id: {
+    tileId: string
+    layer: string
+    featureId: number | string | undefined
+    placementId: string
+  }
+}
+
+type ManagedLabel = {
+  label: Label
+}
+
 type DesiredBucketState = {
   placement: StyledSymbolPlacement
-  textSpecs: Map<string, BillboardSpec>
+  textSpecs: Map<string, TextLabelSpec>
   iconSpecs: Map<string, BillboardSpec>
 }
 
@@ -94,9 +122,9 @@ type SymbolBucketRuntime = {
   tileId: string
   bucketKey: string
   order: number
-  textBillboardCollection: BillboardCollection
+  textLabelCollection: LabelCollection
   iconBillboardCollection: BillboardCollection
-  textBillboards: Map<string, ManagedBillboard>
+  textLabels: Map<string, ManagedLabel>
   iconBillboards: Map<string, ManagedBillboard>
   setLabelsVisible: (visible: boolean) => void
   destroy: () => void
@@ -435,17 +463,17 @@ export class SymbolRenderer {
         candidate.textSize,
         textOrigins,
       )
-      const textSprite = candidate.text
-        ? this.textAtlas.resolveImage(
+      const textLayout = candidate.text
+        ? this.textAtlas.measure(
             buildTextSpriteRequest(candidate, candidate.text, textAnchorName),
           )
         : undefined
-      const textRect = textSprite
+      const textRect = textLayout
         ? estimateSpriteScreenRect(
             this.scene,
             candidate.position,
-            textSprite.width,
-            textSprite.height,
+            textLayout.width,
+            textLayout.height,
             textPixelOffset,
             textOrigins,
             0,
@@ -632,19 +660,26 @@ export class SymbolRenderer {
         )
       }
 
-      if (renderText && textRect && candidate.text && textSprite) {
+      if (renderText && textRect && candidate.text && textLayout) {
+        const outlineWidth = Math.max(
+          0,
+          candidate.haloWidth + candidate.haloBlur * 0.5,
+        )
         bucket.textSpecs.set(`${candidate.labelId}:text`, {
           key: `${candidate.labelId}:text`,
-          imageKey: textSprite.entryKey,
-          image: textSprite.image,
+          text: candidate.text,
+          font: `${candidate.textSize}px ${fontStackToCss(candidate.fontStack)}`,
           position: candidate.position,
-          color: Color.WHITE,
-          width: textSprite.width,
-          height: textSprite.height,
+          fillColor: candidate.textColor,
+          outlineColor: candidate.haloColor,
+          outlineWidth,
+          style:
+            outlineWidth > 0 && candidate.haloColor.alpha > 0
+              ? LabelStyle.FILL_AND_OUTLINE
+              : LabelStyle.FILL,
           pixelOffset: textPixelOffset,
           horizontalOrigin: textOrigins.horizontalOrigin,
           verticalOrigin: textOrigins.verticalOrigin,
-          rotation: 0,
           id: {
             tileId: placement.tileId,
             layer: placement.compiledId,
@@ -675,7 +710,7 @@ export class SymbolRenderer {
 
     const created: DesiredBucketState = {
       placement,
-      textSpecs: new Map<string, BillboardSpec>(),
+      textSpecs: new Map<string, TextLabelSpec>(),
       iconSpecs: new Map<string, BillboardSpec>(),
     }
     desiredBuckets.set(placement.bucketKey, created)
@@ -698,9 +733,9 @@ export class SymbolRenderer {
     for (const desired of desiredBuckets.values()) {
       const runtime = this.ensureRuntime(desired.placement, labelsVisible)
       runtime.setLabelsVisible(labelsVisible)
-      this.reconcileBillboards(
-        runtime.textBillboardCollection,
-        runtime.textBillboards,
+      this.reconcileLabels(
+        runtime.textLabelCollection,
+        runtime.textLabels,
         desired.textSpecs,
       )
       this.reconcileBillboards(
@@ -709,10 +744,51 @@ export class SymbolRenderer {
         desired.iconSpecs,
       )
 
-      if (runtime.textBillboards.size === 0 && runtime.iconBillboards.size === 0) {
+      if (runtime.textLabels.size === 0 && runtime.iconBillboards.size === 0) {
         runtime.destroy()
         this.symbolBucketRuntimes.delete(runtime.bucketKey)
       }
+    }
+  }
+
+  private reconcileLabels(
+    collection: LabelCollection,
+    managedEntries: Map<string, ManagedLabel>,
+    desiredSpecs: Map<string, TextLabelSpec>,
+  ): void {
+    for (const [key, managed] of Array.from(managedEntries.entries())) {
+      if (desiredSpecs.has(key)) {
+        continue
+      }
+
+      collection.remove(managed.label)
+      managedEntries.delete(key)
+    }
+
+    for (const [key, spec] of desiredSpecs) {
+      const existing = managedEntries.get(key)
+      if (existing) {
+        this.applyLabelSpec(existing, spec)
+        continue
+      }
+
+      const created = collection.add({
+        show: true,
+        position: spec.position,
+        text: spec.text,
+        font: spec.font,
+        fillColor: spec.fillColor,
+        outlineColor: spec.outlineColor,
+        outlineWidth: spec.outlineWidth,
+        style: spec.style,
+        pixelOffset: spec.pixelOffset,
+        horizontalOrigin: spec.horizontalOrigin,
+        verticalOrigin: spec.verticalOrigin,
+        id: spec.id,
+      })
+      managedEntries.set(key, {
+        label: created,
+      })
     }
   }
 
@@ -778,6 +854,24 @@ export class SymbolRenderer {
     managed.billboard.id = spec.id
   }
 
+  private applyLabelSpec(
+    managed: ManagedLabel,
+    spec: TextLabelSpec,
+  ): void {
+    managed.label.show = true
+    managed.label.position = spec.position
+    managed.label.text = spec.text
+    managed.label.font = spec.font
+    managed.label.fillColor = spec.fillColor
+    managed.label.outlineColor = spec.outlineColor
+    managed.label.outlineWidth = spec.outlineWidth
+    managed.label.style = spec.style
+    managed.label.pixelOffset = spec.pixelOffset
+    managed.label.horizontalOrigin = spec.horizontalOrigin
+    managed.label.verticalOrigin = spec.verticalOrigin
+    managed.label.id = spec.id
+  }
+
   private ensureRuntime(
     placement: StyledSymbolPlacement,
     labelsVisible: boolean,
@@ -789,13 +883,14 @@ export class SymbolRenderer {
 
     const layerOrderBase =
       placement.tileLevel * 100_000 + placement.bucketOrder * 100
-    const textBillboardCollection = new BillboardCollection({
+    const textLabelCollection = new LabelCollection({
+      scene: this.scene,
       show: labelsVisible,
     })
     addPrimitiveOrdered(
       this.scene,
       this.primitiveOrderMap,
-      textBillboardCollection,
+      textLabelCollection,
       layerOrderBase + 90,
     )
 
@@ -813,16 +908,16 @@ export class SymbolRenderer {
       tileId: placement.tileId,
       bucketKey: placement.bucketKey,
       order: placement.bucketOrder,
-      textBillboardCollection,
+      textLabelCollection,
       iconBillboardCollection,
-      textBillboards: new Map<string, ManagedBillboard>(),
+      textLabels: new Map<string, ManagedLabel>(),
       iconBillboards: new Map<string, ManagedBillboard>(),
       setLabelsVisible: (visible: boolean) => {
-        textBillboardCollection.show = visible
+        textLabelCollection.show = visible
         iconBillboardCollection.show = visible
       },
       destroy: () => {
-        removeAndDestroyPrimitive(this.scene, textBillboardCollection)
+        removeAndDestroyPrimitive(this.scene, textLabelCollection)
         removeAndDestroyPrimitive(this.scene, iconBillboardCollection)
       },
     }

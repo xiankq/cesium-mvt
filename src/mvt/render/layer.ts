@@ -182,6 +182,8 @@ export class CesiumMvtPrimitiveLayer {
   }
   private readonly groups = new Map<string, TilePrimitiveGroup>()
   private readonly primitiveOrderMap = new WeakMap<object, number>()
+  private readonly sharedPointCollections = new Map<string, PointPrimitiveCollection>()
+  private readonly sharedLineCollections = new Map<string, PolylineCollection>()
   private readonly spriteAtlas?: MapLibreSpriteAtlas
   private readonly symbolRenderer: SymbolRenderer
   private readonly sourceCache?: CesiumMvtSourceCache
@@ -204,6 +206,7 @@ export class CesiumMvtPrimitiveLayer {
   private readonly symbolRebuildDelayMs = 160
   private readonly visibleTileRefreshDelayMs = 120
   private readonly movingViewportUpdateDelayMs = 80
+  private readonly deferViewportUpdatesDuringCameraMove = true
   private symbolRebuildTimer?: ReturnType<typeof setTimeout>
   private visibleTileRefreshTimer?: ReturnType<typeof setTimeout>
   private viewportUpdateTimer?: ReturnType<typeof setTimeout>
@@ -445,12 +448,22 @@ export class CesiumMvtPrimitiveLayer {
       group.destroy()
     }
     this.groups.clear()
+    for (const collection of this.sharedPointCollections.values()) {
+      removeAndDestroyPrimitive(this.scene, collection)
+    }
+    this.sharedPointCollections.clear()
+    for (const collection of this.sharedLineCollections.values()) {
+      removeAndDestroyPrimitive(this.scene, collection)
+    }
+    this.sharedLineCollections.clear()
   }
 
   private handleTileEvent = (event: TileDecodeEvent): void => {
     if (this.cameraMoving) {
       this.suppressedTileEventsDuringCameraMove = true
-      this.scheduleViewportUpdate(true)
+      if (!this.deferViewportUpdatesDuringCameraMove) {
+        this.scheduleViewportUpdate(true)
+      }
       return
     }
 
@@ -473,7 +486,9 @@ export class CesiumMvtPrimitiveLayer {
     if (this.cameraMoving) {
       this.currentZoom = snapshot.zoom
       this.pendingViewportSnapshot = snapshot
-      this.scheduleViewportUpdate()
+      if (!this.deferViewportUpdatesDuringCameraMove) {
+        this.scheduleViewportUpdate()
+      }
       return
     }
 
@@ -885,34 +900,21 @@ export class CesiumMvtPrimitiveLayer {
 
     const tileOrderBase = tile.coord.level * 100_000
     const pointCollection = this.options.showPoints
-      ? new PointPrimitiveCollection({
-          show: true,
-        })
+      ? this.getOrCreateSharedPointCollection(
+          `generic:${tile.coord.level}:points`,
+          tileOrderBase + 0,
+        )
       : undefined
     const lineCollection = this.options.showLines || this.options.showPolygonOutlines
-      ? new PolylineCollection({
-          show: true,
-        })
+      ? this.getOrCreateSharedLineCollection(
+          `generic:${tile.coord.level}:lines`,
+          tileOrderBase + 10,
+        )
       : undefined
     const polygonInstances: GeometryInstance[] = []
-
-    if (pointCollection) {
-      addPrimitiveOrdered(
-        this.scene,
-        this.primitiveOrderMap,
-        pointCollection,
-        tileOrderBase + 0,
-      )
-    }
-    if (lineCollection) {
-      addPrimitiveOrdered(
-        this.scene,
-        this.primitiveOrderMap,
-        lineCollection,
-        tileOrderBase + 10,
-      )
-    }
     let polygonPrimitive: Primitive | undefined
+    const pointRemovers: Array<() => void> = []
+    const lineRemovers: Array<() => void> = []
 
     const pointColor = this.options.pointColor
     const polygonFillColor = this.options.polygonFillColor
@@ -950,6 +952,11 @@ export class CesiumMvtPrimitiveLayer {
               outlineColor: pointOutlineColor,
               pixelSize: this.options.pointPixelSize,
               transformContext,
+              onPoint: (pointPrimitive) => {
+                pointRemovers.push(() => {
+                  pointCollection?.remove(pointPrimitive)
+                })
+              },
             })
             break
           case 'LineString':
@@ -963,6 +970,11 @@ export class CesiumMvtPrimitiveLayer {
               color: this.options.lineColor,
               width: this.options.lineWidth,
               transformContext,
+              onPolyline: (polyline) => {
+                lineRemovers.push(() => {
+                  lineCollection?.remove(polyline)
+                })
+              },
             })
             break
           case 'Polygon':
@@ -987,6 +999,11 @@ export class CesiumMvtPrimitiveLayer {
               width: this.options.polygonOutlineWidth,
               closedLoop: true,
               transformContext,
+              onPolyline: (polyline) => {
+                lineRemovers.push(() => {
+                  lineCollection?.remove(polyline)
+                })
+              },
             })
             break
           default:
@@ -1025,8 +1042,12 @@ export class CesiumMvtPrimitiveLayer {
       symbolPlacements: [],
       paintBindings: [],
       destroy: () => {
-        removeAndDestroyPrimitive(this.scene, pointCollection)
-        removeAndDestroyPrimitive(this.scene, lineCollection)
+        for (const removePoint of pointRemovers) {
+          removePoint()
+        }
+        for (const removeLine of lineRemovers) {
+          removeLine()
+        }
         removeAndDestroyPrimitive(this.scene, polygonPrimitive)
       },
     }
@@ -1062,6 +1083,8 @@ export class CesiumMvtPrimitiveLayer {
     const destroyers: Array<() => void> = []
     const styledSymbolPlacements: StyledSymbolPlacement[] = []
     const paintBindings: StyledPaintBinding[] = []
+    const pointRemovers: Array<() => void> = []
+    const lineRemovers: Array<() => void> = []
     let pointCount = 0
     let lineCount = 0
     let polygonCount = 0
@@ -1107,13 +1130,8 @@ export class CesiumMvtPrimitiveLayer {
 
         const ensurePointCollection = () => {
           if (!pointCollection) {
-            pointCollection = new PointPrimitiveCollection({
-              show: true,
-            })
-            addPrimitiveOrdered(
-              this.scene,
-              this.primitiveOrderMap,
-              pointCollection,
+            pointCollection = this.getOrCreateSharedPointCollection(
+              `styled:${tile.coord.level}:point:${compiled.id}`,
               layerOrderBase + 10,
             )
           }
@@ -1122,13 +1140,8 @@ export class CesiumMvtPrimitiveLayer {
 
         const ensureLineCollection = () => {
           if (!lineCollection) {
-            lineCollection = new PolylineCollection({
-              show: true,
-            })
-            addPrimitiveOrdered(
-              this.scene,
-              this.primitiveOrderMap,
-              lineCollection,
+            lineCollection = this.getOrCreateSharedLineCollection(
+              `styled:${tile.coord.level}:line:${compiled.id}`,
               layerOrderBase + 20,
             )
           }
@@ -1190,6 +1203,11 @@ export class CesiumMvtPrimitiveLayer {
                   width: 1,
                   closedLoop: true,
                   transformContext,
+                  onPolyline: (polyline) => {
+                    lineRemovers.push(() => {
+                      outlineCollection.remove(polyline)
+                    })
+                  },
                 })
               }
               break
@@ -1220,6 +1238,9 @@ export class CesiumMvtPrimitiveLayer {
                 onPolyline:
                   compiled.zoomRefreshMode === 'paint'
                     ? (polyline) => {
+                        lineRemovers.push(() => {
+                          collection.remove(polyline)
+                        })
                         paintBindings.push({
                           type: 'line',
                           compiled,
@@ -1227,7 +1248,11 @@ export class CesiumMvtPrimitiveLayer {
                           polyline,
                         })
                       }
-                    : undefined,
+                    : (polyline) => {
+                        lineRemovers.push(() => {
+                          collection.remove(polyline)
+                        })
+                      },
               })
               break
             }
@@ -1268,6 +1293,9 @@ export class CesiumMvtPrimitiveLayer {
                 onPoint:
                   compiled.zoomRefreshMode === 'paint'
                     ? (pointPrimitive) => {
+                        pointRemovers.push(() => {
+                          collection.remove(pointPrimitive)
+                        })
                         paintBindings.push({
                           type: 'circle',
                           compiled,
@@ -1275,7 +1303,11 @@ export class CesiumMvtPrimitiveLayer {
                           pointPrimitive,
                         })
                       }
-                    : undefined,
+                    : (pointPrimitive) => {
+                        pointRemovers.push(() => {
+                          collection.remove(pointPrimitive)
+                        })
+                      },
               })
               break
             }
@@ -1343,8 +1375,6 @@ export class CesiumMvtPrimitiveLayer {
           ).length
 
           destroyers.push(() => {
-            removeAndDestroyPrimitive(this.scene, pointCollection)
-            removeAndDestroyPrimitive(this.scene, lineCollection)
             removeAndDestroyPrimitive(this.scene, polygonPrimitive)
           })
         }
@@ -1367,6 +1397,12 @@ export class CesiumMvtPrimitiveLayer {
       symbolPlacements: styledSymbolPlacements,
       paintBindings,
       destroy: () => {
+        for (const removePoint of pointRemovers) {
+          removePoint()
+        }
+        for (const removeLine of lineRemovers) {
+          removeLine()
+        }
         for (const destroy of destroyers) {
           destroy()
         }
@@ -1378,6 +1414,50 @@ export class CesiumMvtPrimitiveLayer {
       this.scheduleSymbolRebuild()
     }
     this.scene.requestRender()
+  }
+
+  private getOrCreateSharedPointCollection(
+    key: string,
+    order: number,
+  ): PointPrimitiveCollection {
+    const existing = this.sharedPointCollections.get(key)
+    if (existing) {
+      return existing
+    }
+
+    const created = new PointPrimitiveCollection({
+      show: true,
+    })
+    addPrimitiveOrdered(
+      this.scene,
+      this.primitiveOrderMap,
+      created,
+      order,
+    )
+    this.sharedPointCollections.set(key, created)
+    return created
+  }
+
+  private getOrCreateSharedLineCollection(
+    key: string,
+    order: number,
+  ): PolylineCollection {
+    const existing = this.sharedLineCollections.get(key)
+    if (existing) {
+      return existing
+    }
+
+    const created = new PolylineCollection({
+      show: true,
+    })
+    addPrimitiveOrdered(
+      this.scene,
+      this.primitiveOrderMap,
+      created,
+      order,
+    )
+    this.sharedLineCollections.set(key, created)
+    return created
   }
 
   private collectStyledTileSymbolPlacements(
