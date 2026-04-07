@@ -478,7 +478,9 @@ export class CesiumMvtPrimitiveLayer {
     }
 
     if (event.type === 'decoded') {
-      if (this.sourceCache && !this.sourceCache.isVisible(event.tile.id)) {
+      // On first load, accept all decoded tiles unconditionally until
+      // postRender populates activeTileIds via syncSceneTiles().
+      if (this.sourceCache && this.sourceCache.hasActiveTiles() && !this.sourceCache.isVisible(event.tile.id)) {
         return;
       }
       this.addTile(event.tile);

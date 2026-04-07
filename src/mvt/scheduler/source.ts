@@ -215,8 +215,13 @@ export class CesiumMvtSourceCache {
     this.removePostRenderListener = this.scene.postRender.addEventListener(
       this.handleScenePostRender,
     );
-    this.syncSceneTiles();
+    // Kick off Cesium's render cycle immediately so imagery tiles get requested.
+    // Then sync tiles after the first frame when surface tiles are available.
+    this.scene.requestRender();
+    this.syncAfterFirstFrame = true;
   }
+
+  private syncAfterFirstFrame = false;
 
   pause(): void {
     this.paused = true;
@@ -334,6 +339,10 @@ export class CesiumMvtSourceCache {
 
   isVisible(tileId: string): boolean {
     return this.activeTileIds.has(tileId);
+  }
+
+  hasActiveTiles(): boolean {
+    return this.activeTileIds.size > 0;
   }
 
   private handleScenePostRender = (): void => {
