@@ -1,5 +1,6 @@
 import {
   Color,
+  type Polyline,
   PolylineCollection,
   type TilingScheme,
 } from 'cesium'
@@ -23,6 +24,7 @@ export type RenderLineStringPrimitivesOptions = {
   color: Color
   width: number
   closedLoop?: boolean
+  onPolyline?: (polyline: Polyline) => void
 }
 
 export function renderLineStringPrimitives(
@@ -38,6 +40,7 @@ export function renderLineStringPrimitives(
     color,
     width,
     closedLoop = false,
+    onPolyline,
   } = options
 
   if (!collection) {
@@ -60,7 +63,7 @@ export function renderLineStringPrimitives(
       continue
     }
 
-    collection.add({
+    const polyline = collection.add({
       show: true,
       positions: closedLoop ? ensureClosedLoop(positions) : positions,
       width,
@@ -72,6 +75,7 @@ export function renderLineStringPrimitives(
         featureId: feature.id,
       },
     })
+    onPolyline?.(polyline)
     count += 1
   }
 

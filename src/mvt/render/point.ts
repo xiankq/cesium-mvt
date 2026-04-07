@@ -1,5 +1,6 @@
 import {
   Color,
+  type PointPrimitive,
   PointPrimitiveCollection,
   type TilingScheme,
 } from 'cesium'
@@ -20,6 +21,7 @@ export type RenderPointPrimitivesOptions = {
   outlineColor: Color
   pixelSize: number
   outlineWidth?: number
+  onPoint?: (point: PointPrimitive) => void
 }
 
 export function renderPointPrimitives(
@@ -36,6 +38,7 @@ export function renderPointPrimitives(
     outlineColor,
     pixelSize,
     outlineWidth,
+    onPoint,
   } = options
 
   if (!collection) {
@@ -52,7 +55,7 @@ export function renderPointPrimitives(
         extent,
       )
 
-      collection.add({
+      const pointPrimitive = collection.add({
         show: true,
         position,
         color,
@@ -65,6 +68,7 @@ export function renderPointPrimitives(
           featureId: feature.id,
         },
       })
+      onPoint?.(pointPrimitive)
       count += 1
     }
   }

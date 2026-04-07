@@ -2,6 +2,7 @@ import {
   BillboardCollection,
   Cartesian2,
   Color,
+  type Billboard,
   type Scene,
   type TilingScheme,
 } from 'cesium'
@@ -36,7 +37,6 @@ import {
   resolveIconImageDimensions,
   resolveTextPixelOffset,
   type StyledSymbolPlacement,
-  type SymbolBucketRuntime,
   textOffsetToPixelOffset,
   unionScreenRects,
   wrapSymbolText,
@@ -57,6 +57,49 @@ type CreateStyledSymbolPlacementOptions = {
 type PreparedStyledSymbolPlacement = StyledSymbolPlacement & {
   textAnchorCandidates: string[]
   screenY: number
+}
+
+type BillboardSpec = {
+  key: string
+  imageKey: string
+  image: HTMLCanvasElement | HTMLImageElement | string
+  position: StyledSymbolPlacement['candidate']['position']
+  color: Color
+  width: number
+  height: number
+  pixelOffset: Cartesian2
+  horizontalOrigin: ReturnType<typeof parseTextAnchor>['horizontalOrigin']
+  verticalOrigin: ReturnType<typeof parseTextAnchor>['verticalOrigin']
+  rotation: number
+  id: {
+    tileId: string
+    layer: string
+    featureId: number | string | undefined
+    placementId: string
+  }
+}
+
+type ManagedBillboard = {
+  billboard: Billboard
+  imageKey: string
+}
+
+type DesiredBucketState = {
+  placement: StyledSymbolPlacement
+  textSpecs: Map<string, BillboardSpec>
+  iconSpecs: Map<string, BillboardSpec>
+}
+
+type SymbolBucketRuntime = {
+  tileId: string
+  bucketKey: string
+  order: number
+  textBillboardCollection: BillboardCollection
+  iconBillboardCollection: BillboardCollection
+  textBillboards: Map<string, ManagedBillboard>
+  iconBillboards: Map<string, ManagedBillboard>
+  setLabelsVisible: (visible: boolean) => void
+  destroy: () => void
 }
 
 export function createStyledSymbolPlacement(
@@ -277,8 +320,6 @@ export class SymbolRenderer {
   private readonly scene: Scene
   private readonly primitiveOrderMap: WeakMap<object, number>
   private readonly spriteAtlas?: MapLibreSpriteAtlas
-  private readonly labelCollisionIndex = new ScreenLabelCollisionIndex()
-  private readonly symbolDedupeIndex = new ScreenSymbolDedupeIndex()
   private readonly textAtlas = new TextSpriteAtlas()
   private readonly symbolBucketRuntimes = new Map<string, SymbolBucketRuntime>()
 
@@ -307,8 +348,6 @@ export class SymbolRenderer {
       runtime.destroy()
     }
     this.symbolBucketRuntimes.clear()
-    this.labelCollisionIndex.clear()
-    this.symbolDedupeIndex.clear()
   }
 
   destroy(): void {
@@ -320,12 +359,15 @@ export class SymbolRenderer {
     placements: StyledSymbolPlacement[],
     labelsVisible: boolean,
   ): void {
-    this.clear()
-
     if (!labelsVisible || placements.length === 0) {
+      this.clear()
       this.scene.requestRender()
       return
     }
+
+    const labelCollisionIndex = new ScreenLabelCollisionIndex()
+    const symbolDedupeIndex = new ScreenSymbolDedupeIndex()
+    const desiredBuckets = new Map<string, DesiredBucketState>()
 
     const orderedPlacements = placements
       .map((placement) => ({
@@ -350,15 +392,23 @@ export class SymbolRenderer {
       )
 
     for (const placement of orderedPlacements) {
-      this.placeSymbol(placement, labelsVisible)
+      this.placeSymbol(
+        placement,
+        desiredBuckets,
+        labelCollisionIndex,
+        symbolDedupeIndex,
+      )
     }
 
+    this.reconcileRuntimes(desiredBuckets, labelsVisible)
     this.scene.requestRender()
   }
 
   private placeSymbol(
     placement: PreparedStyledSymbolPlacement,
-    labelsVisible: boolean,
+    desiredBuckets: Map<string, DesiredBucketState>,
+    labelCollisionIndex: ScreenLabelCollisionIndex,
+    symbolDedupeIndex: ScreenSymbolDedupeIndex,
   ): void {
     const candidate = placement.candidate
     const textPlacementMode = candidate.ignorePlacement
@@ -372,7 +422,6 @@ export class SymbolRenderer {
         ? placement.textAnchorCandidates
         : [candidate.textAnchor]
 
-    let placed = false
     for (const textAnchorName of textAnchors) {
       const textOrigins = {
         ...parseTextAnchor(textAnchorName),
@@ -481,16 +530,16 @@ export class SymbolRenderer {
         candidate,
         candidate.text,
       )
-      if (!this.symbolDedupeIndex.canPlace(dedupeKey, placementRect)) {
+      if (!symbolDedupeIndex.canPlace(dedupeKey, placementRect)) {
         continue
       }
 
       const textFits =
         textRect !== undefined &&
-        this.labelCollisionIndex.canPlace(textRect, textPlacementMode)
+        labelCollisionIndex.canPlace(textRect, textPlacementMode)
       const iconFits =
         resolvedIconRect !== undefined &&
-        this.labelCollisionIndex.canPlace(
+        labelCollisionIndex.canPlace(
           resolvedIconRect,
           iconPlacementMode,
         )
@@ -513,9 +562,8 @@ export class SymbolRenderer {
         continue
       }
 
-      this.symbolDedupeIndex.add(candidate.labelId, dedupeKey, placementRect)
-
-      const runtime = this.ensureRuntime(placement, labelsVisible)
+      symbolDedupeIndex.add(candidate.labelId, dedupeKey, placementRect)
+      const bucket = this.ensureDesiredBucket(placement, desiredBuckets)
 
       if (
         renderIcon &&
@@ -534,12 +582,15 @@ export class SymbolRenderer {
           candidate.iconTextFitPadding,
         )
         const haloSpread = candidate.iconHaloWidth + candidate.iconHaloBlur
+        const iconImageKey =
+          candidate.iconImageName ?? `${candidate.labelId}:icon-image`
 
         if (haloSpread > 0 && candidate.iconHaloColor.alpha > 0) {
-          runtime.iconBillboardCollection?.add({
-            show: true,
-            position: candidate.position,
+          bucket.iconSpecs.set(`${candidate.labelId}:icon-halo`, {
+            key: `${candidate.labelId}:icon-halo`,
+            imageKey: iconImageKey,
             image: spriteImage,
+            position: candidate.position,
             color: candidate.iconHaloColor,
             width: iconDimensions.width + haloSpread * 2,
             height: iconDimensions.height + haloSpread * 2,
@@ -556,10 +607,11 @@ export class SymbolRenderer {
           })
         }
 
-        runtime.iconBillboardCollection?.add({
-          show: true,
-          position: candidate.position,
+        bucket.iconSpecs.set(`${candidate.labelId}:icon`, {
+          key: `${candidate.labelId}:icon`,
+          imageKey: iconImageKey,
           image: spriteImage,
+          position: candidate.position,
           color: baseColor,
           width: iconDimensions.width,
           height: iconDimensions.height,
@@ -574,7 +626,7 @@ export class SymbolRenderer {
             placementId: `${candidate.labelId}:icon`,
           },
         })
-        this.labelCollisionIndex.add(
+        labelCollisionIndex.add(
           `${candidate.labelId}:icon`,
           resolvedIconRect,
           iconPlacementMode,
@@ -583,16 +635,18 @@ export class SymbolRenderer {
       }
 
       if (renderText && textRect && candidate.text && textSprite) {
-        runtime.textBillboardCollection?.add({
-          show: true,
-          position: candidate.position,
+        bucket.textSpecs.set(`${candidate.labelId}:text`, {
+          key: `${candidate.labelId}:text`,
+          imageKey: textSprite.entryKey,
           image: textSprite.image,
+          position: candidate.position,
           color: Color.WHITE,
           width: textSprite.width,
           height: textSprite.height,
           pixelOffset: textPixelOffset,
           horizontalOrigin: textOrigins.horizontalOrigin,
           verticalOrigin: textOrigins.verticalOrigin,
+          rotation: 0,
           id: {
             tileId: placement.tileId,
             layer: placement.compiledId,
@@ -600,7 +654,7 @@ export class SymbolRenderer {
             placementId: `${candidate.labelId}:text`,
           },
         })
-        this.labelCollisionIndex.add(
+        labelCollisionIndex.add(
           `${candidate.labelId}:text`,
           textRect,
           textPlacementMode,
@@ -608,13 +662,122 @@ export class SymbolRenderer {
         )
       }
 
-      placed = true
       break
     }
+  }
 
-    if (!placed) {
-      this.symbolDedupeIndex.remove(candidate.labelId)
+  private ensureDesiredBucket(
+    placement: StyledSymbolPlacement,
+    desiredBuckets: Map<string, DesiredBucketState>,
+  ): DesiredBucketState {
+    const existing = desiredBuckets.get(placement.bucketKey)
+    if (existing) {
+      return existing
     }
+
+    const created: DesiredBucketState = {
+      placement,
+      textSpecs: new Map<string, BillboardSpec>(),
+      iconSpecs: new Map<string, BillboardSpec>(),
+    }
+    desiredBuckets.set(placement.bucketKey, created)
+    return created
+  }
+
+  private reconcileRuntimes(
+    desiredBuckets: Map<string, DesiredBucketState>,
+    labelsVisible: boolean,
+  ): void {
+    for (const [bucketKey, runtime] of Array.from(this.symbolBucketRuntimes.entries())) {
+      if (desiredBuckets.has(bucketKey)) {
+        continue
+      }
+
+      runtime.destroy()
+      this.symbolBucketRuntimes.delete(bucketKey)
+    }
+
+    for (const desired of desiredBuckets.values()) {
+      const runtime = this.ensureRuntime(desired.placement, labelsVisible)
+      runtime.setLabelsVisible(labelsVisible)
+      this.reconcileBillboards(
+        runtime.textBillboardCollection,
+        runtime.textBillboards,
+        desired.textSpecs,
+      )
+      this.reconcileBillboards(
+        runtime.iconBillboardCollection,
+        runtime.iconBillboards,
+        desired.iconSpecs,
+      )
+
+      if (runtime.textBillboards.size === 0 && runtime.iconBillboards.size === 0) {
+        runtime.destroy()
+        this.symbolBucketRuntimes.delete(runtime.bucketKey)
+      }
+    }
+  }
+
+  private reconcileBillboards(
+    collection: BillboardCollection,
+    managedEntries: Map<string, ManagedBillboard>,
+    desiredSpecs: Map<string, BillboardSpec>,
+  ): void {
+    for (const [key, managed] of Array.from(managedEntries.entries())) {
+      if (desiredSpecs.has(key)) {
+        continue
+      }
+
+      collection.remove(managed.billboard)
+      managedEntries.delete(key)
+    }
+
+    for (const [key, spec] of desiredSpecs) {
+      const existing = managedEntries.get(key)
+      if (existing) {
+        this.applyBillboardSpec(existing, spec)
+        continue
+      }
+
+      const created = collection.add({
+        show: true,
+        position: spec.position,
+        image: spec.image,
+        color: spec.color,
+        width: spec.width,
+        height: spec.height,
+        pixelOffset: spec.pixelOffset,
+        horizontalOrigin: spec.horizontalOrigin,
+        verticalOrigin: spec.verticalOrigin,
+        rotation: spec.rotation,
+        id: spec.id,
+      })
+      managedEntries.set(key, {
+        billboard: created,
+        imageKey: spec.imageKey,
+      })
+    }
+  }
+
+  private applyBillboardSpec(
+    managed: ManagedBillboard,
+    spec: BillboardSpec,
+  ): void {
+    if (managed.imageKey !== spec.imageKey) {
+      managed.billboard.setImage(spec.imageKey, spec.image)
+      managed.imageKey = spec.imageKey
+    }
+
+    managed.billboard.show = true
+    managed.billboard.position = spec.position
+    managed.billboard.color = spec.color
+    managed.billboard.width = spec.width
+    managed.billboard.height = spec.height
+    managed.billboard.pixelOffset = spec.pixelOffset
+    managed.billboard.horizontalOrigin = spec.horizontalOrigin
+    managed.billboard.verticalOrigin = spec.verticalOrigin
+    managed.billboard.rotation = spec.rotation
+    managed.billboard.id = spec.id
   }
 
   private ensureRuntime(
@@ -654,6 +817,8 @@ export class SymbolRenderer {
       order: placement.bucketOrder,
       textBillboardCollection,
       iconBillboardCollection,
+      textBillboards: new Map<string, ManagedBillboard>(),
+      iconBillboards: new Map<string, ManagedBillboard>(),
       setLabelsVisible: (visible: boolean) => {
         textBillboardCollection.show = visible
         iconBillboardCollection.show = visible

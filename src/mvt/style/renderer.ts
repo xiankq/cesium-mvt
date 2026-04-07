@@ -32,7 +32,7 @@ export { resolveFormattedText } from './expressions'
 export type { CompiledStyleExpression, ResolvedFormattedText } from './expressions'
 
 type SupportedStyleLayerType = 'fill' | 'line' | 'circle' | 'symbol'
-export type CompiledStyleRefreshMode = 'none' | 'symbols' | 'full'
+export type CompiledStyleRefreshMode = 'none' | 'paint' | 'symbols' | 'full'
 type SupportedLayerSpecification = LayerSpecification & {
   type: SupportedStyleLayerType
   filter?: unknown
@@ -231,27 +231,39 @@ function expressionsUseZoom(
   return expressions.some((expression) => expression?.zoomDependent === true)
 }
 
-function layerUsesZoom(
+function layerMembershipUsesZoom(
   layer: SupportedLayerSpecification,
-  ...expressions: Array<CompiledStyleExpression<unknown> | undefined>
 ): boolean {
   return (
     layer.minzoom !== undefined ||
     layer.maxzoom !== undefined ||
-    styleValueUsesZoom(layer.filter) ||
-    expressionsUseZoom(...expressions)
+    styleValueUsesZoom(layer.filter)
   )
 }
 
 function resolveZoomRefreshMode(
   layerType: SupportedStyleLayerType,
-  zoomDependent: boolean,
+  zoomLayoutDependent: boolean,
+  zoomPaintDependent: boolean,
 ): CompiledStyleRefreshMode {
-  if (!zoomDependent) {
+  if (zoomLayoutDependent) {
+    return layerType === 'symbol' ? 'symbols' : 'full'
+  }
+
+  if (!zoomPaintDependent) {
     return 'none'
   }
 
-  return layerType === 'symbol' ? 'symbols' : 'full'
+  switch (layerType) {
+    case 'line':
+    case 'circle':
+      return 'paint'
+    case 'symbol':
+      return 'symbols'
+    case 'fill':
+    default:
+      return 'full'
+  }
 }
 
 function compileFillStyle(
@@ -634,17 +646,22 @@ function createCompiledLayer(
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'fill' }
       const base = createCompiledLayerBase(supportedLayer, order)
       const fill = compileFillStyle(supportedLayer)
-      const zoomDependent = layerUsesZoom(
-        supportedLayer,
+      const zoomLayoutDependent =
+        layerMembershipUsesZoom(supportedLayer)
+        || expressionsUseZoom(fill.sortKey)
+      const zoomPaintDependent = expressionsUseZoom(
         fill.color,
         fill.opacity,
         fill.outlineColor,
         fill.antialias,
-        fill.sortKey,
       )
       return {
         ...base,
-        zoomRefreshMode: resolveZoomRefreshMode('fill', zoomDependent),
+        zoomRefreshMode: resolveZoomRefreshMode(
+          'fill',
+          zoomLayoutDependent,
+          zoomPaintDependent,
+        ),
         fill,
       }
     }
@@ -652,16 +669,21 @@ function createCompiledLayer(
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'line' }
       const base = createCompiledLayerBase(supportedLayer, order)
       const line = compileLineStyle(supportedLayer)
-      const zoomDependent = layerUsesZoom(
-        supportedLayer,
+      const zoomLayoutDependent =
+        layerMembershipUsesZoom(supportedLayer)
+        || expressionsUseZoom(line.sortKey)
+      const zoomPaintDependent = expressionsUseZoom(
         line.color,
         line.width,
         line.opacity,
-        line.sortKey,
       )
       return {
         ...base,
-        zoomRefreshMode: resolveZoomRefreshMode('line', zoomDependent),
+        zoomRefreshMode: resolveZoomRefreshMode(
+          'line',
+          zoomLayoutDependent,
+          zoomPaintDependent,
+        ),
         line,
       }
     }
@@ -669,19 +691,24 @@ function createCompiledLayer(
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'circle' }
       const base = createCompiledLayerBase(supportedLayer, order)
       const circle = compileCircleStyle(supportedLayer)
-      const zoomDependent = layerUsesZoom(
-        supportedLayer,
+      const zoomLayoutDependent =
+        layerMembershipUsesZoom(supportedLayer)
+        || expressionsUseZoom(circle.sortKey)
+      const zoomPaintDependent = expressionsUseZoom(
         circle.radius,
         circle.color,
         circle.strokeWidth,
         circle.strokeColor,
         circle.opacity,
         circle.strokeOpacity,
-        circle.sortKey,
       )
       return {
         ...base,
-        zoomRefreshMode: resolveZoomRefreshMode('circle', zoomDependent),
+        zoomRefreshMode: resolveZoomRefreshMode(
+          'circle',
+          zoomLayoutDependent,
+          zoomPaintDependent,
+        ),
         circle,
       }
     }
@@ -689,8 +716,9 @@ function createCompiledLayer(
       const supportedLayer = layer as SupportedLayerSpecification & { type: 'symbol' }
       const base = createCompiledLayerBase(supportedLayer, order)
       const symbol = compileSymbolStyle(supportedLayer)
-      const zoomDependent = layerUsesZoom(
-        supportedLayer,
+      const zoomLayoutDependent =
+        layerMembershipUsesZoom(supportedLayer)
+        || expressionsUseZoom(
         symbol.textField,
         symbol.textSize,
         symbol.textMaxWidth,
@@ -737,7 +765,11 @@ function createCompiledLayer(
       )
       return {
         ...base,
-        zoomRefreshMode: resolveZoomRefreshMode('symbol', zoomDependent),
+        zoomRefreshMode: resolveZoomRefreshMode(
+          'symbol',
+          zoomLayoutDependent,
+          false,
+        ),
         symbol,
       }
     }

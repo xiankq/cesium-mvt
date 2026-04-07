@@ -5,7 +5,6 @@ import { ViewerKey } from './viewer-context'
 
 const container = shallowRef<HTMLDivElement | null>(null)
 const viewerRef = shallowRef<Viewer>()
-let animationFrameHandle: number | undefined
 let renderErrorCleanup: (() => void) | undefined
 let resizeObserver: ResizeObserver | undefined
 let createRetryHandle: ReturnType<typeof setTimeout> | undefined
@@ -19,14 +18,26 @@ function hasUsableSize(element: HTMLDivElement | null | undefined): element is H
   return Boolean(element && element.clientWidth > 0 && element.clientHeight > 0)
 }
 
-function renderViewerFrame() {
+function clearCreateRetryTimer() {
+  if (createRetryHandle !== undefined) {
+    clearTimeout(createRetryHandle)
+    createRetryHandle = undefined
+  }
+}
+
+function syncViewerRenderLoop() {
+  const viewer = viewerRef.value
   const target = container.value
-  if (!target || !hasUsableSize(target)) {
+  if (!viewer || !target) {
     return
   }
 
-  const viewer = viewerRef.value
-  if (!viewer) {
+  const shouldRender = hasUsableSize(target)
+  if (viewer.useDefaultRenderLoop !== shouldRender) {
+    viewer.useDefaultRenderLoop = shouldRender
+  }
+
+  if (!shouldRender) {
     return
   }
 
@@ -36,14 +47,7 @@ function renderViewerFrame() {
     return
   }
 
-  viewer.render()
-}
-
-function clearCreateRetryTimer() {
-  if (createRetryHandle !== undefined) {
-    clearTimeout(createRetryHandle)
-    createRetryHandle = undefined
-  }
+  viewer.scene.requestRender()
 }
 
 function destroyViewer() {
@@ -72,7 +76,7 @@ function createViewer(target: HTMLDivElement) {
     requestRenderMode: true,
     maximumRenderTimeChange: Number.POSITIVE_INFINITY,
     shouldAnimate: false,
-    useDefaultRenderLoop: false,
+    useDefaultRenderLoop: true,
   })
 
   const handleRenderError = (_scene: unknown, error: unknown) => {
@@ -129,34 +133,20 @@ function ensureViewer() {
   }
 }
 
-function tick() {
-  renderViewerFrame()
-  animationFrameHandle = requestAnimationFrame(tick)
-}
-
 onMounted(() => {
   if (container.value) {
     resizeObserver = new ResizeObserver(() => {
       ensureViewer()
-      if (!viewerRef.value || !hasUsableSize(container.value)) {
-        return
-      }
-
-      viewerRef.value.resize()
-      viewerRef.value.scene.requestRender()
+      syncViewerRenderLoop()
     })
     resizeObserver.observe(container.value)
   }
 
   ensureViewer()
-  animationFrameHandle = requestAnimationFrame(tick)
+  syncViewerRenderLoop()
 })
 
 onBeforeUnmount(() => {
-  if (animationFrameHandle !== undefined) {
-    cancelAnimationFrame(animationFrameHandle)
-    animationFrameHandle = undefined
-  }
   resizeObserver?.disconnect()
   resizeObserver = undefined
   clearCreateRetryTimer()

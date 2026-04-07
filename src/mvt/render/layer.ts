@@ -1,7 +1,10 @@
 import {
   Color,
   GeometryInstance,
+  Material,
+  type PointPrimitive,
   PointPrimitiveCollection,
+  type Polyline,
   PolylineCollection,
   PerInstanceColorAppearance,
   Primitive,
@@ -29,6 +32,7 @@ import {
 import {
   addPrimitiveOrdered,
   applyOpacity,
+  createPolylineMaterial,
   estimateSceneZoom,
   evaluateStyleLayerSortKey,
   removeAndDestroyPrimitive,
@@ -75,13 +79,14 @@ type ResolvedCesiumMvtPrimitiveLayerOptions = Omit<
 
 type TilePrimitiveGroup = {
   mode: 'generic' | 'styled'
-  refreshMode: CompiledStyleRefreshMode
+  refreshState: TileZoomRefreshState
   pointCount: number
   lineCount: number
   polygonCount: number
   labelCount: number
   iconCount: number
   symbolPlacements: StyledSymbolPlacement[]
+  paintBindings: StyledPaintBinding[]
   destroy: () => void
 }
 
@@ -91,6 +96,28 @@ type StyledFeatureEntry = {
   sortKey: number
 }
 
+type TileZoomRefreshState = {
+  full: boolean
+  paint: boolean
+  symbols: boolean
+}
+
+type LinePaintBinding = {
+  type: 'line'
+  compiled: Extract<CompiledStyleLayer, { type: 'line' }>
+  feature: DecodedFeatureRecord
+  polyline: Polyline
+}
+
+type CirclePaintBinding = {
+  type: 'circle'
+  compiled: Extract<CompiledStyleLayer, { type: 'circle' }>
+  feature: DecodedFeatureRecord
+  pointPrimitive: PointPrimitive
+}
+
+type StyledPaintBinding = LinePaintBinding | CirclePaintBinding
+
 const DEFAULT_POINT_COLOR = Color.fromCssColorString('#67d7ff')
 const DEFAULT_LINE_COLOR = Color.fromCssColorString('#8c9eff')
 const DEFAULT_POLYGON_FILL_COLOR = Color.fromCssColorString('#173b78')
@@ -98,19 +125,33 @@ DEFAULT_POLYGON_FILL_COLOR.alpha = 0.28
 const DEFAULT_POLYGON_OUTLINE_COLOR = Color.fromCssColorString('#7c5cff')
 const DEFAULT_POINT_OUTLINE_COLOR = Color.fromCssColorString('#06131f')
 
-function mergeRefreshMode(
-  left: CompiledStyleRefreshMode,
-  right: CompiledStyleRefreshMode,
-): CompiledStyleRefreshMode {
-  if (left === 'full' || right === 'full') {
-    return 'full'
+function createTileZoomRefreshState(): TileZoomRefreshState {
+  return {
+    full: false,
+    paint: false,
+    symbols: false,
+  }
+}
+
+function mergeRefreshState(
+  state: TileZoomRefreshState,
+  refreshMode: CompiledStyleRefreshMode,
+): TileZoomRefreshState {
+  switch (refreshMode) {
+    case 'full':
+      state.full = true
+      break
+    case 'paint':
+      state.paint = true
+      break
+    case 'symbols':
+      state.symbols = true
+      break
+    default:
+      break
   }
 
-  if (left === 'symbols' || right === 'symbols') {
-    return 'symbols'
-  }
-
-  return 'none'
+  return state
 }
 
 export class CesiumMvtPrimitiveLayer {
@@ -666,30 +707,32 @@ export class CesiumMvtPrimitiveLayer {
         continue
       }
 
-      switch (group.refreshMode) {
-        case 'none':
-          break
-        case 'full':
-          symbolRefreshNeeded = true
+      if (group.refreshState.full) {
+        symbolRefreshNeeded = symbolRefreshNeeded || group.refreshState.symbols
+        group.destroy()
+        this.groups.delete(tileId)
+        this.addTile(tile, zoom)
+        continue
+      }
+
+      if (group.refreshState.paint) {
+        this.applyPaintBindings(group.paintBindings, zoom)
+      }
+
+      if (group.refreshState.symbols) {
+        symbolRefreshNeeded = true
+        if (group.mode === 'generic') {
           group.destroy()
           this.groups.delete(tileId)
           this.addTile(tile, zoom)
-          break
-        case 'symbols':
-          symbolRefreshNeeded = true
-          if (group.mode === 'generic') {
-            group.destroy()
-            this.groups.delete(tileId)
-            this.addTile(tile, zoom)
-            break
-          }
+          continue
+        }
 
-          group.symbolPlacements = this.collectStyledTileSymbolPlacements(tile, zoom)
-          group.labelCount = group.symbolPlacements.length
-          group.iconCount = group.symbolPlacements.filter(
-            (placement) => !!placement.candidate.iconImageName,
-          ).length
-          break
+        group.symbolPlacements = this.collectStyledTileSymbolPlacements(tile, zoom)
+        group.labelCount = group.symbolPlacements.length
+        group.iconCount = group.symbolPlacements.filter(
+          (placement) => !!placement.candidate.iconImageName,
+        ).length
       }
     }
 
@@ -712,15 +755,15 @@ export class CesiumMvtPrimitiveLayer {
     return tile.layers
   }
 
-  private collectTileRefreshMode(
+  private collectTileRefreshState(
     tile: DecodedTileRecord,
     decodedLayersByName: Map<string, DecodedLayerRecord>,
-  ): CompiledStyleRefreshMode {
+  ): TileZoomRefreshState {
     if (!this.styleRenderer) {
-      return 'none'
+      return createTileZoomRefreshState()
     }
 
-    let refreshMode: CompiledStyleRefreshMode = 'none'
+    const refreshState = createTileZoomRefreshState()
 
     for (const compiled of this.styleRenderer.layers) {
       if (compiled.zoomRefreshMode === 'none') {
@@ -737,13 +780,62 @@ export class CesiumMvtPrimitiveLayer {
         continue
       }
 
-      refreshMode = mergeRefreshMode(refreshMode, compiled.zoomRefreshMode)
-      if (refreshMode === 'full') {
-        break
-      }
+      mergeRefreshState(refreshState, compiled.zoomRefreshMode)
     }
 
-    return refreshMode
+    return refreshState
+  }
+
+  private applyPaintBindings(bindings: StyledPaintBinding[], zoom: number): void {
+    for (const binding of bindings) {
+      switch (binding.type) {
+        case 'line': {
+          const lineColor = applyOpacity(
+            binding.compiled.line.color?.evaluate(binding.feature, zoom) ??
+              this.options.lineColor,
+            binding.compiled.line.opacity?.evaluate(binding.feature, zoom),
+          )
+          const lineWidth =
+            binding.compiled.line.width?.evaluate(binding.feature, zoom) ??
+            this.options.lineWidth
+          binding.polyline.width = lineWidth
+          const material = binding.polyline.material
+          if (material.type === Material.ColorType) {
+            material.uniforms.color = Color.clone(
+              lineColor,
+              material.uniforms.color,
+            )
+          } else {
+            binding.polyline.material = createPolylineMaterial(lineColor)
+          }
+          break
+        }
+        case 'circle': {
+          const style = binding.compiled.circle
+          const circleOpacity = style.opacity?.evaluate(binding.feature, zoom)
+          const strokeOpacity = style.strokeOpacity?.evaluate(binding.feature, zoom) ?? 1
+          const circleColor = applyOpacity(
+            style.color?.evaluate(binding.feature, zoom) ??
+              this.options.pointColor,
+            circleOpacity,
+          )
+          const strokeColor = applyOpacity(
+            style.strokeColor?.evaluate(binding.feature, zoom) ??
+              this.options.pointOutlineColor,
+            strokeOpacity,
+          )
+          const radius = style.radius?.evaluate(binding.feature, zoom) ?? 5
+          binding.pointPrimitive.color = circleColor
+          binding.pointPrimitive.outlineColor = strokeColor
+          binding.pointPrimitive.pixelSize = Math.max(1, Math.round(radius * 2))
+          binding.pointPrimitive.outlineWidth =
+            style.strokeWidth?.evaluate(binding.feature, zoom) ?? 0
+          break
+        }
+        default:
+          break
+      }
+    }
   }
 
   private collectSortedStyledFeatures(
@@ -784,7 +876,7 @@ export class CesiumMvtPrimitiveLayer {
 
   private addGenericTile(
     tile: DecodedTileRecord,
-    refreshMode: CompiledStyleRefreshMode = 'none',
+    refreshState: TileZoomRefreshState = createTileZoomRefreshState(),
   ): void {
     if (this.groups.has(tile.id)) {
       return
@@ -914,13 +1006,14 @@ export class CesiumMvtPrimitiveLayer {
 
     const group: TilePrimitiveGroup = {
       mode: 'generic',
-      refreshMode,
+      refreshState,
       pointCount,
       lineCount,
       polygonCount,
       labelCount: 0,
       iconCount: 0,
       symbolPlacements: [],
+      paintBindings: [],
       destroy: () => {
         removeAndDestroyPrimitive(this.scene, pointCollection)
         removeAndDestroyPrimitive(this.scene, lineCollection)
@@ -958,6 +1051,7 @@ export class CesiumMvtPrimitiveLayer {
       tile.coord.level
     const destroyers: Array<() => void> = []
     const styledSymbolPlacements: StyledSymbolPlacement[] = []
+    const paintBindings: StyledPaintBinding[] = []
     let pointCount = 0
     let lineCount = 0
     let polygonCount = 0
@@ -968,7 +1062,7 @@ export class CesiumMvtPrimitiveLayer {
     const decodedLayersByName = new Map(
       tile.layers.map((layer) => [layer.name, layer]),
     )
-    const refreshMode = this.collectTileRefreshMode(tile, decodedLayersByName)
+    const refreshState = this.collectTileRefreshState(tile, decodedLayersByName)
 
     for (const compiled of this.styleRenderer.layers) {
       const candidateLayers = this.getCandidateDecodedLayers(
@@ -1105,6 +1199,17 @@ export class CesiumMvtPrimitiveLayer {
                 collection,
                 color: lineColor,
                 width: lineWidth ?? this.options.lineWidth,
+                onPolyline:
+                  compiled.zoomRefreshMode === 'paint'
+                    ? (polyline) => {
+                        paintBindings.push({
+                          type: 'line',
+                          compiled,
+                          feature,
+                          polyline,
+                        })
+                      }
+                    : undefined,
               })
               break
             }
@@ -1141,6 +1246,17 @@ export class CesiumMvtPrimitiveLayer {
                 outlineColor: strokeColor,
                 pixelSize,
                 outlineWidth,
+                onPoint:
+                  compiled.zoomRefreshMode === 'paint'
+                    ? (pointPrimitive) => {
+                        paintBindings.push({
+                          type: 'circle',
+                          compiled,
+                          feature,
+                          pointPrimitive,
+                        })
+                      }
+                    : undefined,
               })
               break
             }
@@ -1217,19 +1333,20 @@ export class CesiumMvtPrimitiveLayer {
     }
 
     if (!handledStyledLayer) {
-      this.addGenericTile(tile, refreshMode)
+      this.addGenericTile(tile, refreshState)
       return
     }
 
     const group: TilePrimitiveGroup = {
       mode: 'styled',
-      refreshMode,
+      refreshState,
       pointCount,
       lineCount,
       polygonCount,
       labelCount,
       iconCount,
       symbolPlacements: styledSymbolPlacements,
+      paintBindings,
       destroy: () => {
         for (const destroy of destroyers) {
           destroy()
