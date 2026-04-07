@@ -25,8 +25,8 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
   readonly scheduler: TileScheduler
 
   private readonly viewer: Viewer
-  private readonly sourceCache: CesiumMvtSourceCache
-  private readonly imageryLayer: ImageryLayer
+  private sourceCache?: CesiumMvtSourceCache
+  private imageryLayer?: ImageryLayer
   private readonly tileRequestSource: MvtSourceOptions
   private readonly tileImageCache = new TileImageCache()
   private readonly backgroundTileFillStyle?: string
@@ -76,30 +76,42 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
       maxConcurrentRequests,
       cacheSize,
     )
-    this.imageryLayer = viewer.scene.imageryLayers.addImageryProvider(this)
-
-    this.sourceCache = new CesiumMvtSourceCache({
-      scene: viewer.scene,
-      scheduler: this.scheduler,
-      tilingScheme: this.tilingScheme,
-      source,
-      imageryLayer: this.imageryLayer,
-    })
+    let imageryLayer: ImageryLayer | undefined
+    let sourceCache: CesiumMvtSourceCache | undefined
+    let previewLayer: CesiumMvtPrimitiveLayer | undefined
 
     try {
+      imageryLayer = viewer.scene.imageryLayers.addImageryProvider(this)
+      sourceCache = new CesiumMvtSourceCache({
+        scene: viewer.scene,
+        scheduler: this.scheduler,
+        tilingScheme: this.tilingScheme,
+        source,
+        imageryLayer,
+      })
+
       if (style) {
-        this.previewLayer = new CesiumMvtPrimitiveLayer(
+        previewLayer = new CesiumMvtPrimitiveLayer(
           viewer.scene,
           this.scheduler,
           this.tilingScheme,
           {
             style,
-            sourceCache: this.sourceCache,
+            sourceCache,
           },
         )
       }
+
+      this.imageryLayer = imageryLayer
+      this.sourceCache = sourceCache
+      this.previewLayer = previewLayer
     } catch (error) {
-      this.destroy()
+      previewLayer?.destroy()
+      sourceCache?.destroy()
+      if (imageryLayer) {
+        viewer.scene.imageryLayers.remove(imageryLayer, true)
+      }
+      this.scheduler.destroy()
       throw error
     }
   }
@@ -114,8 +126,19 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
     level: number,
     _request?: Request,
   ): Promise<HTMLCanvasElement> {
+    const sourceCache = this.sourceCache
+    if (!sourceCache) {
+      return Promise.resolve(
+        this.tileImageCache.get(
+          this.tileWidth,
+          this.tileHeight,
+          this.backgroundTileFillStyle,
+        ),
+      )
+    }
+
     const coord = { x, y, level }
-    this.sourceCache.touch(coord)
+    sourceCache.touch(coord)
 
     const job: TileDecodeJob = createTileDecodeJob(
       this.tileRequestSource,
@@ -153,8 +176,12 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
     this.previewLayer?.destroy()
     this.previewLayer = undefined
     this.tileImageCache.clear()
-    this.sourceCache.destroy()
-    this.viewer.scene.imageryLayers.remove(this.imageryLayer, true)
+    this.sourceCache?.destroy()
+    this.sourceCache = undefined
+    if (this.imageryLayer) {
+      this.viewer.scene.imageryLayers.remove(this.imageryLayer, true)
+      this.imageryLayer = undefined
+    }
     this.scheduler.destroy()
   }
 }

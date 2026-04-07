@@ -32,6 +32,7 @@ import {
 import {
   addPrimitiveOrdered,
   applyOpacity,
+  createTileTransformContext,
   createPolylineMaterial,
   estimateSceneZoom,
   evaluateStyleLayerSortKey,
@@ -926,6 +927,11 @@ export class CesiumMvtPrimitiveLayer {
         continue
       }
 
+      const transformContext = createTileTransformContext(
+        this.tilingScheme,
+        tile.coord,
+        layer.extent,
+      )
       for (const feature of layer.features) {
         if (!this.options.featureFilter(feature, layer, tile)) {
           continue
@@ -943,6 +949,7 @@ export class CesiumMvtPrimitiveLayer {
               color: pointColor,
               outlineColor: pointOutlineColor,
               pixelSize: this.options.pointPixelSize,
+              transformContext,
             })
             break
           case 'LineString':
@@ -955,6 +962,7 @@ export class CesiumMvtPrimitiveLayer {
               collection: lineCollection,
               color: this.options.lineColor,
               width: this.options.lineWidth,
+              transformContext,
             })
             break
           case 'Polygon':
@@ -966,6 +974,7 @@ export class CesiumMvtPrimitiveLayer {
               feature,
               instances: polygonInstances,
               color: polygonFillColor,
+              transformContext,
             })
             lineCount += renderLineStringPrimitives({
               tilingScheme: this.tilingScheme,
@@ -977,6 +986,7 @@ export class CesiumMvtPrimitiveLayer {
               color: this.options.polygonOutlineColor,
               width: this.options.polygonOutlineWidth,
               closedLoop: true,
+              transformContext,
             })
             break
           default:
@@ -1088,6 +1098,11 @@ export class CesiumMvtPrimitiveLayer {
         let bucketLineCount = 0
         let bucketPolygonCount = 0
         const bucketSymbolPlacements: StyledSymbolPlacement[] = []
+        const transformContext = createTileTransformContext(
+          this.tilingScheme,
+          tile.coord,
+          layer.extent,
+        )
         const layerOrderBase = tile.coord.level * 100_000 + compiled.order * 100
 
         const ensurePointCollection = () => {
@@ -1149,6 +1164,7 @@ export class CesiumMvtPrimitiveLayer {
                 feature,
                 instances: polygonInstances,
                 color: fillColor,
+                transformContext,
               })
 
               const fillAntialias =
@@ -1173,6 +1189,7 @@ export class CesiumMvtPrimitiveLayer {
                   color: outlineColor,
                   width: 1,
                   closedLoop: true,
+                  transformContext,
                 })
               }
               break
@@ -1199,6 +1216,7 @@ export class CesiumMvtPrimitiveLayer {
                 collection,
                 color: lineColor,
                 width: lineWidth ?? this.options.lineWidth,
+                transformContext,
                 onPolyline:
                   compiled.zoomRefreshMode === 'paint'
                     ? (polyline) => {
@@ -1246,6 +1264,7 @@ export class CesiumMvtPrimitiveLayer {
                 outlineColor: strokeColor,
                 pixelSize,
                 outlineWidth,
+                transformContext,
                 onPoint:
                   compiled.zoomRefreshMode === 'paint'
                     ? (pointPrimitive) => {
@@ -1266,13 +1285,13 @@ export class CesiumMvtPrimitiveLayer {
               }
 
               const placement = createStyledSymbolPlacement({
-                tilingScheme: this.tilingScheme,
                 tile,
                 layer,
                 feature,
                 featureIndex,
                 compiled,
                 zoom,
+                transformContext,
               })
               if (placement) {
                 bucketSymbolPlacements.push(placement)
@@ -1394,6 +1413,11 @@ export class CesiumMvtPrimitiveLayer {
           continue
         }
 
+        const transformContext = createTileTransformContext(
+          this.tilingScheme,
+          tile.coord,
+          layer.extent,
+        )
         const sortedFeatures = this.collectSortedStyledFeatures(
           compiled,
           layer,
@@ -1403,13 +1427,13 @@ export class CesiumMvtPrimitiveLayer {
 
         for (const { feature, featureIndex } of sortedFeatures) {
           const placement = createStyledSymbolPlacement({
-            tilingScheme: this.tilingScheme,
             tile,
             layer,
             feature,
             featureIndex,
             compiled,
             zoom,
+            transformContext,
           })
           if (placement) {
             placements.push(placement)

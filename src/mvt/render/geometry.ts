@@ -22,33 +22,79 @@ type PolygonRingGroup = {
   holes: TileGeometryPart[]
 }
 
+export type TileTransformContext = {
+  tilingScheme: TilingScheme
+  tile: TileCoord
+  extent: number
+  west: number
+  north: number
+  scaleX: number
+  scaleY: number
+}
+
+export function createTileTransformContext(
+  tilingScheme: TilingScheme,
+  tile: TileCoord,
+  extent: number,
+): TileTransformContext {
+  const nativeRectangle = tilingScheme.tileXYToNativeRectangle(
+    tile.x,
+    tile.y,
+    tile.level,
+  )
+  const normalizedExtent = Math.max(1, extent)
+
+  return {
+    tilingScheme,
+    tile,
+    extent: normalizedExtent,
+    west: nativeRectangle.west,
+    north: nativeRectangle.north,
+    scaleX: (nativeRectangle.east - nativeRectangle.west) / normalizedExtent,
+    scaleY: (nativeRectangle.north - nativeRectangle.south) / normalizedExtent,
+  }
+}
+
+export function tilePointToCartesianWithContext(
+  context: TileTransformContext,
+  point: [number, number],
+): Cartesian3 {
+  const xRatio = point[0]
+  const yRatio = point[1]
+
+  scratchNativePosition.x = context.west + xRatio * context.scaleX
+  scratchNativePosition.y = context.north - yRatio * context.scaleY
+  scratchNativePosition.z = 0
+
+  const cartographic = context.tilingScheme.projection.unproject(
+    scratchNativePosition,
+    scratchCartographic,
+  )
+
+  return Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0)
+}
+
 export function tilePointToCartesian(
   tilingScheme: TilingScheme,
   tile: TileCoord,
   point: [number, number],
   extent: number,
 ): Cartesian3 {
-  const nativeRectangle = tilingScheme.tileXYToNativeRectangle(
-    tile.x,
-    tile.y,
-    tile.level,
+  return tilePointToCartesianWithContext(
+    createTileTransformContext(tilingScheme, tile, extent),
+    point,
   )
+}
 
-  const xRatio = point[0] / extent
-  const yRatio = point[1] / extent
-
-  scratchNativePosition.x =
-    nativeRectangle.west + xRatio * (nativeRectangle.east - nativeRectangle.west)
-  scratchNativePosition.y =
-    nativeRectangle.north - yRatio * (nativeRectangle.north - nativeRectangle.south)
-  scratchNativePosition.z = 0
-
-  const cartographic = tilingScheme.projection.unproject(
-    scratchNativePosition,
-    scratchCartographic,
-  )
-
-  return Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0)
+export function toCartesianPositionsWithContext(
+  context: TileTransformContext,
+  part: [number, number][],
+): Cartesian3[] {
+  const positions: Cartesian3[] = []
+  for (const point of part) {
+    positions.push(tilePointToCartesianWithContext(context, point))
+  }
+  return positions
 }
 
 export function toCartesianPositions(
@@ -57,11 +103,10 @@ export function toCartesianPositions(
   part: [number, number][],
   extent: number,
 ): Cartesian3[] {
-  const positions: Cartesian3[] = []
-  for (const point of part) {
-    positions.push(tilePointToCartesian(tilingScheme, tile, point, extent))
-  }
-  return positions
+  return toCartesianPositionsWithContext(
+    createTileTransformContext(tilingScheme, tile, extent),
+    part,
+  )
 }
 
 export function createPolylineMaterial(color: Color): Material {

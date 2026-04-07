@@ -1,74 +1,158 @@
 import type { DecodedTileRecord, TileDecodeJob } from '../types'
-
-type WorkerRequest = {
-  id: number
-  kind: 'decode'
-  job: TileDecodeJob
-}
-
-type WorkerSuccessResponse = {
-  id: number
-  ok: true
-  tile: DecodedTileRecord
-}
-
-type WorkerErrorResponse = {
-  id: number
-  ok: false
-  error: string
-}
-
-type WorkerResponse = WorkerSuccessResponse | WorkerErrorResponse
+import {
+  createTileDecodeAbortError,
+  type WorkerDecodeRequest,
+  type WorkerRequest,
+  type WorkerResponse,
+} from './protocol'
 
 type PendingJob = {
   resolve: (tile: DecodedTileRecord) => void
   reject: (error: Error) => void
+  workerIndex: number
+  tileId: string
+}
+
+type WorkerSlot = {
+  worker: Worker
+  pendingIds: Set<number>
+}
+
+export type VectorTileWorkerTask = {
+  promise: Promise<DecodedTileRecord>
+  cancel: () => boolean
+  requestId: number
+}
+
+function resolveDefaultWorkerCount(): number {
+  const hardwareConcurrency = globalThis.navigator?.hardwareConcurrency
+  if (!Number.isFinite(hardwareConcurrency) || hardwareConcurrency === undefined) {
+    return 2
+  }
+
+  return Math.max(1, Math.min(4, Math.floor(hardwareConcurrency)))
 }
 
 export class VectorTileWorkerClient {
-  private readonly worker: Worker
+  private readonly workers: WorkerSlot[]
   private readonly pending = new Map<number, PendingJob>()
   private requestId = 0
 
-  constructor() {
-    this.worker = new Worker(new URL('./worker.ts', import.meta.url), {
-      type: 'module',
-    })
-    this.worker.onmessage = this.handleMessage
-    this.worker.onerror = this.handleError
+  constructor(workerCount = resolveDefaultWorkerCount()) {
+    const resolvedWorkerCount = Math.max(1, Math.floor(workerCount))
+    this.workers = Array.from({ length: resolvedWorkerCount }, () => ({
+      worker: new Worker(new URL('./worker.ts', import.meta.url), {
+        type: 'module',
+      }),
+      pendingIds: new Set<number>(),
+    }))
+
+    for (const [workerIndex, slot] of this.workers.entries()) {
+      slot.worker.onmessage = (event) => {
+        this.handleMessage(workerIndex, event)
+      }
+      slot.worker.onerror = (event) => {
+        this.handleError(workerIndex, event)
+      }
+    }
   }
 
-  decode(job: TileDecodeJob): Promise<DecodedTileRecord> {
-    const id = this.requestId + 1
-    this.requestId = id
+  decode(job: TileDecodeJob): VectorTileWorkerTask {
+    const id = this.nextRequestId()
+    const workerIndex = this.pickWorkerIndex()
+    const slot = this.workers[workerIndex]
 
-    return new Promise<DecodedTileRecord>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+    const promise = new Promise<DecodedTileRecord>((resolve, reject) => {
+      this.pending.set(id, {
+        resolve,
+        reject,
+        workerIndex,
+        tileId: job.id,
+      })
+      slot.pendingIds.add(id)
 
-      const message: WorkerRequest = {
+      const message: WorkerDecodeRequest = {
         id,
         kind: 'decode',
         job,
       }
 
-      this.worker.postMessage(message)
+      slot.worker.postMessage(message satisfies WorkerRequest)
     })
+
+    return {
+      requestId: id,
+      promise,
+      cancel: () => this.cancel(id),
+    }
+  }
+
+  cancel(requestId: number): boolean {
+    const pending = this.pending.get(requestId)
+    if (!pending) {
+      return false
+    }
+
+    this.pending.delete(requestId)
+    this.workers[pending.workerIndex]?.pendingIds.delete(requestId)
+    pending.reject(createTileDecodeAbortError(pending.tileId))
+    this.workers[pending.workerIndex]?.worker.postMessage({
+      id: requestId,
+      kind: 'cancel',
+    } satisfies WorkerRequest)
+    return true
   }
 
   destroy(): void {
-    this.worker.terminate()
-    for (const { reject } of this.pending.values()) {
-      reject(new Error('Vector tile worker was terminated.'))
+    for (const slot of this.workers) {
+      slot.worker.terminate()
     }
+
+    for (const [requestId, pending] of this.pending.entries()) {
+      this.workers[pending.workerIndex]?.pendingIds.delete(requestId)
+      pending.reject(new Error('Vector tile worker was terminated.'))
+    }
+
     this.pending.clear()
   }
 
-  private handleMessage = (event: MessageEvent<WorkerResponse>) => {
+  private nextRequestId(): number {
+    let nextId = this.requestId
+
+    do {
+      nextId += 1
+      if (nextId >= Number.MAX_SAFE_INTEGER) {
+        nextId = 1
+      }
+    } while (this.pending.has(nextId))
+
+    this.requestId = nextId
+    return nextId
+  }
+
+  private pickWorkerIndex(): number {
+    let selectedIndex = 0
+    let minPendingCount = Number.POSITIVE_INFINITY
+
+    for (const [index, slot] of this.workers.entries()) {
+      if (slot.pendingIds.size < minPendingCount) {
+        selectedIndex = index
+        minPendingCount = slot.pendingIds.size
+      }
+    }
+
+    return selectedIndex
+  }
+
+  private handleMessage = (workerIndex: number, event: MessageEvent<WorkerResponse>) => {
     const message = event.data
     const pending = this.pending.get(message.id)
-    if (!pending) return
+    if (!pending) {
+      return
+    }
 
     this.pending.delete(message.id)
+    this.workers[workerIndex]?.pendingIds.delete(message.id)
 
     if (message.ok) {
       pending.resolve(message.tile)
@@ -78,12 +162,23 @@ export class VectorTileWorkerClient {
     pending.reject(new Error(message.error))
   }
 
-  private handleError = (event: ErrorEvent) => {
+  private handleError = (workerIndex: number, event: ErrorEvent) => {
     const error = new Error(event.message)
-
-    for (const { reject } of this.pending.values()) {
-      reject(error)
+    const slot = this.workers[workerIndex]
+    if (!slot) {
+      return
     }
-    this.pending.clear()
+
+    for (const requestId of Array.from(slot.pendingIds)) {
+      const pending = this.pending.get(requestId)
+      if (!pending) {
+        continue
+      }
+
+      this.pending.delete(requestId)
+      pending.reject(error)
+    }
+
+    slot.pendingIds.clear()
   }
 }

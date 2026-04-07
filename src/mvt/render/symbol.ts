@@ -4,7 +4,6 @@ import {
   Color,
   type Billboard,
   type Scene,
-  type TilingScheme,
 } from 'cesium'
 import type {
   DecodedFeatureRecord,
@@ -22,7 +21,8 @@ import {
   applyOpacity,
   getFeatureAnchor,
   removeAndDestroyPrimitive,
-  tilePointToCartesian,
+  tilePointToCartesianWithContext,
+  type TileTransformContext,
 } from './geometry'
 import {
   applyTextTransform,
@@ -45,13 +45,13 @@ import type { MapLibreSpriteAtlas } from './sprite'
 import { buildTextSpriteRequest, TextSpriteAtlas } from './text'
 
 type CreateStyledSymbolPlacementOptions = {
-  tilingScheme: TilingScheme
   tile: DecodedTileRecord
   layer: DecodedLayerRecord
   feature: DecodedFeatureRecord
   featureIndex: number
   compiled: CompiledSymbolLayer
   zoom: number
+  transformContext: TileTransformContext
 }
 
 type PreparedStyledSymbolPlacement = StyledSymbolPlacement & {
@@ -106,13 +106,13 @@ export function createStyledSymbolPlacement(
   options: CreateStyledSymbolPlacementOptions,
 ): StyledSymbolPlacement | undefined {
   const {
-    tilingScheme,
     tile,
     layer,
     feature,
     featureIndex,
     compiled,
     zoom,
+    transformContext,
   } = options
   const style = compiled.symbol
   const anchor = getFeatureAnchor(feature)
@@ -120,11 +120,9 @@ export function createStyledSymbolPlacement(
     return undefined
   }
 
-  const position = tilePointToCartesian(
-    tilingScheme,
-    tile.coord,
+  const position = tilePointToCartesianWithContext(
+    transformContext,
     anchor,
-    layer.extent,
   )
 
   const textSize = Math.max(

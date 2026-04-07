@@ -7,39 +7,48 @@ import type {
   TileDecodeJob,
   TileGeometryType,
 } from '../types'
+import {
+  isTileDecodeAbortError,
+  type WorkerRequest,
+  type WorkerScope,
+  type WorkerSuccessResponse,
+  type WorkerErrorResponse,
+} from './protocol'
 
-type WorkerRequest = {
-  id: number
-  kind: 'decode'
-  job: TileDecodeJob
-}
-
-type WorkerSuccessResponse = {
-  id: number
-  ok: true
-  tile: DecodedTileRecord
-}
-
-type WorkerErrorResponse = {
-  id: number
-  ok: false
-  error: string
-}
-
-type WorkerScope = typeof globalThis & {
-  onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null
-  postMessage: (message: WorkerSuccessResponse | WorkerErrorResponse) => void
+type ActiveRequest = {
+  tileId: string
+  controller: AbortController
 }
 
 const workerScope = globalThis as WorkerScope
+const activeRequests = new Map<number, ActiveRequest>()
 
 workerScope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
 
-  if (message.kind !== 'decode') return
+  if (message.kind === 'cancel') {
+    const activeRequest = activeRequests.get(message.id)
+    if (!activeRequest) {
+      return
+    }
+
+    activeRequests.delete(message.id)
+    activeRequest.controller.abort()
+    return
+  }
+
+  const controller = new AbortController()
+  activeRequests.set(message.id, {
+    tileId: message.job.id,
+    controller,
+  })
 
   try {
-    const tile = await decodeTile(message.job)
+    const tile = await decodeTile(message.job, controller.signal)
+    if (!activeRequests.has(message.id)) {
+      return
+    }
+
     const response: WorkerSuccessResponse = {
       id: message.id,
       ok: true,
@@ -47,18 +56,29 @@ workerScope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     }
     workerScope.postMessage(response)
   } catch (error) {
+    if (!activeRequests.has(message.id) || isTileDecodeAbortError(error)) {
+      return
+    }
+
     const response: WorkerErrorResponse = {
       id: message.id,
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     }
     workerScope.postMessage(response)
+  } finally {
+    activeRequests.delete(message.id)
   }
 }
 
-async function decodeTile(job: TileDecodeJob): Promise<DecodedTileRecord> {
+async function decodeTile(
+  job: TileDecodeJob,
+  signal: AbortSignal,
+): Promise<DecodedTileRecord> {
   const fetchedAt = Date.now()
-  const response = await fetch(job.url)
+  const response = await fetch(job.url, {
+    signal,
+  })
 
   if (!response.ok) {
     throw new Error(

@@ -12,9 +12,11 @@ import type {
   DecodedTileRecord,
 } from '../types'
 import {
+  createTileTransformContext,
   ensureClosedLoop,
   groupPolygonRings,
-  toCartesianPositions,
+  type TileTransformContext,
+  toCartesianPositionsWithContext,
 } from './geometry'
 
 export type RenderPolygonPrimitivesOptions = {
@@ -25,6 +27,7 @@ export type RenderPolygonPrimitivesOptions = {
   feature: DecodedFeatureRecord
   instances: GeometryInstance[]
   color: Color
+  transformContext?: TileTransformContext
 }
 
 export function renderPolygonPrimitives(
@@ -38,15 +41,21 @@ export function renderPolygonPrimitives(
     feature,
     instances,
     color,
+    transformContext,
   } = options
 
-  let count = 0
-  for (const polygon of groupPolygonRings(feature.geometry)) {
-    const outerPositions = toCartesianPositions(
+  const resolvedTransformContext =
+    transformContext
+    ?? createTileTransformContext(
       tilingScheme,
       tile.coord,
-      polygon.outer,
       extent,
+    )
+  let count = 0
+  for (const polygon of groupPolygonRings(feature.geometry)) {
+    const outerPositions = toCartesianPositionsWithContext(
+      resolvedTransformContext,
+      polygon.outer,
     )
     if (outerPositions.length < 3) {
       continue
@@ -54,7 +63,7 @@ export function renderPolygonPrimitives(
 
     const holes = polygon.holes
       .map((ring) =>
-        toCartesianPositions(tilingScheme, tile.coord, ring, extent),
+        toCartesianPositionsWithContext(resolvedTransformContext, ring),
       )
       .filter((positions) => positions.length >= 3)
       .map((positions) => new PolygonHierarchy(ensureClosedLoop(positions)))

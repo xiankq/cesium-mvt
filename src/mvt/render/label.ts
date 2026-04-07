@@ -492,8 +492,11 @@ export function buildSymbolDedupeKey(
   const textKey = candidate.textKey ? normalizeSymbolKey(candidate.textKey) : text ? normalizeSymbolKey(text) : ''
   const iconKey = candidate.iconImageName ? candidate.iconImageName.trim() : ''
   const sourceKey = textKey.length > 0 ? textKey : iconKey
-  const positionKey = formatSymbolPositionKey(candidate.position)
-  return `${layerId}:${sourceKey}:${positionKey}`
+  const featureKey =
+    candidate.featureId !== undefined
+      ? String(candidate.featureId)
+      : formatSymbolPositionKey(candidate.position)
+  return `${layerId}:${sourceKey}:${featureKey}`
 }
 
 export function unionScreenRects(
@@ -557,22 +560,33 @@ export function fontStackToCss(
   fontStack: unknown,
   fallback = DEFAULT_TEXT_FONT_STACK.join(', '),
 ): string {
-  if (Array.isArray(fontStack)) {
-    const names = fontStack
-      .map((font) => String(font).trim())
-      .filter((font) => font.length > 0)
-    if (names.length > 0) {
-      return names
-        .map((font) =>
-          /[,"\s]/.test(font) ? `"${font.replace(/"/g, '\\"')}"` : font,
-        )
-        .join(', ')
-    }
+  const names = normalizeFontStack(fontStack)
+  if (names.length > 0) {
+    return names.map(formatFontFamilyName).join(', ')
   }
 
-  if (typeof fontStack === 'string' && fontStack.trim().length > 0) {
-    return fontStack.trim()
+  const fallbackNames = normalizeFontStack(fallback)
+  if (fallbackNames.length > 0) {
+    return fallbackNames.map(formatFontFamilyName).join(', ')
   }
 
-  return fallback
+  return DEFAULT_TEXT_FONT_STACK.map(formatFontFamilyName).join(', ')
+}
+
+function normalizeFontStack(fontStack: unknown): string[] {
+  const names = Array.isArray(fontStack)
+    ? fontStack.map((font) => String(font))
+    : typeof fontStack === 'string'
+      ? fontStack.split(',')
+      : []
+
+  return names
+    .map((font) => font.trim().replace(/^['"]+|['"]+$/g, ''))
+    .filter((font) => font.length > 0)
+}
+
+function formatFontFamilyName(font: string): string {
+  return /[,"\s]/.test(font)
+    ? `"${font.replace(/"/g, '\\"')}"`
+    : font
 }

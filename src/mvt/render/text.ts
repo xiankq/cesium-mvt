@@ -56,13 +56,31 @@ type TextAtlasPage = {
 type TextAtlasBucket = {
   pageCssSize: number
   pixelRatio: number
-  pages: TextAtlasPage[]
+  page?: TextAtlasPage
   entries: Map<string, TextAtlasEntry>
+}
+
+export type TextSpriteAtlasOptions = {
+  pageCssSize?: number
+  maxBuckets?: number
+  maxLayouts?: number
+  maxEntries?: number
+  maxEntriesPerBucket?: number
+}
+
+export type TextSpriteAtlasStats = {
+  bucketCount: number
+  layoutCount: number
+  entryCount: number
 }
 
 const DEFAULT_PAGE_CSS_SIZE = 1024
 const DEFAULT_PADDING = 2
 const DEFAULT_BACKGROUND_MARGIN = 2
+const DEFAULT_MAX_BUCKETS = 24
+const DEFAULT_MAX_LAYOUTS = 4096
+const DEFAULT_MAX_ENTRIES = 1024
+const DEFAULT_MAX_ENTRIES_PER_BUCKET = 192
 const JUSTIFY_TO_TEXT_ALIGN: Record<'left' | 'center' | 'right', CanvasTextAlign> = {
   left: 'left',
   center: 'center',
@@ -299,6 +317,7 @@ function drawTextBlock(
     DEFAULT_PADDING,
     Math.max(0, request.textPadding) + haloSpread + DEFAULT_BACKGROUND_MARGIN,
   )
+  context.font = layout.fontCss
   const x = placement.x
   const y = placement.y
   const width = placement.width
@@ -316,7 +335,6 @@ function drawTextBlock(
 
   context.save()
   context.clearRect(x, y, width, height)
-  context.font = layout.fontCss
   context.fillStyle = colorToCss(request.textColor)
   context.textAlign = layout.textAlign
   context.lineWidth = Math.max(1, request.haloWidth + request.haloBlur)
@@ -377,38 +395,74 @@ function createBucket(pageCssSize: number, pixelRatio: number): TextAtlasBucket 
   return {
     pageCssSize,
     pixelRatio,
-    pages: [],
     entries: new Map<string, TextAtlasEntry>(),
   }
 }
 
 function getOrCreatePage(bucket: TextAtlasBucket): TextAtlasPage {
-  const lastPage = bucket.pages[bucket.pages.length - 1]
-  if (lastPage) {
-    return lastPage
+  if (bucket.page) {
+    return bucket.page
   }
 
   const page = createPageCanvas(bucket.pageCssSize, bucket.pageCssSize, bucket.pixelRatio)
-  bucket.pages.push(page)
+  bucket.page = page
   return page
+}
+
+function resetPage(page: TextAtlasPage): void {
+  page.context.save()
+  page.context.setTransform(1, 0, 0, 1, 0, 0)
+  page.context.clearRect(0, 0, page.canvas.width, page.canvas.height)
+  page.context.restore()
+  page.cursorX = 0
+  page.cursorY = 0
+  page.rowHeight = 0
 }
 
 export class TextSpriteAtlas {
   private readonly pageCssSize: number
+  private readonly maxBuckets: number
+  private readonly maxLayouts: number
+  private readonly maxEntries: number
+  private readonly maxEntriesPerBucket: number
   private readonly bucketMap = new Map<string, TextAtlasBucket>()
   private readonly layoutCache = new Map<string, TextSpriteLayout>()
+  private entryCount = 0
 
-  constructor(pageCssSize = DEFAULT_PAGE_CSS_SIZE) {
-    this.pageCssSize = Math.max(256, pageCssSize)
+  constructor(options: number | TextSpriteAtlasOptions = DEFAULT_PAGE_CSS_SIZE) {
+    const resolvedOptions =
+      typeof options === 'number'
+        ? {
+            pageCssSize: options,
+          }
+        : options
+
+    this.pageCssSize = Math.max(256, resolvedOptions.pageCssSize ?? DEFAULT_PAGE_CSS_SIZE)
+    this.maxBuckets = Math.max(1, resolvedOptions.maxBuckets ?? DEFAULT_MAX_BUCKETS)
+    this.maxLayouts = Math.max(1, resolvedOptions.maxLayouts ?? DEFAULT_MAX_LAYOUTS)
+    this.maxEntries = Math.max(1, resolvedOptions.maxEntries ?? DEFAULT_MAX_ENTRIES)
+    this.maxEntriesPerBucket = Math.max(
+      1,
+      resolvedOptions.maxEntriesPerBucket ?? DEFAULT_MAX_ENTRIES_PER_BUCKET,
+    )
   }
 
   clear(): void {
     this.bucketMap.clear()
     this.layoutCache.clear()
+    this.entryCount = 0
   }
 
   destroy(): void {
     this.clear()
+  }
+
+  getStats(): TextSpriteAtlasStats {
+    return {
+      bucketCount: this.bucketMap.size,
+      layoutCount: this.layoutCache.size,
+      entryCount: this.entryCount,
+    }
   }
 
   measure(request: TextSpriteRequest): TextSpriteLayout | undefined {
@@ -426,6 +480,7 @@ export class TextSpriteAtlas {
     const entryKey = getEntryKey(bucketKey, measured.text, measured.textAlign)
     const cached = this.layoutCache.get(entryKey)
     if (cached) {
+      this.touchLayout(entryKey, cached)
       return cached
     }
 
@@ -435,7 +490,8 @@ export class TextSpriteAtlas {
       ...measured,
     }
 
-    this.layoutCache.set(entryKey, layout)
+    this.touchLayout(entryKey, layout)
+    this.trimLayouts()
     return layout
   }
 
@@ -448,27 +504,19 @@ export class TextSpriteAtlas {
     const bucket = this.getBucket(layout.bucketKey, layout.pixelRatio)
     const cached = bucket.entries.get(layout.entryKey)
     if (cached) {
+      this.touchBucketEntry(bucket, layout.entryKey, cached)
+      this.touchBucket(layout.bucketKey, bucket)
       return cached
     }
 
     const page = getOrCreatePage(bucket)
     let placement = allocatePlacement(page, layout, bucket.pageCssSize)
     if (!placement) {
-      const nextPage = createPageCanvas(bucket.pageCssSize, bucket.pageCssSize, bucket.pixelRatio)
-      bucket.pages.push(nextPage)
-      placement = allocatePlacement(nextPage, layout, bucket.pageCssSize)
+      resetPage(page)
+      placement = allocatePlacement(page, layout, bucket.pageCssSize)
       if (!placement) {
         return undefined
       }
-
-      drawTextBlock(nextPage, placement, layout, request)
-      const image = cropTextEntry(nextPage, placement, layout)
-      const entry: TextAtlasEntry = {
-        ...layout,
-        image,
-      }
-      bucket.entries.set(layout.entryKey, entry)
-      return entry
     }
 
     drawTextBlock(page, placement, layout, request)
@@ -477,19 +525,145 @@ export class TextSpriteAtlas {
       ...layout,
       image,
     }
-    bucket.entries.set(layout.entryKey, entry)
+    this.setBucketEntry(layout.bucketKey, bucket, entry)
     return entry
   }
 
   private getBucket(bucketKey: string, pixelRatio: number): TextAtlasBucket {
     const existing = this.bucketMap.get(bucketKey)
     if (existing) {
+      this.touchBucket(bucketKey, existing)
       return existing
     }
 
     const created = createBucket(this.pageCssSize, pixelRatio)
-    this.bucketMap.set(bucketKey, created)
+    this.touchBucket(bucketKey, created)
+    this.trimBuckets()
     return created
+  }
+
+  private touchBucket(bucketKey: string, bucket: TextAtlasBucket): void {
+    if (this.bucketMap.get(bucketKey) === bucket) {
+      this.bucketMap.delete(bucketKey)
+    }
+
+    this.bucketMap.set(bucketKey, bucket)
+  }
+
+  private touchLayout(entryKey: string, layout: TextSpriteLayout): void {
+    if (this.layoutCache.get(entryKey) === layout) {
+      this.layoutCache.delete(entryKey)
+    }
+
+    this.layoutCache.set(entryKey, layout)
+  }
+
+  private touchBucketEntry(
+    bucket: TextAtlasBucket,
+    entryKey: string,
+    entry: TextAtlasEntry,
+  ): void {
+    if (bucket.entries.get(entryKey) === entry) {
+      bucket.entries.delete(entryKey)
+    }
+
+    bucket.entries.set(entryKey, entry)
+  }
+
+  private setBucketEntry(
+    bucketKey: string,
+    bucket: TextAtlasBucket,
+    entry: TextAtlasEntry,
+  ): void {
+    const existing = bucket.entries.get(entry.entryKey)
+    if (existing) {
+      bucket.entries.delete(entry.entryKey)
+    } else {
+      this.entryCount += 1
+    }
+
+    bucket.entries.set(entry.entryKey, entry)
+
+    while (bucket.entries.size > this.maxEntriesPerBucket) {
+      if (!this.evictOldestBucketEntry(bucket)) {
+        break
+      }
+    }
+
+    if (bucket.entries.size === 0) {
+      this.evictBucket(bucketKey)
+      return
+    }
+
+    this.touchBucket(bucketKey, bucket)
+    this.trimTotalEntries()
+    this.trimBuckets()
+  }
+
+  private evictOldestBucketEntry(bucket: TextAtlasBucket): boolean {
+    const oldestEntryKey = bucket.entries.keys().next().value
+    if (oldestEntryKey === undefined) {
+      return false
+    }
+
+    if (bucket.entries.delete(oldestEntryKey)) {
+      this.entryCount = Math.max(0, this.entryCount - 1)
+      return true
+    }
+
+    return false
+  }
+
+  private evictBucket(bucketKey: string): boolean {
+    const bucket = this.bucketMap.get(bucketKey)
+    if (!bucket) {
+      return false
+    }
+
+    this.entryCount = Math.max(0, this.entryCount - bucket.entries.size)
+    this.bucketMap.delete(bucketKey)
+    return true
+  }
+
+  private trimBuckets(): void {
+    while (this.bucketMap.size > this.maxBuckets) {
+      const oldestBucketKey = this.bucketMap.keys().next().value
+      if (oldestBucketKey === undefined) {
+        break
+      }
+
+      this.evictBucket(oldestBucketKey)
+    }
+  }
+
+  private trimLayouts(): void {
+    while (this.layoutCache.size > this.maxLayouts) {
+      const oldestLayoutKey = this.layoutCache.keys().next().value
+      if (oldestLayoutKey === undefined) {
+        break
+      }
+
+      this.layoutCache.delete(oldestLayoutKey)
+    }
+  }
+
+  private trimTotalEntries(): void {
+    while (this.entryCount > this.maxEntries) {
+      const oldestBucketKey = this.bucketMap.keys().next().value
+      if (oldestBucketKey === undefined) {
+        break
+      }
+
+      const bucket = this.bucketMap.get(oldestBucketKey)
+      if (!bucket) {
+        this.bucketMap.delete(oldestBucketKey)
+        continue
+      }
+
+      if (!this.evictOldestBucketEntry(bucket) || bucket.entries.size === 0) {
+        this.evictBucket(oldestBucketKey)
+      }
+    }
   }
 }
 

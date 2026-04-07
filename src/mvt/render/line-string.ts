@@ -9,9 +9,11 @@ import type {
   DecodedTileRecord,
 } from '../types'
 import {
+  createTileTransformContext,
   createPolylineMaterial,
   ensureClosedLoop,
-  toCartesianPositions,
+  type TileTransformContext,
+  toCartesianPositionsWithContext,
 } from './geometry'
 
 export type RenderLineStringPrimitivesOptions = {
@@ -25,6 +27,7 @@ export type RenderLineStringPrimitivesOptions = {
   width: number
   closedLoop?: boolean
   onPolyline?: (polyline: Polyline) => void
+  transformContext?: TileTransformContext
 }
 
 export function renderLineStringPrimitives(
@@ -41,23 +44,29 @@ export function renderLineStringPrimitives(
     width,
     closedLoop = false,
     onPolyline,
+    transformContext,
   } = options
 
   if (!collection) {
     return 0
   }
 
+  const resolvedTransformContext =
+    transformContext
+    ?? createTileTransformContext(
+      tilingScheme,
+      tile.coord,
+      extent,
+    )
   let count = 0
   for (const part of feature.geometry) {
     if (part.length < 2) {
       continue
     }
 
-    const positions = toCartesianPositions(
-      tilingScheme,
-      tile.coord,
+    const positions = toCartesianPositionsWithContext(
+      resolvedTransformContext,
       part,
-      extent,
     )
     if (positions.length < 2) {
       continue

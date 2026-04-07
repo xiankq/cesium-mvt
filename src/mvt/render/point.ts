@@ -8,7 +8,11 @@ import type {
   DecodedFeatureRecord,
   DecodedTileRecord,
 } from '../types'
-import { tilePointToCartesian } from './geometry'
+import {
+  createTileTransformContext,
+  type TileTransformContext,
+  tilePointToCartesianWithContext,
+} from './geometry'
 
 export type RenderPointPrimitivesOptions = {
   tilingScheme: TilingScheme
@@ -22,6 +26,7 @@ export type RenderPointPrimitivesOptions = {
   pixelSize: number
   outlineWidth?: number
   onPoint?: (point: PointPrimitive) => void
+  transformContext?: TileTransformContext
 }
 
 export function renderPointPrimitives(
@@ -39,20 +44,26 @@ export function renderPointPrimitives(
     pixelSize,
     outlineWidth,
     onPoint,
+    transformContext,
   } = options
 
   if (!collection) {
     return 0
   }
 
+  const resolvedTransformContext =
+    transformContext
+    ?? createTileTransformContext(
+      tilingScheme,
+      tile.coord,
+      extent,
+    )
   let count = 0
   for (const part of feature.geometry) {
     for (const point of part) {
-      const position = tilePointToCartesian(
-        tilingScheme,
-        tile.coord,
+      const position = tilePointToCartesianWithContext(
+        resolvedTransformContext,
         point,
-        extent,
       )
 
       const pointPrimitive = collection.add({
