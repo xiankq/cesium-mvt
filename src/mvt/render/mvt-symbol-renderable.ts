@@ -124,7 +124,6 @@ export function createSymbolRenderable(
   warnUnsupportedSymbolLayerProperties(layer, warningContext);
 
   const placementGroups: MvtSymbolPlacementGroup[] = [];
-  let anchorCount = 0;
   let iconCandidateCount = 0;
   let labelLineCount = 0;
 
@@ -138,7 +137,6 @@ export function createSymbolRenderable(
     if (!anchors.length) {
       continue;
     }
-    anchorCount += anchors.length;
 
     const nextPlacementGroups = createSymbolPlacementGroups(
       anchors,
@@ -164,19 +162,6 @@ export function createSymbolRenderable(
   }
 
   if (!placementGroups.length) {
-    if (features.length) {
-      warnMvtOnce(
-        warningContext,
-        `symbol:${layer.id}:empty-renderable`,
-        `symbol layer 当前瓦片未生成任何可渲染文本或图标。`,
-        {
-          anchorCount,
-          featureCount: features.length,
-          layerId: layer.id,
-          zoom,
-        },
-      );
-    }
     return undefined;
   }
 
@@ -191,21 +176,7 @@ export function createSymbolRenderable(
       labelCollection?.destroy();
     },
     update: (frameState: unknown, nextCollisionIndex = collisionIndex) => {
-      const visiblePlacementCount = applyPlacementVisibility(placementGroups, nextCollisionIndex);
-      if (visiblePlacementCount === 0) {
-        warnMvtOnce(
-          warningContext,
-          `symbol:${layer.id}:all-hidden`,
-          `symbol layer 当前帧全部被碰撞或显隐规则隐藏。`,
-          {
-            iconCandidateCount,
-            labelLineCount,
-            layerId: layer.id,
-            placementGroupCount: placementGroups.length,
-            zoom,
-          },
-        );
-      }
+      applyPlacementVisibility(placementGroups, nextCollisionIndex);
 
       if (!canUpdateCesiumCollections(frameState)) {
         return;
