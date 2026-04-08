@@ -9,8 +9,10 @@ import type {
   MvtStyleSpriteAtlas,
   MvtStyleSpriteEntry,
 } from '../mvt-types';
+import type { MvtCompositeSpriteCache } from '../render/mvt-symbol-composite';
 import type { MvtStyleExpressionCache } from './mvt-style-value';
 import { isMvtDebugLoggingEnabled, logMvtWarning } from '../mvt-log';
+import { createMvtCompositeSpriteCache } from '../render/mvt-symbol-composite';
 import { buildMvtStyleFamilies, compileStyleLayer } from './mvt-style-family';
 import {
   fetchTileJson,
@@ -66,6 +68,7 @@ export class MvtStyleSet {
 
   readonly backgroundLayers: readonly MvtCompiledStyleLayer[];
   readonly compiledLayers: readonly MvtCompiledStyleLayer[];
+  readonly compositeSpriteCache: MvtCompositeSpriteCache;
   readonly families: readonly MvtStyleFamily[];
   readonly source?: MvtStyleSourceSpecification;
   readonly sourceId?: string;
@@ -97,6 +100,7 @@ export class MvtStyleSet {
     this.compiledLayerMap = compiledLayerMap;
     this.families = families;
     this.backgroundLayers = backgroundLayers;
+    this.compositeSpriteCache = createMvtCompositeSpriteCache();
   }
 
   get backgroundColor(): string | undefined {

@@ -83,13 +83,37 @@ export async function resolveStyleSpriteAtlas(
   ]);
   const imageSize = readPngSize(spriteImageBuffer);
 
+  const image = await loadImageFromArrayBuffer(spriteImageBuffer);
+
   return {
     entries: new Map(Object.entries(spriteIndex)),
+    image,
     imageHeight: imageSize.height,
     imageUrl,
     imageWidth: imageSize.width,
     jsonUrl,
   };
+}
+
+function loadImageFromArrayBuffer(buffer: ArrayBuffer): Promise<HTMLImageElement> {
+  if (typeof Image === 'undefined') {
+    return Promise.resolve({} as HTMLImageElement);
+  }
+
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([buffer], { type: 'image/png' });
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load sprite image'));
+    };
+    image.src = url;
+  });
 }
 
 export function resolveStyleResourceUrl(resourceUrl?: string, baseUrl?: string): string | undefined {

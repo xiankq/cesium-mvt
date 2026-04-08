@@ -63,6 +63,7 @@ export interface MvtStyleSpriteEntry {
 
 export interface MvtStyleSpriteAtlas {
   entries: ReadonlyMap<string, MvtStyleSpriteEntry>;
+  image: HTMLImageElement;
   imageHeight: number;
   imageUrl: string;
   imageWidth: number;

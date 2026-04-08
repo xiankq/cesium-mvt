@@ -8,6 +8,7 @@ import type { MvtBucketFeature, MvtCompiledStyleLayer, MvtStyleSpriteEntry } fro
 import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import type { MvtSymbolCollisionIndex } from './mvt-symbol-collision';
+import type { MvtCompositeSpriteItem } from './mvt-symbol-composite';
 import type { createMvtTileTransform } from './mvt-tile-transform';
 import {
   BillboardCollection,
@@ -26,6 +27,11 @@ import { normalizePolylinePoints } from '../mesh/mvt-geometry-normalize';
 import { warnMvtOnce, warnUnsupportedLayerProperty } from '../mvt-warning-context';
 import { getLayerHeightOffset, liftLocalPosition } from './mvt-layer-height';
 import { getTileUnitsPerPixel } from './mvt-style-geometry';
+import {
+  buildCompositeSpriteAtlas,
+  createCompositeCacheKey,
+  getOrCreateCompositeSpriteEntry,
+} from './mvt-symbol-composite';
 import { extractPlainTextValue, resolveTextBlock } from './mvt-symbol-text';
 import { projectTilePointToLocalCartesian } from './mvt-tile-transform';
 
@@ -47,6 +53,8 @@ interface MvtSymbolIconItem {
   billboard?: Billboard;
   color: Color;
   collisionBox?: { maxX: number; maxY: number; minX: number; minY: number };
+  compositeKey?: string;
+  compositeLabel?: MvtResolvedSymbolLabel;
   height: number;
   horizontalOrigin: HorizontalOrigin;
   image: string;
@@ -83,7 +91,7 @@ interface MvtSymbolPlacementGroup {
   visible?: boolean;
 }
 
-interface MvtResolvedSymbolIcon {
+export interface MvtResolvedSymbolIcon {
   color: Color;
   height: number;
   horizontalOrigin: HorizontalOrigin;
@@ -95,7 +103,7 @@ interface MvtResolvedSymbolIcon {
   width: number;
 }
 
-interface MvtResolvedSymbolLabel {
+export interface MvtResolvedSymbolLabel {
   blockHeight: number;
   blockWidth: number;
   fillColor: Color;
@@ -126,6 +134,8 @@ export function createSymbolRenderable(
   const placementGroups: MvtSymbolPlacementGroup[] = [];
   let iconCandidateCount = 0;
   let labelLineCount = 0;
+  const compositeItems: MvtCompositeSpriteItem[] = [];
+  const compositeCache = styleSet.compositeSpriteCache;
 
   for (const feature of features) {
     const displayFeature = getClippedDisplayFeature(feature, extent, transform, displayFeatureCache);
@@ -153,6 +163,23 @@ export function createSymbolRenderable(
     for (const group of nextPlacementGroups) {
       if (group.icon) {
         iconCandidateCount += 1;
+        if (group.icon.compositeKey && group.icon.compositeLabel) {
+          const entry = getOrCreateCompositeSpriteEntry(
+            group.icon,
+            group.icon.compositeLabel,
+            compositeCache,
+            'both',
+            [0, 0, 0, 0],
+          );
+          if (entry) {
+            compositeItems.push({
+              entry,
+              icon: group.icon,
+              key: group.icon.compositeKey,
+              label: group.icon.compositeLabel,
+            });
+          }
+        }
       }
       if (group.label) {
         labelLineCount += group.label.items.length;
@@ -165,7 +192,13 @@ export function createSymbolRenderable(
     return undefined;
   }
 
-  const billboardCollection = createBillboardCollection(placementGroups, transform);
+  const spriteAtlas = styleSet.spriteAtlas;
+  let compositeAtlas: ReturnType<typeof buildCompositeSpriteAtlas> | undefined;
+  if (compositeItems.length > 0 && spriteAtlas) {
+    compositeAtlas = buildCompositeSpriteAtlas(compositeItems, spriteAtlas);
+  }
+
+  const billboardCollection = createBillboardCollection(placementGroups, transform, compositeAtlas);
   const labelCollection = createLabelCollection(placementGroups, transform);
   const byteLength = estimateIconByteLength(iconCandidateCount) + estimateLabelByteLength(labelLineCount, placementGroups);
 
@@ -197,9 +230,22 @@ function createSymbolPlacementGroups(
   warningContext: MvtWarningContext | undefined,
 ): MvtSymbolPlacementGroup[] {
   const resolvedLabel = resolveSymbolLabel(styleSet, layer, zoom, feature, warningContext);
-  const resolvedIcon = resolveSymbolIcon(styleSet, layer, zoom, feature, warningContext);
+  let resolvedIcon = resolveSymbolIcon(styleSet, layer, zoom, feature, warningContext);
   if (!resolvedLabel && !resolvedIcon) {
     return [];
+  }
+
+  let iconTextFit: string | undefined;
+  let iconTextFitPadding: [number, number, number, number] = [0, 0, 0, 0];
+  let shouldComposite = false;
+
+  if (resolvedIcon && resolvedLabel) {
+    iconTextFit = styleSet.evaluateLayoutValue(layer, 'icon-text-fit', zoom, feature) as string | undefined;
+    if (iconTextFit && iconTextFit !== 'none') {
+      iconTextFitPadding = resolveIconTextFitPadding(styleSet, layer, zoom, feature);
+      resolvedIcon = applyIconTextFit(resolvedIcon, resolvedLabel, iconTextFit, iconTextFitPadding);
+      shouldComposite = true;
+    }
   }
 
   const iconAllowOverlap = resolveSymbolBoolean(styleSet, layer, 'icon-allow-overlap', zoom, feature, false);
@@ -229,6 +275,10 @@ function createSymbolPlacementGroups(
               resolvedIcon.width,
             )
           : undefined,
+        compositeKey: shouldComposite
+          ? createCompositeCacheKey(resolvedIcon, iconTextFit!, iconTextFitPadding)
+          : undefined,
+        compositeLabel: shouldComposite ? resolvedLabel : undefined,
         position: liftLocalPosition(
           Cartesian3.clone(anchor.position),
           getLayerHeightOffset(layer, 'symbol-icon'),
@@ -239,7 +289,7 @@ function createSymbolPlacementGroups(
       };
     }
 
-    if (resolvedLabel) {
+    if (resolvedLabel && !shouldComposite) {
       placementGroup.label = {
         collisionBox: !textAllowOverlap && !textIgnorePlacement
           ? createSymbolCollisionBox(
@@ -340,6 +390,7 @@ function setPlacementGroupVisible(
 function createBillboardCollection(
   placementGroups: readonly MvtSymbolPlacementGroup[],
   transform: ReturnType<typeof createMvtTileTransform>,
+  compositeAtlas?: ReturnType<typeof buildCompositeSpriteAtlas>,
 ): BillboardCollection | undefined {
   const iconItems = placementGroups
     .map(group => group.icon)
@@ -352,13 +403,28 @@ function createBillboardCollection(
   collection.modelMatrix = transform.modelMatrix;
 
   for (const item of iconItems) {
+    let image = item.image;
+    let imageSubRegion = item.imageSubRegion;
+
+    if (item.compositeKey && compositeAtlas) {
+      const compositeEntry = compositeAtlas.entries.get(item.compositeKey);
+      if (compositeEntry) {
+        image = compositeAtlas.imageUrl;
+        imageSubRegion = new BoundingRectangle(
+          compositeEntry.x,
+          compositeEntry.y,
+          compositeEntry.width,
+          compositeEntry.height,
+        );
+      }
+    }
+
     item.billboard = collection.add({
       color: item.color,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
       height: item.height,
       horizontalOrigin: item.horizontalOrigin,
-      image: item.image,
-      imageSubRegion: item.imageSubRegion,
+      image,
+      imageSubRegion,
       pixelOffset: item.pixelOffset,
       position: item.position,
       rotation: item.rotation,
@@ -384,7 +450,6 @@ function createLabelCollection(
 
   for (const item of labelItems) {
     item.label = collection.add({
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
       fillColor: item.fillColor,
       font: item.font,
       horizontalOrigin: item.horizontalOrigin,
@@ -1057,12 +1122,68 @@ function warnUnsupportedSymbolLayerProperties(
   if (layer.layout['text-variable-anchor'] !== undefined) {
     warnUnsupportedLayerProperty(warningContext, layer, 'layout', 'text-variable-anchor');
   }
-  if (layer.layout['icon-text-fit'] !== undefined) {
-    warnUnsupportedLayerProperty(warningContext, layer, 'layout', 'icon-text-fit');
-  }
   if (layer.paint['icon-halo-color'] !== undefined || layer.paint['icon-halo-width'] !== undefined) {
     warnUnsupportedLayerProperty(warningContext, layer, 'paint', 'icon-halo-color');
   }
+}
+
+function resolveIconTextFitPadding(
+  styleSet: MvtStyleSet,
+  layer: MvtCompiledStyleLayer,
+  zoom: number,
+  feature: MvtBucketFeature,
+): [number, number, number, number] {
+  const value = styleSet.evaluateLayoutValue(layer, 'icon-text-fit-padding', zoom, feature);
+  if (!Array.isArray(value) || value.length < 4) {
+    return [0, 0, 0, 0];
+  }
+
+  const [top, right, bottom, left] = value;
+  if (
+    typeof top !== 'number'
+    || typeof right !== 'number'
+    || typeof bottom !== 'number'
+    || typeof left !== 'number'
+  ) {
+    return [0, 0, 0, 0];
+  }
+
+  return [top, right, bottom, left];
+}
+
+function applyIconTextFit(
+  icon: MvtResolvedSymbolIcon,
+  label: MvtResolvedSymbolLabel,
+  fit: string,
+  padding: [number, number, number, number],
+): MvtResolvedSymbolIcon {
+  const [top, right, bottom, left] = padding;
+  const textWidth = label.blockWidth + left + right;
+  const textHeight = label.blockHeight + top + bottom;
+
+  let newWidth = icon.width;
+  let newHeight = icon.height;
+
+  switch (fit) {
+    case 'width':
+      newWidth = textWidth;
+      break;
+    case 'height':
+      newHeight = textHeight;
+      break;
+    case 'both':
+      newWidth = textWidth;
+      newHeight = textHeight;
+      break;
+    default:
+      return icon;
+  }
+
+  return {
+    ...icon,
+    height: newHeight,
+    width: newWidth,
+  };
 }
 
 function withOpacity(color: Color, opacity: number): Color {
