@@ -45,17 +45,41 @@ export function evaluateLayerPaintColor(
   fallbackColor: Color,
 ): Color {
   const value = evaluateLayerPaintValue(cache, layer, propertyName, zoom, feature);
+
   if (value instanceof Color) {
     return Color.clone(value);
   }
   if (isMapLibreColor(value)) {
-    return new Color(value.r, value.g, value.b, value.a);
+    const [r, g, b, a] = value.rgb;
+    return new Color(r, g, b, a);
+  }
+  if (isMapLibreColorLike(value)) {
+    return unpremultiplyColor(value.r, value.g, value.b, value.a);
   }
   if (typeof value === 'string') {
     return Color.fromCssColorString(value) ?? Color.clone(fallbackColor);
   }
 
   return Color.clone(fallbackColor);
+}
+
+function isMapLibreColorLike(value: unknown): value is { a: number; b: number; g: number; r: number } {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.r === 'number'
+    && typeof candidate.g === 'number'
+    && typeof candidate.b === 'number'
+    && typeof candidate.a === 'number';
+}
+
+function unpremultiplyColor(r: number, g: number, b: number, a: number): Color {
+  if (a <= 0 || a >= 1) {
+    return new Color(r, g, b, a);
+  }
+  return new Color(r / a, g / a, b / a, a);
 }
 
 export function evaluateLayerPaintNumber(
@@ -188,7 +212,15 @@ function getOrCreatePropertyExpression(
   return expression;
 }
 
-function isMapLibreColor(value: unknown): value is { a: number; b: number; g: number; r: number } {
+interface MapLibreColor {
+  a: number;
+  b: number;
+  g: number;
+  r: number;
+  rgb: [number, number, number, number];
+}
+
+function isMapLibreColor(value: unknown): value is MapLibreColor {
   if (!value || typeof value !== 'object') {
     return false;
   }
@@ -197,5 +229,6 @@ function isMapLibreColor(value: unknown): value is { a: number; b: number; g: nu
   return typeof candidate.r === 'number'
     && typeof candidate.g === 'number'
     && typeof candidate.b === 'number'
-    && typeof candidate.a === 'number';
+    && typeof candidate.a === 'number'
+    && typeof candidate.rgb !== 'undefined';
 }
