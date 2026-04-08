@@ -380,12 +380,13 @@ export class MvtTilesetPrimitive {
 
   private renderReadyTiles(frameState: MvtPrimitiveFrameState): void {
     const visibleTiles = filterLeafRequestedTiles(this.resolveVisibleTilesForRender());
+    const symbolCollisionIndex = new MvtSymbolCollisionIndex();
+
     if (!visibleTiles.length) {
-      this.renderRecentReadyTiles(frameState);
+      this.renderRecentReadyTiles(frameState, symbolCollisionIndex);
       return;
     }
 
-    const symbolCollisionIndex = new MvtSymbolCollisionIndex();
     const renderedTileKeys = new Set<string>();
     const renderedTiles: MvtTile[] = [];
     for (const tile of visibleTiles) {
@@ -412,12 +413,14 @@ export class MvtTilesetPrimitive {
     }
 
     if (!renderedTiles.length) {
-      this.renderRecentReadyTiles(frameState);
+      this.renderRecentReadyTiles(frameState, symbolCollisionIndex);
     }
   }
 
-  private renderRecentReadyTiles(frameState: MvtPrimitiveFrameState): void {
-    const symbolCollisionIndex = new MvtSymbolCollisionIndex();
+  private renderRecentReadyTiles(
+    frameState: MvtPrimitiveFrameState,
+    symbolCollisionIndex: MvtSymbolCollisionIndex,
+  ): void {
     for (const tile of filterLeafRequestedTiles(this.tileStore.getRecentlyRenderedTiles(this.fallbackFrameWindow))) {
       this.renderTile(frameState, tile, tile.coordinate.z, symbolCollisionIndex);
     }
