@@ -1,4 +1,4 @@
-import type { BoundingRectangle } from '@cesium/engine';
+import type { BoundingRectangle, Scene } from '@cesium/engine';
 import type Point from '@mapbox/point-geometry';
 import type { VectorTileFeature } from '@mapbox/vector-tile';
 import type {
@@ -210,6 +210,7 @@ export interface MvtStyleFamily {
 
 export interface MvtPrimitiveFrameState {
   frameNumber: number;
+  scene?: Scene;
 }
 
 export interface MvtTilesetPrimitiveStats {

@@ -382,6 +382,10 @@ export class MvtTilesetPrimitive {
     const visibleTiles = filterLeafRequestedTiles(this.resolveVisibleTilesForRender());
     const symbolCollisionIndex = new MvtSymbolCollisionIndex();
 
+    if (frameState.scene) {
+      symbolCollisionIndex.beginFrame(frameState.scene);
+    }
+
     if (!visibleTiles.length) {
       this.renderRecentReadyTiles(frameState, symbolCollisionIndex);
       return;

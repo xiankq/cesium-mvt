@@ -93,8 +93,15 @@ export interface MvtResolvedSymbolLabel {
 }
 
 export interface MvtSymbolCollisionBox {
-  maxX: number;
-  maxY: number;
-  minX: number;
-  minY: number;
+  height: number;
+  horizontalOrigin: HorizontalOrigin;
+  padding: number;
+  pixelOffset: Cartesian2;
+  position: Cartesian3;
+  tileMaxX: number;
+  tileMaxY: number;
+  tileMinX: number;
+  tileMinY: number;
+  verticalOrigin: VerticalOrigin;
+  width: number;
 }

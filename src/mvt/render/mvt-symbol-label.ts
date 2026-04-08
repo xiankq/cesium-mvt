@@ -1,3 +1,4 @@
+import type { HorizontalOrigin, VerticalOrigin } from '@cesium/engine';
 import type { MvtBucketFeature, MvtCompiledStyleLayer } from '../mvt-types';
 import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
@@ -7,7 +8,7 @@ import type {
   MvtSymbolCollisionBox,
   MvtSymbolLabelItem,
 } from './mvt-symbol-types';
-import { Cartesian2, Color, HorizontalOrigin, LabelStyle, VerticalOrigin } from '@cesium/engine';
+import { Cartesian2, Cartesian3, Color, LabelStyle } from '@cesium/engine';
 import { getLayerHeightOffset, liftLocalPosition } from './mvt-layer-height';
 import { extractPlainTextValue, resolveTextBlock } from './mvt-symbol-text';
 import { resolveOrigins, resolveSymbolTranslate, withOpacity } from './mvt-symbol-utils';
@@ -80,14 +81,22 @@ export function createSymbolLabelCollisionBox(
   const widthInMapUnits = width * anchor.mapScale;
   const heightInMapUnits = height * anchor.mapScale;
   const paddingInMapUnits = Math.max(0, padding) * anchor.mapScale;
-  const centerX = resolveSymbolHorizontalCenter(anchor.mapX + offsetX, horizontalOrigin, widthInMapUnits);
-  const centerY = resolveSymbolVerticalCenter(anchor.mapY + offsetY, verticalOrigin, heightInMapUnits);
+
+  const centerX = anchor.mapX + offsetX;
+  const centerY = anchor.mapY + offsetY;
 
   return {
-    maxX: centerX + widthInMapUnits * 0.5 + paddingInMapUnits,
-    maxY: centerY + heightInMapUnits * 0.5 + paddingInMapUnits,
-    minX: centerX - widthInMapUnits * 0.5 - paddingInMapUnits,
-    minY: centerY - heightInMapUnits * 0.5 - paddingInMapUnits,
+    height,
+    horizontalOrigin,
+    padding,
+    pixelOffset,
+    position: Cartesian3.clone(anchor.position),
+    tileMaxX: centerX + widthInMapUnits * 0.5 + paddingInMapUnits,
+    tileMaxY: centerY + heightInMapUnits * 0.5 + paddingInMapUnits,
+    tileMinX: centerX - widthInMapUnits * 0.5 - paddingInMapUnits,
+    tileMinY: centerY - heightInMapUnits * 0.5 - paddingInMapUnits,
+    verticalOrigin,
+    width,
   };
 }
 
@@ -201,36 +210,4 @@ function resolveTextPixelOffset(
     resolveSymbolTranslate(styleSet, layer, 'text-translate', zoom, feature),
     new Cartesian2(),
   );
-}
-
-function resolveSymbolHorizontalCenter(
-  anchorX: number,
-  horizontalOrigin: HorizontalOrigin,
-  width: number,
-): number {
-  switch (horizontalOrigin) {
-    case HorizontalOrigin.LEFT:
-      return anchorX + width * 0.5;
-    case HorizontalOrigin.RIGHT:
-      return anchorX - width * 0.5;
-    case HorizontalOrigin.CENTER:
-    default:
-      return anchorX;
-  }
-}
-
-function resolveSymbolVerticalCenter(
-  anchorY: number,
-  verticalOrigin: VerticalOrigin,
-  height: number,
-): number {
-  switch (verticalOrigin) {
-    case VerticalOrigin.TOP:
-      return anchorY + height * 0.5;
-    case VerticalOrigin.BOTTOM:
-      return anchorY - height * 0.5;
-    case VerticalOrigin.CENTER:
-    default:
-      return anchorY;
-  }
 }
