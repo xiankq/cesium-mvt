@@ -19,7 +19,7 @@
    - 支持加载 OpenFreeMap bright style
    - 支持 `source.url -> TileJSON -> tiles`
    - 支持 `sprite -> sprite.json + sprite.png`
-   - sprite atlas 会解析 PNG 头，拿到 atlas 尺寸，供 `imageSubRegion` 正确裁切
+   - sprite atlas 会解析 PNG 并加载为 HTMLImageElement，供合成渲染使用
 2. MVT 解析
    - 复用 `@mapbox/vector-tile + pbf + classifyRings`
    - 按 MapLibre style family 和 filter 过滤 feature
@@ -34,13 +34,14 @@
    - `circle` 已支持 `circle-radius / circle-color / circle-opacity / circle-stroke-* / circle-translate`
    - `fill-sort-key / line-sort-key / circle-sort-key / symbol-sort-key` 已参与每层 feature 排序
    - expression 运行时如果遇到 `null` / 类型不匹配导致的求值异常，会安全回退到 fallback，不再让单个样式属性打爆整 tile
-   - filter 运行时如果遇到脏数据触发的 MapLibre 类型警告，会按“不匹配”处理，不再把 warning 直接刷到业务控制台
+   - filter 运行时如果遇到脏数据触发的 MapLibre 类型警告，会按"不匹配"处理，不再把 warning 直接刷到业务控制台
 4. 渲染
    - `fill` -> Cesium `BufferPolygonCollection`
    - `line` -> Cesium `BufferPolylineCollection`
    - `circle` -> Cesium `BufferPointCollection`
    - `symbol text` -> Cesium `LabelCollection`
    - `symbol icon` -> Cesium `BillboardCollection`
+   - `symbol icon-text-fit` -> 图标与文本合成后使用 `BillboardCollection` 渲染
    - render bundle 会按当前 render zoom 重建内部 Cesium collection，不再把 upload 时的样式永久固化
    - parent fallback 渲染时会按 child request 的 zoom 重算样式，而不是沿用 ancestor tile 自身的 z
    - `fill / line / circle / symbol` 当前都会按 layer order 抬升局部高度，减少同平面 z-fighting、透明叠色错误和点线面互相穿插
@@ -51,7 +52,7 @@
    - 支持每帧 parse tile 数和 parse 字节预算
    - 支持每帧上传 tile 数和上传字节预算
    - 支持 CPU / GPU 双预算和 LRU 回收
-   - 支持“当前可见 tile 优先渲染，child 未 ready 时回退到 ready 父 tile / 最近已渲染 tile”的可见集驱动渲染
+   - 支持"当前可见 tile 优先渲染，child 未 ready 时回退到 ready 父 tile / 最近已渲染 tile"的可见集驱动渲染
    - 支持 source tile 的并发去重和顺序复用缓存
    - 支持 stale tile load / parse / upload 工作取消
    - 当前可见集会先剔除已被更细子 tile 覆盖的父 tile，减少跨层级重复渲染
@@ -75,17 +76,14 @@
    - worker 内会复用同一份 styleSet，避免每块 tile 重复编译 style/filter
    - worker 返回错误时，主线程会自动回退到同步 parse，避免整个场景只剩占位底图
 10. 关键链路日志
-
-- style 加载失败会打印明确错误
-- visible tile 集收集失败会打印 warning
-- load / parse / upload 失败会打印 tile 坐标、source 坐标、source url 和阶段
-- worker 回退到同步 parse 时会打印 warning
-
-11. 基础 symbol collision
-
-- 当前已支持 tile 内、跨 symbol layer 的基础碰撞裁剪
-- symbol 当前已改为按帧使用共享 collision index，能在同一帧的可见 tile 集之间做 map-space 碰撞隐藏
-- 可明显压掉重复点标注和边界邻接 tile 的重复文本
+    - style 加载失败会打印明确错误
+    - visible tile 集收集失败会打印 warning
+    - load / parse / upload 失败会打印 tile 坐标、source 坐标、source url 和阶段
+    - worker 回退到同步 parse 时会打印 warning
+11. Symbol collision
+    - 当前已支持 tile 内、跨 symbol layer 的基础碰撞裁剪
+    - symbol 当前已改为按帧使用共享 collision index，能在同一帧的可见 tile 集之间做 map-space 碰撞隐藏
+    - 可明显压掉重复点标注和边界邻接 tile 的重复文本
 
 ## 当前代码结构
 
@@ -109,6 +107,7 @@ src/mvt/
   render/
     mvt-style-material.ts
     mvt-symbol-collision.ts
+    mvt-symbol-composite.ts
     mvt-symbol-renderable.ts
     mvt-tile-render-bundle.ts
     mvt-tile-transform.ts
@@ -146,6 +145,7 @@ src/mvt/
 - `style/mvt-style-set.ts`
 - `style/mvt-style-resource.ts`
 - `parse/mvt-vector-tile-parser.ts`
+- `render/mvt-symbol-composite.ts`
 - `render/mvt-symbol-renderable.ts`
 - `render/mvt-tile-render-bundle.ts`
 - `render/mvt-tileset-primitive.ts`
@@ -187,7 +187,7 @@ style.json
       -> tiles[]
   -> sprite
     -> sprite.json
-    -> sprite.png header
+    -> sprite.png (HTMLImageElement)
 ```
 
 ## 当前渲染策略
@@ -263,6 +263,8 @@ style.json
 - `icon-rotate`
 - `icon-rotation-alignment: viewport | map`
 - `icon-opacity`
+- `icon-text-fit`: 支持 `width / height / both` 三种模式，将图标和文本合成为单个图片渲染，解决三维场景中文本被图标遮挡的问题
+- `icon-text-fit-padding`
 - `symbol-sort-key`
 - `symbol-placement: point | line`
 - 线要素按 `symbol-spacing` 做近似重复采样
@@ -275,9 +277,24 @@ style.json
 
 - 真正的屏幕空间 symbol collision / placement
 - 沿路径逐字排版的 line text
-- `icon-text-fit`
 - `text-writing-mode`
 - 更完整的 SDF icon 样式控制
+
+### 5. icon-text-fit 合成渲染实现
+
+当 `icon-text-fit` 不为 `none` 时，采用以下策略：
+
+1. **收集阶段**: 遍历所有 placement groups，收集需要合成的图标和文本对
+2. **缓存阶段**: 使用 WeakMap 缓存机制，以 label 为 key，避免重复创建相同的合成条目
+3. **合成阶段**: 使用 Canvas 批量合成所有项目到单个精灵图中
+   - 一次性绘制所有图标和文本
+   - 只调用一次 `toDataURL()`，避免性能问题
+4. **渲染阶段**: Billboard 使用合成图片和对应的子区域
+
+缓存策略：
+
+- 合成精灵图缓存存储在 `MvtStyleSet` 中，跨瓦片共享
+- 使用 WeakMap 确保当 label 对象被回收时，缓存也会自动释放
 
 ## 运行时所有权与缓存规则
 
@@ -295,7 +312,7 @@ style.json
 当前缓存所有权：
 
 - provider: style、tile store、primitive、placeholder cache
-- style set: paint/layout expression cache、visible family cache、sprite atlas
+- style set: paint/layout expression cache、visible family cache、sprite atlas、composite sprite cache
 - primitive: tile render bundle、feature index、source tile cache、调度状态
 - tile store: tile / queue / LRU / byte budget
 
@@ -339,14 +356,7 @@ provider 销毁时至少要清理：
 - `upload-queued / uploading`
 - `ready`
 
-后续 worker 化后再拆成：
-
-- network
-- worker
-- upload
-- render
-
-### 3. 预算控制优先于“一帧传完”
+### 3. 预算控制优先于"一帧传完"
 
 当前保留这些硬限制：
 
@@ -365,7 +375,7 @@ provider 销毁时至少要清理：
 - sprite atlas 只加载一次，挂在 `MvtStyleSet`
 - render bundle 内部按样式值复用 Cesium material，避免同一 tile 重复创建材质对象
 - render bundle 只在 render zoom 变化时重建内部 collection，平移和同级重绘不会重复组装
-- `symbol` 当前改成“静态创建 Cesium `LabelCollection` / `BillboardCollection`，按帧只更新 placement/show 状态”，不再每帧销毁重建文本和图标 collection
+- `symbol` 当前改成"静态创建 Cesium `LabelCollection` / `BillboardCollection`，按帧只更新 placement/show 状态"，不再每帧销毁重建文本和图标 collection
 - MVT 内核统一改用 `@cesium/engine`，避免把 widgets 包拖进内核和测试
 - 相同 source tile 的并发请求会在 primitive 内去重
 - source tile 原始 PBF 会按 LRU 方式缓存在 primitive 内，overzoom sibling 可顺序复用
@@ -380,9 +390,11 @@ provider 销毁时至少要清理：
 - primitive 优先只更新当前可见 tile 集，child 未 ready 时用 ready 父 tile 回退；当前可见 tile 都还没 ready 时，再短暂回退到最近已渲染 tile
 - 当前可见集会先剔除已被更细请求子 tile 覆盖的父 tile，减少 parent/child 同时渲染导致的重复
 - symbol render bundle 会做一层基础 collision，压掉 tile 内重复标注
-- symbol 若当前瓦片没有生成任何文本/图标，或当前帧全部被 collision 隐藏，会按 layer 维度打印一次 warning，便于排查“样式有数据但没画出来”
+- symbol 若当前瓦片没有生成任何文本/图标，或当前帧全部被 collision 隐藏，会按 layer 维度打印一次 warning，便于排查"样式有数据但没画出来"
 - line / fill / circle 的位移、offset、dash 都先在 tile 局部空间预处理，再进入 Cesium collection
 - 不支持或只能近似渲染的 layer property 会按 layer/property 维度打印一次 warning，避免控制台刷屏
+- `icon-text-fit` 合成精灵图采用批量合成策略，所有需要合成的图标和文本一次性绘制到单个 Canvas 中，减少 Canvas 创建和 `toDataURL()` 调用次数
+- 合成精灵图缓存使用 WeakMap 机制，跨瓦片共享缓存，避免重复创建相同的合成图片
 
 ### 5. 当前还缺的调度能力
 
@@ -397,7 +409,7 @@ provider 销毁时至少要清理：
 2. MVT 坐标是 tile 局部坐标，左上原点，`y` 向下
 3. 几何允许超出 tile 边界，buffer 不是异常
 4. 真正进入渲染、symbol anchor 和 pick 之前，必须先把几何裁到当前 display tile，而不是直接拿 source tile buffer 几何去画
-5. overzoom sibling 不能共享“整份 source tile 几何直接渲染”的结果，必须按 child display tile 单独裁剪
+5. overzoom sibling 不能共享"整份 source tile 几何直接渲染"的结果，必须按 child display tile 单独裁剪
 6. 点和 symbol 的 tile 归属尽量使用半开区间，避免边界重复
 7. polygon 必须正确处理 ring / hole / 退化 ring
 8. feature 属性不要过早字符串化
@@ -423,7 +435,7 @@ provider 销毁时至少要清理：
 
 - 有明确职责边界
 - 能明显降低现有复杂度
-- 不是为了“看起来更分层”
+- 不是为了"看起来更分层"
 
 ### 3. `requestImage` 只做入口接入
 
@@ -433,7 +445,7 @@ provider 销毁时至少要清理：
 - 推进请求状态
 - 返回占位图
 
-当前真正的 render 可见集由 primitive 每帧从 Cesium globe 当前 imagery tile 收集，不再把“历史 requestImage 发生过”当成“当前还在屏幕里”。
+当前真正的 render 可见集由 primitive 每帧从 Cesium globe 当前 imagery tile 收集，不再把"历史 requestImage 发生过"当成"当前还在屏幕里"。
 
 不要在里面做：
 
@@ -495,6 +507,7 @@ provider 销毁时至少要清理：
 - feature index 与 pickFeatures
 - display tile clip 与 overscaled 边界归属
 - symbol text / icon 渲染
+- symbol icon-text-fit 合成渲染
 - 多行 symbol 文本解析与居中排布
 - symbol collision 去重
 - 邻接 tile 的共享 symbol collision
@@ -507,11 +520,12 @@ provider 销毁时至少要清理：
 
 ## 一句话结论
 
-当前代码已经不是“方案阶段”，而是：
+当前代码已经不是"方案阶段"，而是：
 
 - 真实样式已接通
 - 真实 MVT 数据已接通
 - `fill / line / circle / symbol(text+icon)` 已可渲染
+- `icon-text-fit` 支持图标与文本合成渲染
 - 渲染可见集已经切到 Cesium 当前 globe imagery tile，而不是靠历史请求猜测
 - 调度、缓存、资源边界已经基本理顺
 
