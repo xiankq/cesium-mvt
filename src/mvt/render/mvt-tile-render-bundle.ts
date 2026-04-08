@@ -657,16 +657,5 @@ function warnUnsupportedStaticLayerProperties(
     if (layer.paint['line-gradient'] !== undefined) {
       warnUnsupportedLayerProperty(warningContext, layer, 'paint', 'line-gradient');
     }
-    if (layer.paint['line-blur'] !== undefined) {
-      warnUnsupportedLayerProperty(warningContext, layer, 'paint', 'line-blur');
-    }
-  }
-  if (layer.type === 'circle') {
-    if (layer.paint['circle-blur'] !== undefined) {
-      warnUnsupportedLayerProperty(warningContext, layer, 'paint', 'circle-blur');
-    }
-    if (layer.paint['circle-pitch-scale'] !== undefined) {
-      warnUnsupportedLayerProperty(warningContext, layer, 'paint', 'circle-pitch-scale');
-    }
   }
 }

@@ -1063,9 +1063,6 @@ function warnUnsupportedSymbolLayerProperties(
   if (layer.paint['icon-halo-color'] !== undefined || layer.paint['icon-halo-width'] !== undefined) {
     warnUnsupportedLayerProperty(warningContext, layer, 'paint', 'icon-halo-color');
   }
-  if (layer.paint['text-halo-blur'] !== undefined) {
-    warnUnsupportedLayerProperty(warningContext, layer, 'paint', 'text-halo-blur');
-  }
 }
 
 function withOpacity(color: Color, opacity: number): Color {

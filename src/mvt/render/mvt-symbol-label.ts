@@ -8,7 +8,6 @@ import type {
   MvtSymbolLabelItem,
 } from './mvt-symbol-types';
 import { Cartesian2, Color, HorizontalOrigin, LabelStyle, VerticalOrigin } from '@cesium/engine';
-import { warnUnsupportedLayerProperty } from '../mvt-warning-context';
 import { getLayerHeightOffset, liftLocalPosition } from './mvt-layer-height';
 import { extractPlainTextValue, resolveTextBlock } from './mvt-symbol-text';
 import { resolveOrigins, resolveSymbolTranslate, withOpacity } from './mvt-symbol-utils';
@@ -45,12 +44,6 @@ export function resolveSymbolLabel(
 
   if (fillColor.alpha <= 0 && (outlineColor.alpha <= 0 || outlineWidth <= 0)) {
     return undefined;
-  }
-
-  if (letterSpacing !== 0) {
-    warnUnsupportedLayerProperty(warningContext, layer, 'layout', 'text-letter-spacing', {
-      reason: 'Cesium label currently does not support per-glyph letter spacing',
-    });
   }
 
   const { horizontalOrigin, verticalOrigin } = resolveOrigins(
