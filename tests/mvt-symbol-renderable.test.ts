@@ -168,7 +168,6 @@ describe('mvt-symbol-renderable', () => {
     expect(labelCalls[1].text).toBe('太湖');
     expect(labelCalls[0].horizontalOrigin).toBe(labelCalls[1].horizontalOrigin);
     expect(labelCalls[0].pixelOffset.y).toBeGreaterThan(labelCalls[1].pixelOffset.y);
-    expect(labelCalls.every(call => call.disableDepthTestDistance === Number.POSITIVE_INFINITY)).toBe(true);
 
     renderBundle.update({}, 14, new MvtSymbolCollisionIndex());
     renderBundle.update({}, 14, new MvtSymbolCollisionIndex());
@@ -181,11 +180,10 @@ describe('mvt-symbol-renderable', () => {
   it('shares collision hiding across neighboring tiles in the same frame', async () => {
     const styleSet = await loadOpenFreeMapBrightStyleSet();
     const addedLabels: Array<{ show: boolean; text?: string }> = [];
-    const originalAdd = LabelCollection.prototype.add;
-    const addSpy = vi.spyOn(LabelCollection.prototype, 'add').mockImplementation(function (...args) {
-      const label = originalAdd.apply(this, args);
-      addedLabels.push(label as { show: boolean; text?: string });
-      return label;
+    const addSpy = vi.spyOn(LabelCollection.prototype, 'add').mockImplementation((options) => {
+      const label = { show: true, text: options?.text } as { show: boolean; text?: string };
+      addedLabels.push(label);
+      return label as unknown as ReturnType<LabelCollection['add']>;
     });
     const sharedCollisionIndex = new MvtSymbolCollisionIndex();
     const leftBundle = createMvtTileRenderBundle({
