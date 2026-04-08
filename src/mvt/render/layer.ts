@@ -1,24 +1,12 @@
-import type {  GeometryInstance,
-  PointPrimitive,
-  Polyline,
-  Scene,
-  TilingScheme,
-} from 'cesium';
+import type { GeometryInstance, PointPrimitive, Polyline, Scene, TilingScheme } from 'cesium';
 import type { TileScheduler } from '../scheduler/scheduler';
 import type { CesiumMvtSourceCache } from '../scheduler/source';
 import type { MapLibreStyleDocument } from '../style/document';
 import type { CompiledMapLibreStyleRenderer, CompiledStyleLayer, CompiledStyleRefreshMode } from '../style/renderer';
-import type {  DecodedFeatureRecord,
-  DecodedLayerRecord,
-  DecodedTileRecord,
-  MvtSchedulerSnapshot,
-  MvtViewportSnapshot,
-  TileDecodeEvent,
-} from '../types';
+import type { DecodedFeatureRecord, DecodedLayerRecord, DecodedTileRecord, MvtSchedulerSnapshot, MvtViewportSnapshot, TileDecodeEvent } from '../types';
 import type { StyledSymbolPlacement } from './label';
 import { Color, Material, PerInstanceColorAppearance, PointPrimitiveCollection, PolylineCollection, Primitive } from 'cesium';
-import {
-  compileMapLibreStyleRenderer,
+import { compileMapLibreStyleRenderer,
 } from '../style/renderer';
 import { addPrimitiveOrdered, applyOpacity, createPolylineMaterial, createTileTransformContext, estimateSceneZoom, evaluateStyleLayerSortKey, removeAndDestroyPrimitive } from './geometry';
 import { renderLineStringPrimitives } from './line-string';

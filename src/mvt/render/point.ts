@@ -1,11 +1,5 @@
-import type {  Color,
-  PointPrimitive,
-  PointPrimitiveCollection,
-  TilingScheme,
-} from 'cesium';
-import type {  DecodedFeatureRecord,
-  DecodedTileRecord,
-} from '../types';
+import type { Color, PointPrimitive, PointPrimitiveCollection, TilingScheme } from 'cesium';
+import type { DecodedFeatureRecord, DecodedTileRecord } from '../types';
 import type { TileTransformContext } from './geometry';
 import { createTileTransformContext, tilePointToCartesianWithContext } from './geometry';
 

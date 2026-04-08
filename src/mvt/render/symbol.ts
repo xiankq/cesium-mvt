@@ -1,9 +1,6 @@
 import type { Billboard, Label, Scene } from 'cesium';
 import type { CompiledSymbolLayer } from '../style/renderer';
-import type {  DecodedFeatureRecord,
-  DecodedLayerRecord,
-  DecodedTileRecord,
-} from '../types';
+import type { DecodedFeatureRecord, DecodedLayerRecord, DecodedTileRecord } from '../types';
 import type { TileTransformContext } from './geometry';
 import type { StyledSymbolPlacement } from './label';
 import type { MapLibreSpriteAtlas } from './sprite';

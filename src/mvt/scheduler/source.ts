@@ -1,13 +1,5 @@
-import type {  ImageryLayer,
-  Scene,
-  TilingScheme,
-} from 'cesium';
-import type {  DecodedTileRecord,
-  MvtSourceOptions,
-  MvtViewportListener,
-  MvtViewportSnapshot,
-  TileCoord,
-} from '../types';
+import type { ImageryLayer, Scene, TilingScheme } from 'cesium';
+import type { DecodedTileRecord, MvtSourceOptions, MvtViewportListener, MvtViewportSnapshot, TileCoord } from '../types';
 import type { TileScheduler } from './scheduler';
 import { estimateSceneZoom } from '../render/geometry';
 

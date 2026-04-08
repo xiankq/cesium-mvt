@@ -1,9 +1,6 @@
 import type { Scene, TilingScheme } from 'cesium';
 import type { CompiledStyleLayer } from '../style/renderer';
-import type {  DecodedFeatureRecord,
-  TileCoord,
-  TileGeometryPart,
-} from '../types';
+import type { DecodedFeatureRecord, TileCoord, TileGeometryPart } from '../types';
 import { classifyRings } from '@maplibre/maplibre-gl-style-spec';
 import { Cartesian3, Cartographic, Color, Material } from 'cesium';
 
@@ -91,7 +88,7 @@ export function ensureClosedLoop(positions: Cartesian3[]): Cartesian3[] {
   const first = positions[0];
   const last = positions.at(-1);
   if (
-    first.x === last.x
+    first.x === last?.x
     && first.y === last.y
     && first.z === last.z
   ) {
@@ -168,7 +165,7 @@ export function computeLineStringMidpoint(part: TileGeometryPart): [number, numb
     travelled += segmentLength;
   }
 
-  return part.at(-1);
+  return part.at(-1)!;
 }
 
 export function computeRingCentroid(part: TileGeometryPart): [number, number] {

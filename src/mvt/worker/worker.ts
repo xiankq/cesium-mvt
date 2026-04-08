@@ -1,9 +1,4 @@
-import type {  DecodedFeatureRecord,
-  DecodedLayerRecord,
-  DecodedTileRecord,
-  TileDecodeJob,
-  TileGeometryType,
-} from '../types';
+import type { DecodedFeatureRecord, DecodedLayerRecord, DecodedTileRecord, TileDecodeJob, TileGeometryType } from '../types';
 import type { WorkerErrorResponse, WorkerRequest, WorkerScope, WorkerSuccessResponse } from './protocol';
 import { VectorTile, VectorTileFeature } from '@mapbox/vector-tile';
 import Pbf from 'pbf';

@@ -1,8 +1,4 @@
-import type {  DecodedTileRecord,
-  MvtSchedulerSnapshot,
-  TileDecodeEvent,
-  TileDecodeJob,
-} from '../types';
+import type { DecodedTileRecord, MvtSchedulerSnapshot, TileDecodeEvent, TileDecodeJob } from '../types';
 import TinyQueue from 'tinyqueue';
 import { resolveHardwareConcurrency } from '../utils';
 import { VectorTileWorkerClient } from '../worker/client';

@@ -1,9 +1,5 @@
-import type {  Color,
-  TilingScheme,
-} from 'cesium';
-import type {  DecodedFeatureRecord,
-  DecodedTileRecord,
-} from '../types';
+import type { Color, TilingScheme } from 'cesium';
+import type { DecodedFeatureRecord, DecodedTileRecord } from '../types';
 import type { TileTransformContext } from './geometry';
 import { ColorGeometryInstanceAttribute, GeometryInstance, PerInstanceColorAppearance, PolygonGeometry, PolygonHierarchy } from 'cesium';
 import { createTileTransformContext, ensureClosedLoop, groupPolygonRings, toCartesianPositionsWithContext } from './geometry';

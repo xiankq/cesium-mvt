@@ -1,10 +1,6 @@
 import type { ImageryLayer, Request, Viewer } from 'cesium';
 import type { MapLibreStyleDocument } from './style/document';
-import type {  MvtProviderOptions,
-  MvtSchedulerSnapshot,
-  MvtSourceOptions,
-  TileDecodeJob,
-} from './types';
+import type { MvtProviderOptions, MvtSchedulerSnapshot, MvtSourceOptions, TileDecodeJob } from './types';
 import { UrlTemplateImageryProvider } from 'cesium';
 import { CesiumMvtPrimitiveLayer } from './render/layer';
 import { TileImageCache } from './request/image';
