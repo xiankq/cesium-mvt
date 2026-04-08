@@ -1,5 +1,5 @@
 import type { MvtStyleSpriteAtlas } from '../mvt-types';
-import type { MvtResolvedSymbolIcon, MvtResolvedSymbolLabel } from './mvt-symbol-renderable';
+import type { MvtResolvedSymbolIcon, MvtResolvedSymbolLabel } from './mvt-symbol-types';
 
 export interface MvtCompositeSpriteEntry {
   height: number;

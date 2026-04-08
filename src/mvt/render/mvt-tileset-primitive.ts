@@ -1,4 +1,4 @@
-import type { TilingScheme } from '@cesium/engine';
+import type { Scene, TilingScheme } from '@cesium/engine';
 import type { MvtPrimitiveFrameState, MvtTileCoordinate, MvtTilesetPrimitiveStats } from '../mvt-types';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import type { MvtTile } from '../tile/mvt-tile';
@@ -54,6 +54,7 @@ export class MvtTilesetPrimitive {
   private readonly sourceTileCache: MvtSourceTileCache;
   private readonly staleFrameWindow: number;
   private readonly parseWorkerClient: MvtParseWorkerClient;
+  private readonly symbolCollisionIndex = new MvtSymbolCollisionIndex();
   private readonly warningContext;
   show = true;
 
@@ -133,9 +134,13 @@ export class MvtTilesetPrimitive {
       return;
     }
 
-    this.frameNumber = frameState.frameNumber;
-    this.tileStore.beginFrame(frameState.frameNumber);
-    this.sourceTileCache.beginFrame(frameState.frameNumber);
+    const cesiumFrameState = frameState as unknown as { camera?: { scene?: Scene } };
+    const scene = frameState.scene ?? cesiumFrameState.camera?.scene;
+    const mvtFrameState = scene ? { ...frameState, scene } : frameState;
+
+    this.frameNumber = mvtFrameState.frameNumber;
+    this.tileStore.beginFrame(mvtFrameState.frameNumber);
+    this.sourceTileCache.beginFrame(mvtFrameState.frameNumber);
 
     if (!this.styleSet || !this.tileLoader) {
       this.sourceTileCache.evict();
@@ -150,7 +155,7 @@ export class MvtTilesetPrimitive {
     this.flushUploadQueue();
     this.sourceTileCache.evict();
     this.releaseEvictedTiles(this.tileStore.evictToBudgets());
-    this.renderReadyTiles(frameState);
+    this.renderReadyTiles(mvtFrameState);
   }
 
   private abortAllLoads(): void {
@@ -380,14 +385,15 @@ export class MvtTilesetPrimitive {
 
   private renderReadyTiles(frameState: MvtPrimitiveFrameState): void {
     const visibleTiles = filterLeafRequestedTiles(this.resolveVisibleTilesForRender());
-    const symbolCollisionIndex = new MvtSymbolCollisionIndex();
 
+    let collisionIndex: MvtSymbolCollisionIndex | undefined;
     if (frameState.scene) {
-      symbolCollisionIndex.beginFrame(frameState.scene);
+      this.symbolCollisionIndex.beginFrame(frameState.scene);
+      collisionIndex = this.symbolCollisionIndex;
     }
 
     if (!visibleTiles.length) {
-      this.renderRecentReadyTiles(frameState, symbolCollisionIndex);
+      this.renderRecentReadyTiles(frameState, collisionIndex);
       return;
     }
 
@@ -405,7 +411,7 @@ export class MvtTilesetPrimitive {
         continue;
       }
 
-      if (!this.renderTile(frameState, candidateTile, tile.coordinate.z, symbolCollisionIndex)) {
+      if (!this.renderTile(frameState, candidateTile, tile.coordinate.z, collisionIndex)) {
         continue;
       }
 
@@ -417,16 +423,16 @@ export class MvtTilesetPrimitive {
     }
 
     if (!renderedTiles.length) {
-      this.renderRecentReadyTiles(frameState, symbolCollisionIndex);
+      this.renderRecentReadyTiles(frameState, collisionIndex);
     }
   }
 
   private renderRecentReadyTiles(
     frameState: MvtPrimitiveFrameState,
-    symbolCollisionIndex: MvtSymbolCollisionIndex,
+    collisionIndex: MvtSymbolCollisionIndex | undefined,
   ): void {
     for (const tile of filterLeafRequestedTiles(this.tileStore.getRecentlyRenderedTiles(this.fallbackFrameWindow))) {
-      this.renderTile(frameState, tile, tile.coordinate.z, symbolCollisionIndex);
+      this.renderTile(frameState, tile, tile.coordinate.z, collisionIndex);
     }
   }
 
@@ -434,7 +440,7 @@ export class MvtTilesetPrimitive {
     frameState: MvtPrimitiveFrameState,
     tile: MvtTile,
     renderZoom: number,
-    symbolCollisionIndex: MvtSymbolCollisionIndex,
+    collisionIndex: MvtSymbolCollisionIndex | undefined,
   ): boolean {
     if (tile.state !== 'ready') {
       return false;
@@ -445,7 +451,7 @@ export class MvtTilesetPrimitive {
       return false;
     }
 
-    renderBundle.update(frameState, renderZoom, symbolCollisionIndex);
+    renderBundle.update(frameState, renderZoom, collisionIndex);
     tile.markRendered(this.frameNumber);
     return true;
   }

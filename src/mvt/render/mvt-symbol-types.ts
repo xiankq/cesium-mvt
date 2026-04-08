@@ -29,6 +29,8 @@ export interface MvtSymbolIconItem {
   billboard?: Billboard;
   color: Color;
   collisionBox?: MvtSymbolCollisionBox;
+  compositeKey?: string;
+  compositeLabel?: MvtResolvedSymbolLabel;
   height: number;
   horizontalOrigin: HorizontalOrigin;
   image: string;
@@ -62,6 +64,9 @@ export interface MvtSymbolLabelGroup {
 export interface MvtSymbolPlacementGroup {
   icon?: MvtSymbolIconItem;
   label?: MvtSymbolLabelGroup;
+  layerId: string;
+  sortKey?: number;
+  text?: string;
   visible?: boolean;
 }
 
@@ -95,6 +100,8 @@ export interface MvtResolvedSymbolLabel {
 export interface MvtSymbolCollisionBox {
   height: number;
   horizontalOrigin: HorizontalOrigin;
+  latitude: number;
+  longitude: number;
   padding: number;
   pixelOffset: Cartesian2;
   position: Cartesian3;

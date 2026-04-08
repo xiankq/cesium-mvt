@@ -85,9 +85,14 @@ export function createSymbolLabelCollisionBox(
   const centerX = anchor.mapX + offsetX;
   const centerY = anchor.mapY + offsetY;
 
+  const longitude = centerX * 360 - 180;
+  const latitude = Math.atan(Math.sinh(centerY * Math.PI)) * 180 / Math.PI;
+
   return {
     height,
     horizontalOrigin,
+    latitude,
+    longitude,
     padding,
     pixelOffset,
     position: Cartesian3.clone(anchor.position),

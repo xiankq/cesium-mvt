@@ -1,7 +1,3 @@
-import type {
-  Billboard,
-  Label,
-} from '@cesium/engine';
 import type Point from '@mapbox/point-geometry';
 import type { MvtDisplayFeatureCache } from '../mesh/mvt-display-feature';
 import type { MvtBucketFeature, MvtCompiledStyleLayer, MvtStyleSpriteEntry } from '../mvt-types';
@@ -9,6 +5,15 @@ import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import type { MvtSymbolCollisionIndex } from './mvt-symbol-collision';
 import type { MvtCompositeSpriteItem } from './mvt-symbol-composite';
+import type {
+  MvtResolvedSymbolIcon,
+  MvtResolvedSymbolLabel,
+  MvtSymbolAnchor,
+  MvtSymbolCollisionBox,
+  MvtSymbolIconItem,
+  MvtSymbolLabelItem,
+  MvtSymbolPlacementGroup,
+} from './mvt-symbol-types';
 import type { createMvtTileTransform } from './mvt-tile-transform';
 import {
   BillboardCollection,
@@ -39,83 +44,6 @@ export interface MvtTileRenderableLike {
   byteLength: number;
   destroy: () => void;
   update: (frameState: unknown, collisionIndex?: MvtSymbolCollisionIndex) => void;
-}
-
-interface MvtSymbolAnchor {
-  angle: number;
-  mapScale: number;
-  mapX: number;
-  mapY: number;
-  position: Cartesian3;
-}
-
-interface MvtSymbolIconItem {
-  billboard?: Billboard;
-  color: Color;
-  collisionBox?: { height: number; horizontalOrigin: HorizontalOrigin; padding: number; pixelOffset: Cartesian2; position: Cartesian3; tileMaxX: number; tileMaxY: number; tileMinX: number; tileMinY: number; verticalOrigin: VerticalOrigin; width: number };
-  compositeKey?: string;
-  compositeLabel?: MvtResolvedSymbolLabel;
-  height: number;
-  horizontalOrigin: HorizontalOrigin;
-  image: string;
-  imageSubRegion: BoundingRectangle;
-  pixelOffset: Cartesian2;
-  position: Cartesian3;
-  rotation: number;
-  verticalOrigin: VerticalOrigin;
-  width: number;
-}
-
-interface MvtSymbolLabelItem {
-  fillColor: Color;
-  font: string;
-  horizontalOrigin: HorizontalOrigin;
-  label?: Label;
-  outlineColor: Color;
-  outlineWidth: number;
-  pixelOffset: Cartesian2;
-  position: Cartesian3;
-  style: LabelStyle;
-  text: string;
-  verticalOrigin: VerticalOrigin;
-}
-
-interface MvtSymbolLabelGroup {
-  collisionBox?: { height: number; horizontalOrigin: HorizontalOrigin; padding: number; pixelOffset: Cartesian2; position: Cartesian3; tileMaxX: number; tileMaxY: number; tileMinX: number; tileMinY: number; verticalOrigin: VerticalOrigin; width: number };
-  items: MvtSymbolLabelItem[];
-}
-
-interface MvtSymbolPlacementGroup {
-  icon?: MvtSymbolIconItem;
-  label?: MvtSymbolLabelGroup;
-  visible?: boolean;
-}
-
-export interface MvtResolvedSymbolIcon {
-  color: Color;
-  height: number;
-  horizontalOrigin: HorizontalOrigin;
-  image: string;
-  imageSubRegion: BoundingRectangle;
-  pixelOffset: Cartesian2;
-  rotation: number;
-  verticalOrigin: VerticalOrigin;
-  width: number;
-}
-
-export interface MvtResolvedSymbolLabel {
-  blockHeight: number;
-  blockWidth: number;
-  fillColor: Color;
-  font: string;
-  horizontalOrigin: HorizontalOrigin;
-  lineHeight: number;
-  lines: string[];
-  outlineColor: Color;
-  outlineWidth: number;
-  pixelOffset: Cartesian2;
-  style: LabelStyle;
-  verticalOrigin: VerticalOrigin;
 }
 
 export function createSymbolRenderable(
@@ -202,6 +130,9 @@ export function createSymbolRenderable(
   const labelCollection = createLabelCollection(placementGroups, transform);
   const byteLength = estimateIconByteLength(iconCandidateCount) + estimateLabelByteLength(labelLineCount, placementGroups);
 
+  const zOrder = resolveZOrderMode(styleSet.evaluateLayoutValue(layer, 'symbol-z-order', zoom));
+  const hasSortKey = layer.layout['symbol-sort-key'] !== undefined;
+
   return {
     byteLength,
     destroy: () => {
@@ -209,7 +140,7 @@ export function createSymbolRenderable(
       labelCollection?.destroy();
     },
     update: (frameState: unknown, nextCollisionIndex = collisionIndex) => {
-      applyPlacementVisibility(placementGroups, nextCollisionIndex);
+      applyPlacementVisibility(placementGroups, nextCollisionIndex, zOrder, hasSortKey);
 
       if (!canUpdateCesiumCollections(frameState)) {
         return;
@@ -219,6 +150,13 @@ export function createSymbolRenderable(
       (labelCollection as unknown as { update: (state: unknown) => void } | undefined)?.update(frameState);
     },
   };
+}
+
+function resolveZOrderMode(value: unknown): ZOrderMode {
+  if (value === 'viewport-y' || value === 'source') {
+    return value;
+  }
+  return 'auto';
 }
 
 function createSymbolPlacementGroups(
@@ -259,8 +197,13 @@ function createSymbolPlacementGroups(
   );
   const placementGroups: MvtSymbolPlacementGroup[] = [];
 
+  const labelText = resolvedLabel?.lines.join('\n');
+
   for (const anchor of anchors) {
-    const placementGroup: MvtSymbolPlacementGroup = {};
+    const placementGroup: MvtSymbolPlacementGroup = {
+      layerId: layer.id,
+      text: labelText,
+    };
     if (resolvedIcon) {
       placementGroup.icon = {
         ...resolvedIcon,
@@ -323,16 +266,50 @@ function canUpdateCesiumCollections(frameState: unknown): frameState is { comman
   return Array.isArray(candidate.commandList) && typeof candidate.context === 'object' && candidate.context !== null;
 }
 
+type ZOrderMode = 'auto' | 'source' | 'viewport-y';
+
 function applyPlacementVisibility(
   placementGroups: readonly MvtSymbolPlacementGroup[],
   collisionIndex?: MvtSymbolCollisionIndex,
+  zOrder: ZOrderMode = 'auto',
+  hasSortKey: boolean = false,
 ): number {
   let visiblePlacementCount = 0;
 
-  for (const placementGroup of placementGroups) {
+  const sortedGroups = sortPlacementGroups(placementGroups, collisionIndex, zOrder, hasSortKey);
+
+  for (const placementGroup of sortedGroups) {
+    const collisionBox = placementGroup.icon?.collisionBox
+      ?? placementGroup.label?.collisionBox;
+
+    if (!collisionBox) {
+      setPlacementGroupVisible(placementGroup, false);
+      continue;
+    }
+
+    const image = placementGroup.icon?.image;
+
+    if (collisionIndex?.isAlreadyPlaced(
+      collisionBox.longitude,
+      collisionBox.latitude,
+      placementGroup.layerId,
+      placementGroup.text,
+      image,
+    )) {
+      setPlacementGroupVisible(placementGroup, false);
+      continue;
+    }
+
     const visible = !collisionIndex || !collidesWithPlacementGroup(placementGroup, collisionIndex);
     if (visible) {
       insertPlacementCollisionBoxes(placementGroup, collisionIndex);
+      collisionIndex?.markAsPlaced(
+        collisionBox.longitude,
+        collisionBox.latitude,
+        placementGroup.layerId,
+        placementGroup.text,
+        image,
+      );
       visiblePlacementCount += 1;
     }
 
@@ -340,6 +317,43 @@ function applyPlacementVisibility(
   }
 
   return visiblePlacementCount;
+}
+
+function sortPlacementGroups(
+  placementGroups: readonly MvtSymbolPlacementGroup[],
+  collisionIndex: MvtSymbolCollisionIndex | undefined,
+  zOrder: ZOrderMode,
+  hasSortKey: boolean,
+): readonly MvtSymbolPlacementGroup[] {
+  if (!collisionIndex || !collisionIndex.hasScene()) {
+    return placementGroups;
+  }
+
+  const shouldSortByViewportY = zOrder === 'viewport-y' || (zOrder === 'auto' && !hasSortKey);
+
+  if (!shouldSortByViewportY) {
+    return placementGroups;
+  }
+
+  return [...placementGroups].sort((a, b) => {
+    const screenYA = calculatePlacementScreenY(a, collisionIndex);
+    const screenYB = calculatePlacementScreenY(b, collisionIndex);
+    return screenYA - screenYB;
+  });
+}
+
+function calculatePlacementScreenY(
+  placementGroup: MvtSymbolPlacementGroup,
+  collisionIndex: MvtSymbolCollisionIndex,
+): number {
+  const position = placementGroup.icon?.collisionBox?.position
+    ?? placementGroup.label?.collisionBox?.position;
+
+  if (position) {
+    return collisionIndex.calculateScreenY(position);
+  }
+
+  return 0;
 }
 
 function collidesWithPlacementGroup(
@@ -498,7 +512,7 @@ function createSymbolCollisionBox(
   padding: number,
   verticalOrigin: VerticalOrigin,
   width: number,
-): { height: number; horizontalOrigin: HorizontalOrigin; padding: number; pixelOffset: Cartesian2; position: Cartesian3; tileMaxX: number; tileMaxY: number; tileMinX: number; tileMinY: number; verticalOrigin: VerticalOrigin; width: number } {
+): MvtSymbolCollisionBox {
   const offsetX = pixelOffset.x * anchor.mapScale;
   const offsetY = pixelOffset.y * anchor.mapScale;
   const widthInMapUnits = width * anchor.mapScale;
@@ -508,9 +522,14 @@ function createSymbolCollisionBox(
   const centerX = anchor.mapX + offsetX;
   const centerY = anchor.mapY + offsetY;
 
+  const longitude = centerX * 360 - 180;
+  const latitude = Math.atan(Math.sinh(centerY * Math.PI)) * 180 / Math.PI;
+
   return {
     height,
     horizontalOrigin,
+    latitude,
+    longitude,
     padding,
     pixelOffset,
     position: Cartesian3.clone(anchor.position),

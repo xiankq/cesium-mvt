@@ -7,6 +7,8 @@ type OverlapMode = 'always' | 'never';
 type ZOrderMode = 'auto' | 'viewport-y' | 'source';
 
 interface CollisionKey {
+  crossTileID?: string;
+  layerId?: string;
   overlapMode: OverlapMode;
 }
 
@@ -33,9 +35,25 @@ interface SortablePlacement {
 const VIEWPORT_PADDING = 100;
 const CELL_SIZE = 25;
 const PERSPECTIVE_RATIO_CUTOFF = 0.6;
+const COORDINATE_PRECISION = 1000000;
 
 function boxesIntersect(a: TileBox, b: TileBox): boolean {
   return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
+}
+
+function generateCrossTileID(
+  longitude: number,
+  latitude: number,
+  layerId: string,
+  text?: string,
+  image?: string,
+): string {
+  const lon = Math.round(longitude * COORDINATE_PRECISION);
+  const lat = Math.round(latitude * COORDINATE_PRECISION);
+  const textKey = text ? `:${text}` : '';
+  const imageKey = image ? `:${image}` : '';
+
+  return `${layerId}:${lon}:${lat}${textKey}${imageKey}`;
 }
 
 function resolveHorizontalCenter(x: number, origin: HorizontalOrigin, width: number): number {
@@ -64,12 +82,12 @@ export class MvtSymbolCollisionIndex {
   private readonly grid: MvtGridIndex<CollisionKey>;
   private readonly ignoredGrid: MvtGridIndex<CollisionKey>;
   private readonly tileBoxes: TileBox[] = [];
+  private readonly placedPositions: Map<string, Cartesian3[]> = new Map();
   private scene?: Scene;
   private screenWidth = 0;
   private screenHeight = 0;
   private cameraToCenterDistance = 0;
   private cameraPosition?: Cartesian3;
-  private centerPosition?: Cartesian3;
 
   constructor() {
     this.grid = new MvtGridIndex(1, 1, CELL_SIZE);
@@ -89,10 +107,33 @@ export class MvtSymbolCollisionIndex {
     this.grid.reset(gridWidth, gridHeight);
     this.ignoredGrid.reset(gridWidth, gridHeight);
     this.tileBoxes.length = 0;
+    this.placedPositions.clear();
   }
 
   hasScene(): boolean {
     return Boolean(this.scene);
+  }
+
+  isAlreadyPlaced(
+    longitude: number,
+    latitude: number,
+    layerId: string,
+    text?: string,
+    image?: string,
+  ): boolean {
+    const crossTileID = generateCrossTileID(longitude, latitude, layerId, text, image);
+    return this.placedPositions.has(crossTileID);
+  }
+
+  markAsPlaced(
+    longitude: number,
+    latitude: number,
+    layerId: string,
+    text?: string,
+    image?: string,
+  ): void {
+    const crossTileID = generateCrossTileID(longitude, latitude, layerId, text, image);
+    this.placedPositions.set(crossTileID, [new Cartesian3(longitude, latitude, 0)]);
   }
 
   sortPlacementsByViewportY(placements: SortablePlacement[]): SortablePlacement[] {
@@ -134,7 +175,6 @@ export class MvtSymbolCollisionIndex {
     const centerOnGlobe = camera.pickEllipsoid(screenCenter, ellipsoid);
 
     if (centerOnGlobe) {
-      this.centerPosition = Cartesian3.clone(centerOnGlobe);
       this.cameraToCenterDistance = Cartesian3.distance(this.cameraPosition, centerOnGlobe);
     }
     else {
@@ -145,7 +185,6 @@ export class MvtSymbolCollisionIndex {
       else {
         this.cameraToCenterDistance = 0;
       }
-      this.centerPosition = undefined;
     }
   }
 
