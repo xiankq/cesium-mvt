@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildSceneViewSignature,
-  getRenderedSurfaceTiles,
-  normalizeVisibleTileCover,
-} from '../src/mvt/scheduler/source';
+import { buildSceneViewSignature, getRenderedSurfaceTiles, normalizeVisibleTileCover } from '../src/mvt/scheduler/source';
 
 describe('normalizeVisibleTileCover', () => {
   it('keeps the parent tile when child coverage is partial', () => {

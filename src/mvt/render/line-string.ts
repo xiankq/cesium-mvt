@@ -9,13 +9,7 @@ import type {
   DecodedTileRecord,
 } from '../types';
 import type { TileTransformContext } from './geometry';
-import {
-  createPolylineMaterial,
-  createTileTransformContext,
-  ensureClosedLoop,
-
-  toCartesianPositionsWithContext,
-} from './geometry';
+import { createPolylineMaterial, createTileTransformContext, ensureClosedLoop, toCartesianPositionsWithContext } from './geometry';
 
 export interface RenderLineStringPrimitivesOptions {
   tilingScheme: TilingScheme;

@@ -1,13 +1,6 @@
 import type { Feature as MapLibreFeature, StylePropertySpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { DecodedFeatureRecord, DecodedLayerRecord, DecodedTileRecord } from '../types';
-import {
-  convertFilter,
-  createExpression,
-  createPropertyExpression,
-  Formatted,
-  isExpression,
-
-} from '@maplibre/maplibre-gl-style-spec';
+import { convertFilter, createExpression, createPropertyExpression, Formatted, isExpression } from '@maplibre/maplibre-gl-style-spec';
 import { Color } from 'cesium';
 
 export interface CompiledStyleExpression<T> {

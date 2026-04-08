@@ -9,7 +9,6 @@ import type { TileTransformContext } from './geometry';
 import type { StyledSymbolPlacement } from './label';
 import type { MapLibreSpriteAtlas } from './sprite';
 import {
-
   BillboardCollection,
   Cartesian2,
   Color,
@@ -19,36 +18,12 @@ import {
 
 } from 'cesium';
 import {
-
   resolveFormattedText,
 } from '../style/renderer';
 import { ScreenLabelCollisionIndex } from './collision';
 import { ScreenSymbolDedupeIndex } from './dedupe';
-import {
-  addPrimitiveOrdered,
-  applyOpacity,
-  getFeatureAnchor,
-  removeAndDestroyPrimitive,
-  tilePointToCartesianWithContext,
-
-} from './geometry';
-import {
-  applyTextTransform,
-  buildSymbolDedupeKey,
-  combinePixelOffsets,
-  DEFAULT_TEXT_FONT_STACK,
-  estimateScreenRect,
-  fontStackToCss,
-  normalizeSymbolKey,
-  parseTextAnchor,
-  resolveIconImageDimensions,
-  resolveTextJustifyOrigin,
-  resolveTextPixelOffset,
-
-  textOffsetToPixelOffset,
-  unionScreenRects,
-  wrapSymbolText,
-} from './label';
+import { addPrimitiveOrdered, applyOpacity, getFeatureAnchor, removeAndDestroyPrimitive, tilePointToCartesianWithContext } from './geometry';
+import { applyTextTransform, buildSymbolDedupeKey, combinePixelOffsets, DEFAULT_TEXT_FONT_STACK, estimateScreenRect, fontStackToCss, normalizeSymbolKey, parseTextAnchor, resolveIconImageDimensions, resolveTextJustifyOrigin, resolveTextPixelOffset, textOffsetToPixelOffset, unionScreenRects, wrapSymbolText } from './label';
 import { buildTextSpriteRequest, TextSpriteAtlas } from './text';
 
 interface CreateStyledSymbolPlacementOptions {

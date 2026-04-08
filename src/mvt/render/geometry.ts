@@ -6,13 +6,7 @@ import type {
   TileGeometryPart,
 } from '../types';
 import { classifyRings } from '@maplibre/maplibre-gl-style-spec';
-import {
-  Cartesian3,
-  Cartographic,
-  Color,
-  Material,
-
-} from 'cesium';
+import { Cartesian3, Cartographic, Color, Material } from 'cesium';
 
 const scratchNativePosition = new Cartesian3();
 const scratchCartographic = new Cartographic();

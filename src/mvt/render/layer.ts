@@ -18,30 +18,11 @@ import type {
   TileDecodeEvent,
 } from '../types';
 import type { StyledSymbolPlacement } from './label';
+import { Color, Material, PerInstanceColorAppearance, PointPrimitiveCollection, PolylineCollection, Primitive } from 'cesium';
 import {
-  Color,
-  Material,
-  PerInstanceColorAppearance,
-
-  PointPrimitiveCollection,
-
-  PolylineCollection,
-  Primitive,
-
-} from 'cesium';
-import {
-
   compileMapLibreStyleRenderer,
 } from '../style/renderer';
-import {
-  addPrimitiveOrdered,
-  applyOpacity,
-  createPolylineMaterial,
-  createTileTransformContext,
-  estimateSceneZoom,
-  evaluateStyleLayerSortKey,
-  removeAndDestroyPrimitive,
-} from './geometry';
+import { addPrimitiveOrdered, applyOpacity, createPolylineMaterial, createTileTransformContext, estimateSceneZoom, evaluateStyleLayerSortKey, removeAndDestroyPrimitive } from './geometry';
 import { renderLineStringPrimitives } from './line-string';
 import { renderPointPrimitives } from './point';
 import { renderPolygonPrimitives } from './polygon';

@@ -8,8 +8,7 @@ import type {
 import type { WorkerErrorResponse, WorkerRequest, WorkerScope, WorkerSuccessResponse } from './protocol';
 import { VectorTile, VectorTileFeature } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
-import {
-  isTileDecodeAbortError,
+import { isTileDecodeAbortError,
 
 } from './protocol';
 

@@ -7,11 +7,7 @@ import type {
 } from 'cesium';
 import type { ScreenRect } from '../utils/screen-space';
 import type { SpriteAtlasEntry } from './sprite';
-import {
-  Cartesian2,
-  HorizontalOrigin,
-  VerticalOrigin,
-} from 'cesium';
+import { Cartesian2, HorizontalOrigin, VerticalOrigin } from 'cesium';
 
 export interface SymbolPlacementCandidate {
   labelId: string;

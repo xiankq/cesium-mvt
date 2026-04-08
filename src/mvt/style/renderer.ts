@@ -5,29 +5,11 @@ import type {
   DecodedTileRecord,
 } from '../types';
 import type { CompiledStyleExpression } from './expressions';
-import {
-  latest,
+import { latest,
 
 } from '@maplibre/maplibre-gl-style-spec';
 import { Color } from 'cesium';
-import {
-  buildStyleFeatureFilter,
-  buildStyleLayerVisibility,
-  compileBooleanExpression,
-  compileColorExpression,
-
-  compileEnumExpression,
-  compileFontExpression,
-  compileNumberExpression,
-  compileNumberTupleExpression,
-  compilePropertyExpression,
-  compileStringExpression,
-  compileTextAnchorExpression,
-  compileTextJustifyExpression,
-  compileTextOffsetExpression,
-  compileTextOverlapExpression,
-  compileTextTransformExpression,
-} from './expressions';
+import { buildStyleFeatureFilter, buildStyleLayerVisibility, compileBooleanExpression, compileColorExpression, compileEnumExpression, compileFontExpression, compileNumberExpression, compileNumberTupleExpression, compilePropertyExpression, compileStringExpression, compileTextAnchorExpression, compileTextJustifyExpression, compileTextOffsetExpression, compileTextOverlapExpression, compileTextTransformExpression } from './expressions';
 
 export { resolveFormattedText } from './expressions';
 export type { CompiledStyleExpression, ResolvedFormattedText } from './expressions';

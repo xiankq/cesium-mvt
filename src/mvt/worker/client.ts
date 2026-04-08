@@ -1,8 +1,7 @@
 import type { DecodedTileRecord, TileDecodeJob } from '../types';
 import type { WorkerDecodeRequest, WorkerRequest, WorkerResponse } from './protocol';
 import { resolveHardwareConcurrency } from '../utils';
-import {
-  createTileDecodeAbortError,
+import { createTileDecodeAbortError,
 
 } from './protocol';
 

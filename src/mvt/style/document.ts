@@ -1,11 +1,5 @@
 import type { SourceSpecification, SpriteSpecification, StyleSpecification, ValidationError, VectorSourceSpecification } from '@maplibre/maplibre-gl-style-spec';
-import {
-  format as formatStyle,
-  migrate as migrateStyle,
-
-  validateStyleMin,
-
-} from '@maplibre/maplibre-gl-style-spec';
+import { format as formatStyle, migrate as migrateStyle, validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 
 export type MapLibreStyleDocument = StyleSpecification;
 

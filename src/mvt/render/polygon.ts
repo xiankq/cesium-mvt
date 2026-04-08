@@ -7,21 +7,8 @@ import type {
   DecodedTileRecord,
 } from '../types';
 import type { TileTransformContext } from './geometry';
-import {
-  ColorGeometryInstanceAttribute,
-  GeometryInstance,
-  PerInstanceColorAppearance,
-  PolygonGeometry,
-  PolygonHierarchy,
-
-} from 'cesium';
-import {
-  createTileTransformContext,
-  ensureClosedLoop,
-  groupPolygonRings,
-
-  toCartesianPositionsWithContext,
-} from './geometry';
+import { ColorGeometryInstanceAttribute, GeometryInstance, PerInstanceColorAppearance, PolygonGeometry, PolygonHierarchy } from 'cesium';
+import { createTileTransformContext, ensureClosedLoop, groupPolygonRings, toCartesianPositionsWithContext } from './geometry';
 
 export interface RenderPolygonPrimitivesOptions {
   tilingScheme: TilingScheme;

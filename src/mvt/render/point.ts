@@ -9,11 +9,7 @@ import type {
   DecodedTileRecord,
 } from '../types';
 import type { TileTransformContext } from './geometry';
-import {
-  createTileTransformContext,
-  tilePointToCartesianWithContext,
-
-} from './geometry';
+import { createTileTransformContext, tilePointToCartesianWithContext } from './geometry';
 
 export interface RenderPointPrimitivesOptions {
   tilingScheme: TilingScheme;
