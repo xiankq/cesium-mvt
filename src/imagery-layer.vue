@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Viewer } from 'cesium';
 import { watchEffect } from 'vue';
+import { MvtImageryProvider } from './mvt';
 
 const props = defineProps<{
   viewer: Viewer;
@@ -8,13 +9,13 @@ const props = defineProps<{
 
 watchEffect((onCleanup) => {
   const layer = props.viewer.imageryLayers.addImageryProvider(
-    // new MvtImageryProvider({
-    //   scene: props.viewer.scene,
-    //   style: 'https://tiles.openfreemap.org/styles/bright',
-    //   // ...其他参数
-    // }),
+    new MvtImageryProvider({
+      scene: props.viewer.scene,
+      source: 'openmaptiles',
+      styleUrl: 'https://tiles.openfreemap.org/styles/bright',
+    }),
   );
-  onCleanup(() => props.viewer.imageryLayers.remove(layer));
+  onCleanup(() => layer && props.viewer.imageryLayers.remove(layer));
 });
 </script>
 
