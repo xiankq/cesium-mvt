@@ -116,3 +116,4 @@ pnpm lint:eslint src/mvt/provider.ts
 - 编写新代码时不要总想着兼容旧代码，或者只是打补丁，要从根本上解决问题
 - 修改代码后运行 `pnpm lint:eslint --fix` 和 `pnpm lint:tsc` 确保通过检查
 - 新功能需编写对应测试
+- 必要时添加对应代码注释
