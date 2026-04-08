@@ -1,5 +1,4 @@
-import type {
-  DecodedFeatureRecord,
+import type {  DecodedFeatureRecord,
   DecodedLayerRecord,
   DecodedTileRecord,
   TileDecodeJob,

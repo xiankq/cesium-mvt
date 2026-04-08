@@ -1,5 +1,4 @@
-import type {
-  BillboardCollection,
+import type {  BillboardCollection,
   Cartesian3,
   Color,
   LabelCollection,

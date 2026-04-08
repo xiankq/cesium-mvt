@@ -1,7 +1,6 @@
 import type { Scene, TilingScheme } from 'cesium';
 import type { CompiledStyleLayer } from '../style/renderer';
-import type {
-  DecodedFeatureRecord,
+import type {  DecodedFeatureRecord,
   TileCoord,
   TileGeometryPart,
 } from '../types';

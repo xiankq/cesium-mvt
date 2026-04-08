@@ -1,5 +1,4 @@
-import type {
-  GeometryInstance,
+import type {  GeometryInstance,
   PointPrimitive,
   Polyline,
   Scene,
@@ -9,8 +8,7 @@ import type { TileScheduler } from '../scheduler/scheduler';
 import type { CesiumMvtSourceCache } from '../scheduler/source';
 import type { MapLibreStyleDocument } from '../style/document';
 import type { CompiledMapLibreStyleRenderer, CompiledStyleLayer, CompiledStyleRefreshMode } from '../style/renderer';
-import type {
-  DecodedFeatureRecord,
+import type {  DecodedFeatureRecord,
   DecodedLayerRecord,
   DecodedTileRecord,
   MvtSchedulerSnapshot,

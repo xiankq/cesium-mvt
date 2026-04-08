@@ -1,7 +1,6 @@
 import type { ImageryLayer, Request, Viewer } from 'cesium';
 import type { MapLibreStyleDocument } from './style/document';
-import type {
-  MvtProviderOptions,
+import type {  MvtProviderOptions,
   MvtSchedulerSnapshot,
   MvtSourceOptions,
   TileDecodeJob,

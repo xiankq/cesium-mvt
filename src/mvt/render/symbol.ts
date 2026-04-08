@@ -1,7 +1,6 @@
 import type { Billboard, Label, Scene } from 'cesium';
 import type { CompiledSymbolLayer } from '../style/renderer';
-import type {
-  DecodedFeatureRecord,
+import type {  DecodedFeatureRecord,
   DecodedLayerRecord,
   DecodedTileRecord,
 } from '../types';

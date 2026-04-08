@@ -1,10 +1,8 @@
-import type {
-  ImageryLayer,
+import type {  ImageryLayer,
   Scene,
   TilingScheme,
 } from 'cesium';
-import type {
-  DecodedTileRecord,
+import type {  DecodedTileRecord,
   MvtSourceOptions,
   MvtViewportListener,
   MvtViewportSnapshot,

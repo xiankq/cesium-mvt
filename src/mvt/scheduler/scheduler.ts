@@ -1,5 +1,4 @@
-import type {
-  DecodedTileRecord,
+import type {  DecodedTileRecord,
   MvtSchedulerSnapshot,
   TileDecodeEvent,
   TileDecodeJob,

@@ -1,6 +1,5 @@
 import type { LayerSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type {
-  DecodedFeatureRecord,
+import type {  DecodedFeatureRecord,
   DecodedLayerRecord,
   DecodedTileRecord,
 } from '../types';
