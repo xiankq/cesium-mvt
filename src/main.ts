@@ -1,6 +1,5 @@
 import { createApp } from 'vue';
-import App from './App.vue';
+import app from './app.vue';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
-import './style.css';
 
-createApp(App).mount('#app');
+createApp(app).mount('#app');
