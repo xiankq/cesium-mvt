@@ -18,6 +18,7 @@ interface CreateTileRequestOptions {
   tiles: string[];
 }
 
+// tile key 带上 source 作用域，避免多个 source 共享同一组 z/x/y 时发生冲突。
 export function createTileKey(
   sourceId: string,
   level: number,
@@ -39,6 +40,7 @@ export function createTileRequest(
     coordinate,
     sourceId,
   } = options;
+  // TMS 的 y 行号从底部开始计数，和 XYZ 模板不同。
   const y = options.scheme === 'tms'
     ? getTmsY(coordinate.level, coordinate.y)
     : coordinate.y;

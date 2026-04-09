@@ -35,6 +35,8 @@ const DEFAULT_BLOCKERS: TileBlockers = {
   uploading: false,
 };
 
+// TileManager 显式维护逐帧状态：shown、hidden、touched、unloadable
+// 是刻意拆开的概念，避免 cache trim 误伤仍在承担 fallback 的瓦片。
 export class TileManager {
   private currentFrame = 0;
   private readonly tiles = new Map<string, TileRecord>();
@@ -88,6 +90,7 @@ export class TileManager {
         tile.state = 'shown';
       }
       else if (tile.state === 'shown') {
+        // 退出 show 集时先转成 hidden，由调用方决定后续是否真正卸载。
         tile.state = 'hidden';
         hiddenKeys.push(tile.key);
       }

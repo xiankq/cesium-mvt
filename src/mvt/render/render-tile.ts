@@ -5,6 +5,8 @@ import type {
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
 import type { RenderEntry } from './render-order';
 
+// RenderTile 表示某个 source tile 在当前 styleEpoch 下的渲染计划，
+// 此时还没有真正构建出可提交给 Cesium 的几何资源。
 export interface BackgroundBatch {
   color?: string;
   layerId: string;
@@ -76,6 +78,8 @@ export function compileRenderTile({
       continue;
     }
 
+    // 一个 family 可能对应多个样式图层，但共享的几何计划只构建一次，
+    // 同时保留原始 layerId 列表，供后续后端继续区分 paint。
     if (entry.sourceId !== sourceId || seenFamilyIds.has(entry.familyId)) {
       continue;
     }

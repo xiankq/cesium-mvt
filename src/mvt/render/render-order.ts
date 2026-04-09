@@ -6,6 +6,7 @@ import type {
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
 import { isSupportedGeometryLayer } from '../style/layer-family';
 
+// 渲染顺序直接镜像样式顺序，不支持的图层会在这里提前过滤掉。
 export interface BackgroundRenderEntry {
   kind: 'background';
   layerId: string;

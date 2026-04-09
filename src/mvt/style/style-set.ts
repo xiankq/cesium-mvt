@@ -3,6 +3,7 @@ import type {
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 
+// StyleSet 保存原始 style，以及几个高频访问的派生字段。
 export interface StyleSet {
   backgroundColor?: string;
   style: StyleSpecification;

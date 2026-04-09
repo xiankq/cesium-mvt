@@ -8,6 +8,7 @@ import type {
 } from '@maplibre/maplibre-gl-style-spec';
 import { GEOJSON_SOURCE_LAYER } from '../source/geojson-source-cache';
 
+// layer family 用来归并相邻且兼容的几何图层，复用同一份解析后的几何批次。
 export type SupportedGeometryLayer
   = | CircleLayerSpecification
     | FillLayerSpecification
@@ -84,6 +85,8 @@ function resolveSourceLayer(
   }
 
   if (source?.type === 'geojson') {
+    // GeoJSON 天生没有 source-layer 概念，这里补一个合成值，
+    // 让下游查找逻辑和普通向量瓦片保持一致。
     return GEOJSON_SOURCE_LAYER;
   }
 
@@ -96,6 +99,8 @@ function stableSerialize(value: unknown): string {
   }
 
   if (value && typeof value === 'object') {
+    // layout 兼容性必须忽略 key 顺序，
+    // 否则语义相同的对象会被错误拆成多个 family，造成重复工作。
     const entries = Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right));
     return `{${entries.map(([key, entryValue]) => `${key}:${stableSerialize(entryValue)}`).join(',')}}`;

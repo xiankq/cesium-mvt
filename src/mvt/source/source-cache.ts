@@ -9,6 +9,7 @@ import {
 
 } from './tile-request';
 
+// SourceCache 负责单个 sourceId 的请求去重与 source 级失效管理。
 export interface TileJson {
   scheme?: 'tms' | 'xyz';
   tiles?: string[];
@@ -210,6 +211,7 @@ export class SourceCache<TValue = ArrayBuffer> {
       return this.tileJsonPromise;
     }
 
+    // TileJSON 按 source 签名缓存，避免重复请求瓦片时反复拉取元数据。
     const abortController = new AbortController();
     this.tileJsonAbortController = abortController;
     this.tileJsonPromise = this.loadTileJson(

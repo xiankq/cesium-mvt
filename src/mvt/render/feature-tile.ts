@@ -3,6 +3,7 @@ import type { ParsedTile } from '../source/vector-tile';
 import type { BackgroundBatch, GeometryBatch, RenderTile } from './render-tile';
 import { getSourceLayer } from '../source/vector-tile';
 
+// FeatureTile 是各类渲染后端共享消费的几何提取结果。
 export interface ExtractedFeature {
   geometry: Point[][];
   id: number | undefined;
@@ -55,6 +56,7 @@ function compileFeatureBatch(batch: GeometryBatch, tile: ParsedTile) {
   for (let index = 0; index < sourceLayer.length; index += 1) {
     const feature = sourceLayer.feature(index);
     const featureType = getFeatureType(feature.type);
+    // 这里只保留目标后端能够处理的几何类型。
     if (!featureType || !matchesBatchType(batch.type, featureType)) {
       continue;
     }

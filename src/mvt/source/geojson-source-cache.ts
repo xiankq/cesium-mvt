@@ -10,6 +10,7 @@ import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { createTileKey } from './tile-request';
 import { parseVectorTile } from './vector-tile';
 
+// GeoJSON source 会先转成内存中的“向量瓦片形态”，这样下游渲染链路可以保持单轨实现。
 export const GEOJSON_SOURCE_LAYER = '_geojson';
 
 type SourceEntryState = 'failed' | 'idle' | 'ready' | 'requesting';
@@ -203,6 +204,8 @@ function getParsedTile(tileIndex: GeoJSONVT, coordinate: TileCoordinate) {
     return EMPTY_TILE;
   }
 
+  // geojson-vt 的输出会重新编码成一张“合成向量瓦片”，
+  // 这样 FeatureTile 提取阶段就能复用普通 MVT 的 source-layer 查找逻辑。
   const encoded = fromGeojsonVt({
     [GEOJSON_SOURCE_LAYER]: tile,
   } as GeojsonVtLayers);

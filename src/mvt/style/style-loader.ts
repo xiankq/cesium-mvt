@@ -6,6 +6,8 @@ import type {
 import type { StyleSet } from './style-set';
 import { createStyleSet } from './style-set';
 
+// 样式加载阶段会先把所有相对资源地址归一化，
+// 这样后续 cache 才能依赖稳定的绝对地址作为标识。
 export interface LoadStyleSetOptions {
   style: string | StyleSpecification;
 }
@@ -73,6 +75,7 @@ function normalizeSource(source: SourceSpecification, styleUrl: string) {
 
   const geojsonSource = source as GeoJSONSourceSpecification;
   if (source.type === 'geojson' && typeof geojsonSource.data === 'string') {
+    // GeoJSON 的 data URL 和其他样式资源一样，也需要尽早解析成绝对地址。
     geojsonSource.data = resolveUrl(geojsonSource.data, styleUrl);
   }
 }

@@ -18,6 +18,7 @@ import {
 import { SceneLayer } from './scene-layer';
 import { loadStyleSet } from './style/style-loader';
 
+// ImageryProvider 继续作为对外门面，真正的矢量渲染运行在 SceneLayer 中。
 export interface StyleImageryProviderOptions {
   credit?: Credit | string;
   maximumLevel?: number;
@@ -97,6 +98,8 @@ export class StyleImageryProvider implements ImageryProvider {
     _level: number,
     _request?: Request,
   ): Promise<ImageryTypes> {
+    // requestImage 只负责维持 Cesium 的 imagery 生命周期。
+    // 真正的矢量内容通过 SceneLayer 挂载到 primitive 管线中。
     const styleSet = await this.styleSetPromise;
     const backgroundColor = styleSet?.backgroundColor ?? TRANSPARENT_COLOR;
     return this.getSolidImage(backgroundColor) as ImageryTypes;
@@ -152,6 +155,7 @@ function createCredit(credit?: Credit | string) {
 
 function createSolidImage(color: string): SolidImage {
   if (typeof document !== 'undefined') {
+    // 每种颜色复用一张共享的 1x1 小图，避免按瓦片重复创建对象。
     const canvas = document.createElement('canvas');
     canvas.width = 1;
     canvas.height = 1;
