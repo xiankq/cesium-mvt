@@ -31,9 +31,11 @@ describe('fill-bucket-builder-integration', () => {
       builder.addFeature(feature, 0);
       const bucket = builder.build();
 
-      expect(bucket.data.positions.length).toBeGreaterThan(0);
-      expect(bucket.data.triangles.length).toBeGreaterThan(0);
-      expect(bucket.stats.vertexCount).toBeGreaterThan(4);
+      const data = bucket.data as any;
+      const stats = bucket.stats as any;
+      expect(data.positions.length).toBeGreaterThan(0);
+      expect(data.triangles.length).toBeGreaterThan(0);
+      expect(stats.vertexCount).toBeGreaterThan(4);
     });
 
     it('should handle multiple rings', async () => {
@@ -72,8 +74,10 @@ describe('fill-bucket-builder-integration', () => {
       builder.addFeature(feature, 0);
       const bucket = builder.build();
 
-      expect(bucket.stats.holeCount).toBe(1);
-      expect(bucket.data.holes.length).toBeGreaterThan(0);
+      const stats = bucket.stats as any;
+      const data = bucket.data as any;
+      expect(stats.holeCount).toBe(1);
+      expect(data.holes.length).toBeGreaterThan(0);
     });
   });
 });
@@ -84,5 +88,5 @@ function createMockPolygonFeature(rings: Array<Array<{ x: number; y: number }>>)
     id: 1,
     properties: { name: 'test' },
     loadGeometry: () => rings.map(ring => ring.map(p => ({ x: p.x, y: p.y }))),
-  };
+  } as any;
 }

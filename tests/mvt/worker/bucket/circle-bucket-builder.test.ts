@@ -113,7 +113,7 @@ function createMockPointFeature(point: { x: number; y: number }) {
     id: 1,
     properties: { name: 'test' },
     loadGeometry: () => [[{ x: point.x, y: point.y }]],
-  };
+  } as any;
 }
 
 function createMockLineFeature(lines: Array<Array<{ x: number; y: number }>>) {
@@ -122,5 +122,5 @@ function createMockLineFeature(lines: Array<Array<{ x: number; y: number }>>) {
     id: 2,
     properties: {},
     loadGeometry: () => lines.map(line => line.map(p => ({ x: p.x, y: p.y }))),
-  };
+  } as any;
 }

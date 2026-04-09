@@ -77,12 +77,12 @@ function createMockBucketTile(type: 'fill' | 'line' | 'circle') {
   return {
     buckets: [
       {
-        type,
+        type: type as 'fill',
         familyId: `source/layer/${type}/0`,
         layerIds: ['layer1'],
         sourceLayer: 'layer',
         stats: {
-          type,
+          type: type as 'fill',
           featureCount: 1,
           byteLength: 100,
           polygonCount: type === 'fill' ? 1 : undefined,
@@ -111,7 +111,7 @@ function createMockBucketTile(type: 'fill' | 'line' | 'circle') {
     epoch: 1,
     key: 'source/0/0/0',
     byteLength: 100,
-  };
+  } as any;
 }
 
 function createMockEmptyBucketTile() {
