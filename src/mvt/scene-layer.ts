@@ -281,6 +281,16 @@ export class SceneLayer {
         }
         return renderedTileHandle;
       })
+      .catch((error) => {
+        if (this.destroyed || styleEpoch !== this.styleEpoch) {
+          return createEmptyBucketRenderedTileHandle(renderTileKey);
+        }
+
+        const emptyHandle = createEmptyBucketRenderedTileHandle(renderTileKey);
+        this.renderedTileHandles.set(renderTileKey, emptyHandle);
+        this.onError?.(error);
+        return emptyHandle;
+      })
       .finally(() => {
         this.renderedTilePromises.delete(renderTileKey);
       });

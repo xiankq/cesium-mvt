@@ -93,10 +93,6 @@ function findFallbackCoordinate({
       return ancestor;
     }
 
-    if (availability === 'empty') {
-      return undefined;
-    }
-
     ancestor = getParentCoordinate(ancestor);
   }
 
