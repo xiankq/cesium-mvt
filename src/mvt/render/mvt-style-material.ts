@@ -1,16 +1,7 @@
 import type { MvtBucketFeature, MvtCompiledStyleLayer } from '../mvt-types';
 import type { MvtStyleSet } from '../style/mvt-style-set';
-import {
-  BufferPointMaterial,
-  BufferPolygonMaterial,
-  BufferPolylineMaterial,
-} from '@cesium/engine';
-import {
-  resolveCircleStyleRule,
-  resolveFillStyleRule,
-  resolveLineStyleRule,
-  serializeColor,
-} from './mvt-style-rule';
+import { BufferPointMaterial, BufferPolygonMaterial, BufferPolylineMaterial } from '@cesium/engine';
+import { resolveCircleStyleRule, resolveFillStyleRule, resolveLineStyleRule, serializeColor } from './mvt-style-rule';
 
 export type MvtFeatureMaterial = BufferPointMaterial | BufferPolygonMaterial | BufferPolylineMaterial;
 export type MvtFeatureMaterialCache = Map<string, MvtFeatureMaterial | undefined>;

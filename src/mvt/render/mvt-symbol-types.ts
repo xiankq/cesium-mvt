@@ -1,14 +1,4 @@
-import type {
-  Billboard,
-  BoundingRectangle,
-  Cartesian2,
-  Cartesian3,
-  Color,
-  HorizontalOrigin,
-  Label,
-  LabelStyle,
-  VerticalOrigin,
-} from '@cesium/engine';
+import type { Billboard, BoundingRectangle, Cartesian2, Cartesian3, Color, HorizontalOrigin, Label, LabelStyle, VerticalOrigin } from '@cesium/engine';
 import type { MvtSymbolCollisionIndex } from './mvt-symbol-collision';
 
 export interface MvtTileRenderableLike {

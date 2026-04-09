@@ -3,11 +3,7 @@ import { BufferPolylineMaterial, Color } from '@cesium/engine';
 import Point from '@mapbox/point-geometry';
 import { describe, expect, it } from 'vitest';
 import { createFeatureMaterial } from '../src/mvt/render/mvt-style-material';
-import {
-  resolveCircleStyleRule,
-  resolveFillStyleRule,
-  resolveLineStyleRule,
-} from '../src/mvt/render/mvt-style-rule';
+import { resolveCircleStyleRule, resolveFillStyleRule, resolveLineStyleRule } from '../src/mvt/render/mvt-style-rule';
 import { MvtStyleSet } from '../src/mvt/style/mvt-style-set';
 
 function createRuleTestStyleSet(): MvtStyleSet {

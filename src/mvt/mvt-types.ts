@@ -1,13 +1,7 @@
 import type { BoundingRectangle, Scene } from '@cesium/engine';
 import type Point from '@mapbox/point-geometry';
 import type { VectorTileFeature } from '@mapbox/vector-tile';
-import type {
-  Feature,
-  FilterSpecification,
-  LayerSpecification,
-  StyleSpecification,
-  VectorSourceSpecification,
-} from '@maplibre/maplibre-gl-style-spec';
+import type { Feature, FilterSpecification, LayerSpecification, StyleSpecification, VectorSourceSpecification } from '@maplibre/maplibre-gl-style-spec';
 
 export type MvtRenderableLayerType = Extract<
   LayerSpecification['type'],

@@ -1,17 +1,8 @@
 import type Point from '@mapbox/point-geometry';
-import type {
-  MvtBucketFeature,
-  MvtLineBucketFeature,
-  MvtPointBucketFeature,
-  MvtPolygonBucketFeature,
-} from '../mvt-types';
+import type { MvtBucketFeature, MvtLineBucketFeature, MvtPointBucketFeature, MvtPolygonBucketFeature } from '../mvt-types';
 import type { MvtOverzoomTransform } from '../tile/mvt-overzoom';
 import { mapSourceTilePointToDisplayTilePoint } from '../tile/mvt-overzoom';
-import {
-  clipTileLineGeometry,
-  clipTilePointGeometry,
-  clipTilePolygonGeometry,
-} from './mvt-tile-clip';
+import { clipTileLineGeometry, clipTilePointGeometry, clipTilePolygonGeometry } from './mvt-tile-clip';
 
 export type MvtDisplayFeatureCache = WeakMap<MvtBucketFeature, MvtBucketFeature | null>;
 

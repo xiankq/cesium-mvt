@@ -2,15 +2,7 @@ import type { MvtBucketFeature, MvtCompiledStyleLayer, MvtStyleSpriteEntry } fro
 import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import type { MvtResolvedSymbolIcon, MvtSymbolAnchor, MvtSymbolCollisionBox } from './mvt-symbol-types';
-import {
-  BoundingRectangle,
-  Cartesian2,
-  Cartesian3,
-  Math as CesiumMath,
-  Color,
-  HorizontalOrigin,
-  VerticalOrigin,
-} from '@cesium/engine';
+import { BoundingRectangle, Cartesian2, Cartesian3, Math as CesiumMath, Color, HorizontalOrigin, VerticalOrigin } from '@cesium/engine';
 import { warnMvtOnce } from '../mvt-warning-context';
 import { ICON_BYTE_SIZE } from './mvt-constants';
 import { resolveSymbolTranslate, withOpacity } from './mvt-symbol-utils';

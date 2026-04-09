@@ -1,8 +1,4 @@
-import type {
-  MvtStyleSpriteAtlas,
-  MvtStyleSpriteEntry,
-  MvtTileJson,
-} from '../mvt-types';
+import type { MvtStyleSpriteAtlas, MvtStyleSpriteEntry, MvtTileJson } from '../mvt-types';
 import { Resource } from '@cesium/engine';
 
 interface MvtPngSize {

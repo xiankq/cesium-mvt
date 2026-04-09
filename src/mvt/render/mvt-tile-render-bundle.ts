@@ -1,30 +1,11 @@
 import type { Cartesian3, TilingScheme } from '@cesium/engine';
 import type { MvtDisplayFeatureCache } from '../mesh/mvt-display-feature';
-import type {
-  MvtBucketFeature,
-  MvtCompiledStyleLayer,
-  MvtMeshIndexArray,
-  MvtParsedTileData,
-  MvtPolygonBucketFeature,
-  MvtTileCoordinate,
-} from '../mvt-types';
+import type { MvtBucketFeature, MvtCompiledStyleLayer, MvtMeshIndexArray, MvtParsedTileData, MvtPolygonBucketFeature, MvtTileCoordinate } from '../mvt-types';
 import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import type { MvtFeatureMaterialCache } from './mvt-style-material';
 import type { MvtTileRenderableLike } from './mvt-symbol-renderable';
-import {
-  BufferPoint,
-  BufferPointCollection,
-  BufferPointMaterial,
-  BufferPolygon,
-  BufferPolygonCollection,
-  BufferPolygonMaterial,
-  BufferPolyline,
-  BufferPolylineCollection,
-  BufferPolylineMaterial,
-  ComponentDatatype,
-  IndexDatatype,
-} from '@cesium/engine';
+import { BufferPoint, BufferPointCollection, BufferPointMaterial, BufferPolygon, BufferPolygonCollection, BufferPolygonMaterial, BufferPolyline, BufferPolylineCollection, BufferPolylineMaterial, ComponentDatatype, IndexDatatype } from '@cesium/engine';
 import earcut from 'earcut';
 import { getClippedDisplayFeature } from '../mesh/mvt-display-feature';
 import { normalizePolylinePoints, normalizeRingPoints } from '../mesh/mvt-geometry-normalize';
@@ -32,12 +13,7 @@ import { warnUnsupportedLayerProperty } from '../mvt-warning-context';
 import { sortBucketFeaturesForLayer } from './mvt-feature-sort';
 import { getLayerHeightOffset, liftLocalPosition } from './mvt-layer-height';
 import { splitPolylineByDashPattern } from './mvt-line-dash';
-import {
-  getTileUnitsPerPixel,
-  offsetPolylineInTileSpace,
-  translateTilePoint,
-  translateTilePoints,
-} from './mvt-style-geometry';
+import { getTileUnitsPerPixel, offsetPolylineInTileSpace, translateTilePoint, translateTilePoints } from './mvt-style-geometry';
 import { createFeatureMaterial } from './mvt-style-material';
 import { resolveCircleStyleRule, resolveFillStyleRule, resolveLineStyleRule } from './mvt-style-rule';
 import { MvtSymbolCollisionIndex } from './mvt-symbol-collision';

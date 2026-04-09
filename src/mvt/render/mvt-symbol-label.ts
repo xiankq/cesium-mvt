@@ -2,12 +2,7 @@ import type { HorizontalOrigin, VerticalOrigin } from '@cesium/engine';
 import type { MvtBucketFeature, MvtCompiledStyleLayer } from '../mvt-types';
 import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
-import type {
-  MvtResolvedSymbolLabel,
-  MvtSymbolAnchor,
-  MvtSymbolCollisionBox,
-  MvtSymbolLabelItem,
-} from './mvt-symbol-types';
+import type { MvtResolvedSymbolLabel, MvtSymbolAnchor, MvtSymbolCollisionBox, MvtSymbolLabelItem } from './mvt-symbol-types';
 import { Cartesian2, Cartesian3, Color, LabelStyle } from '@cesium/engine';
 import { getLayerHeightOffset, liftLocalPosition } from './mvt-layer-height';
 import { extractPlainTextValue, resolveTextBlock } from './mvt-symbol-text';

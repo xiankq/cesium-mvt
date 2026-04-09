@@ -5,38 +5,15 @@ import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import type { MvtSymbolCollisionIndex } from './mvt-symbol-collision';
 import type { MvtCompositeSpriteItem } from './mvt-symbol-composite';
-import type {
-  MvtResolvedSymbolIcon,
-  MvtResolvedSymbolLabel,
-  MvtSymbolAnchor,
-  MvtSymbolCollisionBox,
-  MvtSymbolIconItem,
-  MvtSymbolLabelItem,
-  MvtSymbolPlacementGroup,
-} from './mvt-symbol-types';
+import type { MvtResolvedSymbolIcon, MvtResolvedSymbolLabel, MvtSymbolAnchor, MvtSymbolCollisionBox, MvtSymbolIconItem, MvtSymbolLabelItem, MvtSymbolPlacementGroup } from './mvt-symbol-types';
 import type { createMvtTileTransform } from './mvt-tile-transform';
-import {
-  BillboardCollection,
-  BoundingRectangle,
-  Cartesian2,
-  Cartesian3,
-  Math as CesiumMath,
-  Color,
-  HorizontalOrigin,
-  LabelCollection,
-  LabelStyle,
-  VerticalOrigin,
-} from '@cesium/engine';
+import { BillboardCollection, BoundingRectangle, Cartesian2, Cartesian3, Math as CesiumMath, Color, HorizontalOrigin, LabelCollection, LabelStyle, VerticalOrigin } from '@cesium/engine';
 import { getClippedDisplayFeature } from '../mesh/mvt-display-feature';
 import { normalizePolylinePoints } from '../mesh/mvt-geometry-normalize';
 import { warnMvtOnce, warnUnsupportedLayerProperty } from '../mvt-warning-context';
 import { getLayerHeightOffset, liftLocalPosition } from './mvt-layer-height';
 import { getTileUnitsPerPixel } from './mvt-style-geometry';
-import {
-  buildCompositeSpriteAtlas,
-  createCompositeCacheKey,
-  getOrCreateCompositeSpriteEntry,
-} from './mvt-symbol-composite';
+import { buildCompositeSpriteAtlas, createCompositeCacheKey, getOrCreateCompositeSpriteEntry } from './mvt-symbol-composite';
 import { extractPlainTextValue, resolveTextBlock } from './mvt-symbol-text';
 import { projectTilePointToLocalCartesian } from './mvt-tile-transform';
 

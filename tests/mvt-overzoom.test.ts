@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createMvtOverzoomTransform,
-  getMvtSourceTileCoordinate,
-  mapSourceTilePointToDisplayTilePoint,
-} from '../src/mvt/tile/mvt-overzoom';
+import { createMvtOverzoomTransform, getMvtSourceTileCoordinate, mapSourceTilePointToDisplayTilePoint } from '../src/mvt/tile/mvt-overzoom';
 
 describe('mvt-overzoom', () => {
   it('maps display tiles to clamped source tiles at source maxzoom', () => {

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createMvtTileKey,
-  isSameMvtTileCoordinate,
-  parseMvtTileKey,
-} from '../src/mvt/tile/mvt-tile-key';
+import { createMvtTileKey, isSameMvtTileCoordinate, parseMvtTileKey } from '../src/mvt/tile/mvt-tile-key';
 
 describe('mvt-tile-key', () => {
   it('creates and parses tile keys', () => {

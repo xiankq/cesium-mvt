@@ -1,10 +1,4 @@
-import type {
-  MvtFeatureIndex,
-  MvtParsedTileData,
-  MvtTileCoordinate,
-  MvtTileMeshData,
-  MvtTileState,
-} from '../mvt-types';
+import type { MvtFeatureIndex, MvtParsedTileData, MvtTileCoordinate, MvtTileMeshData, MvtTileState } from '../mvt-types';
 import { createMvtTileKey } from './mvt-tile-key';
 
 export class MvtTile {

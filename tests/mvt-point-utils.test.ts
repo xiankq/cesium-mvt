@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  arePointsEqual,
-  clonePoint,
-  clonePoints,
-  createPoint,
-} from '../src/mvt/utils/mvt-point-utils';
+import { arePointsEqual, clonePoint, clonePoints, createPoint } from '../src/mvt/utils/mvt-point-utils';
 
 describe('mvt-point-utils', () => {
   describe('createPoint', () => {

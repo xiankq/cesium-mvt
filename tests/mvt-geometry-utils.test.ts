@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  distanceBetweenPoints,
-  interpolateHorizontalIntersection,
-  interpolatePoint,
-  interpolateVerticalIntersection,
-} from '../src/mvt/utils/mvt-geometry-utils';
+import { distanceBetweenPoints, interpolateHorizontalIntersection, interpolatePoint, interpolateVerticalIntersection } from '../src/mvt/utils/mvt-geometry-utils';
 import { createPoint } from '../src/mvt/utils/mvt-point-utils';
 
 describe('mvt-geometry-utils', () => {

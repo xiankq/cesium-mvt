@@ -1,11 +1,4 @@
-import type {
-  MvtBucketFeature,
-  MvtParsedTileData,
-  MvtRenderableLayerType,
-  MvtStyleFamily,
-  MvtTileBucket,
-  MvtVectorGeometryType,
-} from '../mvt-types';
+import type { MvtBucketFeature, MvtParsedTileData, MvtRenderableLayerType, MvtStyleFamily, MvtTileBucket, MvtVectorGeometryType } from '../mvt-types';
 import type { MvtWarningContext } from '../mvt-warning-context';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import { classifyRings, VectorTile, VectorTileFeature } from '@mapbox/vector-tile';

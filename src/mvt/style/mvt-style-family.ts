@@ -1,9 +1,5 @@
 import type { LayerSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type {
-  MvtCompiledStyleLayer,
-  MvtStyleFamily,
-  MvtStyleLayerSpecification,
-} from '../mvt-types';
+import type { MvtCompiledStyleLayer, MvtStyleFamily, MvtStyleLayerSpecification } from '../mvt-types';
 import { groupByLayout } from '@maplibre/maplibre-gl-style-spec';
 import { createMvtFilterEvaluator } from './mvt-filter';
 

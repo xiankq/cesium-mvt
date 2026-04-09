@@ -1,16 +1,5 @@
 import type Point from '@mapbox/point-geometry';
-import type {
-  MvtBucketFeature,
-  MvtCircleMeshBucket,
-  MvtFillMeshBucket,
-  MvtLineMeshBucket,
-  MvtMeshBucket,
-  MvtMeshIndexArray,
-  MvtParsedTileData,
-  MvtPointBucketFeature,
-  MvtTileBucket,
-  MvtTileMeshData,
-} from '../mvt-types';
+import type { MvtBucketFeature, MvtCircleMeshBucket, MvtFillMeshBucket, MvtLineMeshBucket, MvtMeshBucket, MvtMeshIndexArray, MvtParsedTileData, MvtPointBucketFeature, MvtTileBucket, MvtTileMeshData } from '../mvt-types';
 import { BoundingRectangle, Cartesian2, IndexDatatype } from '@cesium/engine';
 import earcut from 'earcut';
 import { normalizePolylinePoints, normalizeRingPoints } from './mvt-geometry-normalize';

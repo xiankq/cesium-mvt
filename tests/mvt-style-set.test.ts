@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MvtStyleSet } from '../src/mvt/style/mvt-style-set';
-import {
-  loadOpenFreeMapBrightStyle,
-  loadOpenFreeMapBrightStyleSet,
-  openFreeMapBrightSourceId,
-} from './openfreemap-bright-style';
+import { loadOpenFreeMapBrightStyle, loadOpenFreeMapBrightStyleSet, openFreeMapBrightSourceId } from './openfreemap-bright-style';
 
 describe('mvt-style-set', () => {
   it('loads openfreemap bright style and resolves its vector tile template', async () => {

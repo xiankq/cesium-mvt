@@ -1,32 +1,12 @@
 import type { Color } from '@cesium/engine';
-import type {
-  MvtBucketFeature,
-  MvtCompiledStyleLayer,
-  MvtStyleFamily,
-  MvtStyleLayerSpecification,
-  MvtStyleSourceSpecification,
-  MvtStyleSpecification,
-  MvtStyleSpriteAtlas,
-  MvtStyleSpriteEntry,
-} from '../mvt-types';
+import type { MvtBucketFeature, MvtCompiledStyleLayer, MvtStyleFamily, MvtStyleLayerSpecification, MvtStyleSourceSpecification, MvtStyleSpecification, MvtStyleSpriteAtlas, MvtStyleSpriteEntry } from '../mvt-types';
 import type { MvtCompositeSpriteCache } from '../render/mvt-symbol-composite';
 import type { MvtStyleExpressionCache } from './mvt-style-value';
 import { isMvtDebugLoggingEnabled, logMvtWarning } from '../mvt-log';
 import { createMvtCompositeSpriteCache } from '../render/mvt-symbol-composite';
 import { buildMvtStyleFamilies, compileStyleLayer } from './mvt-style-family';
-import {
-  fetchTileJson,
-  resolveStyleResourceUrl,
-  resolveStyleResourceUrls,
-  resolveStyleSpriteAtlas,
-} from './mvt-style-resource';
-import {
-  evaluateLayerLayoutNumber,
-  evaluateLayerLayoutValue,
-  evaluateLayerPaintColor,
-  evaluateLayerPaintNumber,
-  evaluateLayerPaintValue,
-} from './mvt-style-value';
+import { fetchTileJson, resolveStyleResourceUrl, resolveStyleResourceUrls, resolveStyleSpriteAtlas } from './mvt-style-resource';
+import { evaluateLayerLayoutNumber, evaluateLayerLayoutValue, evaluateLayerPaintColor, evaluateLayerPaintNumber, evaluateLayerPaintValue } from './mvt-style-value';
 
 export interface MvtStyleSetOptions {
   baseUrl?: string;

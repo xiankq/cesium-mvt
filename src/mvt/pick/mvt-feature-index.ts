@@ -1,15 +1,7 @@
 import type { TilingScheme } from '@cesium/engine';
 import type Point from '@mapbox/point-geometry';
 import type { MvtDisplayFeatureCache } from '../mesh/mvt-display-feature';
-import type {
-  MvtBucketFeature,
-  MvtCompiledStyleLayer,
-  MvtFeatureIndex,
-  MvtFeatureIndexBounds,
-  MvtFeatureIndexEntry,
-  MvtParsedTileData,
-  MvtTileCoordinate,
-} from '../mvt-types';
+import type { MvtBucketFeature, MvtCompiledStyleLayer, MvtFeatureIndex, MvtFeatureIndexBounds, MvtFeatureIndexEntry, MvtParsedTileData, MvtTileCoordinate } from '../mvt-types';
 import type { MvtStyleSet } from '../style/mvt-style-set';
 import { Cartographic, ImageryLayerFeatureInfo, Rectangle } from '@cesium/engine';
 import { getClippedDisplayFeature } from '../mesh/mvt-display-feature';

@@ -1,20 +1,9 @@
-import type {
-  TilingScheme,
+import type { TilingScheme,
 } from '@cesium/engine';
 import type Point from '@mapbox/point-geometry';
 import type { MvtTileCoordinate } from '../mvt-types';
-import {
-  BoundingSphere,
-  Cartesian3,
-  Ellipsoid,
-  Matrix4,
-  Rectangle,
-  Transforms,
-} from '@cesium/engine';
-import {
-  createMvtOverzoomTransform,
-  mapSourceTilePointToDisplayTilePoint,
-} from '../tile/mvt-overzoom';
+import { BoundingSphere, Cartesian3, Ellipsoid, Matrix4, Rectangle, Transforms } from '@cesium/engine';
+import { createMvtOverzoomTransform, mapSourceTilePointToDisplayTilePoint } from '../tile/mvt-overzoom';
 
 const scratchRectangle = new Rectangle();
 const scratchWorldPosition = new Cartesian3();

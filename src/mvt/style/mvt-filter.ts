@@ -1,9 +1,5 @@
 import type { Feature } from '@maplibre/maplibre-gl-style-spec';
-import type {
-  MvtFilterEvaluator,
-  MvtFilterFeature,
-  MvtStyleFilterSpecification,
-} from '../mvt-types';
+import type { MvtFilterEvaluator, MvtFilterFeature, MvtStyleFilterSpecification } from '../mvt-types';
 import { featureFilter } from '@maplibre/maplibre-gl-style-spec';
 
 const alwaysMatchFilter: MvtFilterEvaluator = () => true;
