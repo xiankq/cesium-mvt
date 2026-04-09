@@ -7,10 +7,10 @@ const props = defineProps<{
   viewer: Viewer;
 }>();
 
-const PREVIEW_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
 watchEffect(async (onCleanup) => {
-  const provider = await StyleImageryProvider.fromUrl(PREVIEW_STYLE_URL, {
+  const provider = await StyleImageryProvider.fromUrl(STYLE_URL, {
     scene: props.viewer.scene,
   });
   const layer = props.viewer.imageryLayers.addImageryProvider(provider);

@@ -134,7 +134,7 @@ describe('style-imagery-provider', () => {
     provider.destroy();
   });
 
-  it('creates a provider from url and prepares an internal preview layer', async () => {
+  it('creates a provider from url and injects an internal circle fallback layer', async () => {
     const scene = createSceneStub();
     vi.stubGlobal(
       'fetch',
@@ -173,10 +173,47 @@ describe('style-imagery-provider', () => {
     expect(styleSet.style.sprite).toBe('https://example.com/styles/basic/sprite');
     expect(styleSet.style.sources.openmaptiles.url).toBe('https://example.com/styles/tiles/planet.json');
     expect(styleSet.style.layers.at(-1)).toMatchObject({
-      'id': '__cesium-mvt-preview-circle__',
+      'id': '__cesium-mvt-circle-fallback__',
       'source': 'openmaptiles',
       'source-layer': 'place',
       'type': 'circle',
+    });
+
+    provider.destroy();
+  });
+
+  it('keeps remote styles with existing circle layers unchanged', async () => {
+    const scene = createSceneStub();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({
+        version: 8,
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            url: '../tiles/planet.json',
+          },
+        },
+        layers: [
+          {
+            'id': 'poi-circle',
+            'type': 'circle',
+            'source': 'openmaptiles',
+            'source-layer': 'poi',
+          },
+        ],
+      }))),
+    );
+
+    const provider = await StyleImageryProvider.fromUrl('https://example.com/styles/basic/style.json', {
+      scene,
+    });
+
+    const styleSet = await (provider as any).styleSetPromise;
+    expect(styleSet.style.layers).toHaveLength(1);
+    expect(styleSet.style.layers[0]).toMatchObject({
+      id: 'poi-circle',
+      type: 'circle',
     });
 
     provider.destroy();

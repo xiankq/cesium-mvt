@@ -16,7 +16,6 @@ import {
   WebMercatorTilingScheme,
 } from 'cesium';
 import { SceneLayer } from './scene-layer';
-import { ensurePreviewCircleLayer } from './style/preview-style';
 import { loadStyleSet } from './style/style-loader';
 import { createStyleSet } from './style/style-set';
 
@@ -46,6 +45,13 @@ type SolidImage
       width: number;
     };
 
+interface CircleFallbackTarget {
+  sourceId: string;
+  sourceLayer?: string;
+}
+
+const CIRCLE_FALLBACK_LAYER_ID = '__cesium-mvt-circle-fallback__';
+const CIRCLE_FALLBACK_SOURCE_LAYER_PRIORITIES = ['place', 'poi'];
 const TRANSPARENT_COLOR = 'rgba(0,0,0,0)';
 
 export class StyleImageryProvider implements ImageryProvider {
@@ -101,7 +107,7 @@ export class StyleImageryProvider implements ImageryProvider {
     this.styleSetPromise = loadStyleSet({
       style: options.style,
     }).then((styleSet) => {
-      const resolvedStyleSet = prepareStyleSet(
+      const resolvedStyleSet = prepareRenderableStyleSet(
         styleSet,
         typeof options.style === 'string',
       );
@@ -196,20 +202,115 @@ function createCredit(credit?: Credit | string) {
   return credit;
 }
 
-function prepareStyleSet(
+function prepareRenderableStyleSet(
   styleSet: StyleSet,
-  shouldEnsurePreview: boolean,
+  shouldInjectCircleFallback: boolean,
 ) {
-  if (!shouldEnsurePreview) {
+  if (!shouldInjectCircleFallback) {
     return styleSet;
   }
 
-  const preparedStyle = ensurePreviewCircleLayer(styleSet.style);
+  const preparedStyle = injectCircleFallbackLayerIfNeeded(styleSet.style);
   if (preparedStyle === styleSet.style) {
     return styleSet;
   }
 
   return createStyleSet(preparedStyle, styleSet.styleUrl);
+}
+
+function injectCircleFallbackLayerIfNeeded(
+  style: StyleSpecification,
+): StyleSpecification {
+  if (style.layers.some(layer => layer.type === 'circle' || layer.id === CIRCLE_FALLBACK_LAYER_ID)) {
+    return style;
+  }
+
+  const target = findCircleFallbackTarget(style);
+  if (!target) {
+    return style;
+  }
+
+  const nextStyle = cloneStyle(style);
+  nextStyle.layers = nextStyle.layers.concat(createCircleFallbackLayer(target));
+  return nextStyle;
+}
+
+function findCircleFallbackTarget(
+  style: StyleSpecification,
+): CircleFallbackTarget | undefined {
+  const candidates = style.layers
+    .filter(isSymbolLayerWithSource)
+    .map((layer) => {
+      const source = style.sources[layer.source];
+      if (!source) {
+        return undefined;
+      }
+
+      if (source.type === 'vector' && typeof layer['source-layer'] === 'string') {
+        return {
+          sourceId: layer.source,
+          sourceLayer: layer['source-layer'],
+        } satisfies CircleFallbackTarget;
+      }
+
+      if (source.type === 'geojson') {
+        return {
+          sourceId: layer.source,
+        } satisfies CircleFallbackTarget;
+      }
+
+      return undefined;
+    })
+    .filter((candidate): candidate is CircleFallbackTarget => Boolean(candidate));
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  for (const sourceLayer of CIRCLE_FALLBACK_SOURCE_LAYER_PRIORITIES) {
+    const candidate = candidates.find(entry => entry.sourceLayer === sourceLayer);
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
+function isSymbolLayerWithSource(
+  layer: StyleSpecification['layers'][number],
+): layer is Extract<StyleSpecification['layers'][number], { source: string; type: 'symbol' }> {
+  return layer.type === 'symbol' && typeof layer.source === 'string';
+}
+
+function createCircleFallbackLayer(
+  target: CircleFallbackTarget,
+) {
+  return {
+    id: CIRCLE_FALLBACK_LAYER_ID,
+    paint: {
+      'circle-color': '#ff3b30',
+      'circle-opacity': 0.9,
+      'circle-radius': 4,
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 1,
+    },
+    source: target.sourceId,
+    ...(target.sourceLayer
+      ? {
+          'source-layer': target.sourceLayer,
+        }
+      : {}),
+    type: 'circle',
+  } satisfies StyleSpecification['layers'][number];
+}
+
+function cloneStyle(style: StyleSpecification): StyleSpecification {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(style);
+  }
+
+  return JSON.parse(JSON.stringify(style)) as StyleSpecification;
 }
 
 function createSolidImage(color: string): SolidImage {
