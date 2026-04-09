@@ -1,6 +1,8 @@
 import type { SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { Scene } from 'cesium';
+import type { BufferPointCollection, BufferPolygonCollection, BufferPolylineCollection, Scene } from 'cesium';
 import type { CircleTileHandle } from './render/backend/circle-backend';
+import type { FillTileHandle } from './render/backend/fill-backend';
+import type { LineTileHandle } from './render/backend/line-backend';
 import type { FeatureTile } from './render/feature-tile';
 import type { RenderEntry } from './render/render-order';
 import type { RenderTile } from './render/render-tile';
@@ -10,6 +12,8 @@ import type { LayerFamily } from './style/layer-family';
 import type { StyleSet } from './style/style-set';
 import { PrimitiveCollection } from 'cesium';
 import { createCircleTileHandle } from './render/backend/circle-backend';
+import { createFillTileHandle } from './render/backend/fill-backend';
+import { createLineTileHandle } from './render/backend/line-backend';
 import { compileFeatureTile } from './render/feature-tile';
 import { createRenderOrder } from './render/render-order';
 import { compileRenderTile, createRenderTileKey } from './render/render-tile';
@@ -29,10 +33,18 @@ interface ParsedSourceCache {
   updateSource: (source: SourceSpecification) => void;
 }
 
+type MountedCollection = BufferPointCollection | BufferPolygonCollection | BufferPolylineCollection;
+
+interface MountedCollectionEntry {
+  collection: MountedCollection;
+}
+
 export interface RenderedTileHandle {
   byteLength: number;
   circles?: CircleTileHandle;
+  fills?: FillTileHandle;
   key: string;
+  lines?: LineTileHandle;
 }
 
 export class SceneLayer {
@@ -186,18 +198,33 @@ export class SceneLayer {
           x,
           y,
         });
+        const lines = createLineTileHandle({
+          featureTile,
+          level,
+          style: this.styleSet.style,
+          x,
+          y,
+        });
+        const fills = createFillTileHandle({
+          featureTile,
+          level,
+          style: this.styleSet.style,
+          x,
+          y,
+        });
 
-        if (circles) {
-          // 后端生成的 collection 统一挂到 scene-layer 根节点下，便于集中清理。
-          for (const entry of circles.collections) {
-            this.root.add(entry.collection);
-          }
-        }
+        mountRenderedCollections(this.root, circles?.collections);
+        mountRenderedCollections(this.root, lines?.collections);
+        mountRenderedCollections(this.root, fills?.collections);
 
         const renderedTileHandle: RenderedTileHandle = {
-          byteLength: circles?.byteLength ?? 0,
+          byteLength: (circles?.byteLength ?? 0)
+            + (lines?.byteLength ?? 0)
+            + (fills?.byteLength ?? 0),
           circles,
+          fills,
           key: renderTile.key,
+          lines,
         };
         this.renderedTileHandles.set(renderedTileHandle.key, renderedTileHandle);
         this.scene.requestRender();
@@ -346,11 +373,37 @@ function destroyRenderedTileHandle(
   root: PrimitiveCollection,
   handle: RenderedTileHandle,
 ) {
-  if (!handle.circles) {
+  destroyRenderedCollections(root, handle.circles?.collections);
+  destroyRenderedCollections(root, handle.lines?.collections);
+  destroyRenderedCollections(root, handle.fills?.collections);
+}
+
+function getRenderableSourceIds(layerFamilies: LayerFamily[]) {
+  return [...new Set(layerFamilies.map(layerFamily => layerFamily.sourceId))];
+}
+
+function mountRenderedCollections(
+  root: PrimitiveCollection,
+  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
+) {
+  if (!collections) {
     return;
   }
 
-  for (const entry of handle.circles.collections) {
+  for (const entry of collections) {
+    root.add(entry.collection);
+  }
+}
+
+function destroyRenderedCollections(
+  root: PrimitiveCollection,
+  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
+) {
+  if (!collections) {
+    return;
+  }
+
+  for (const entry of collections) {
     // 类型声明里没有承诺 remove 后自动释放资源，因此这里显式 destroy，
     // 避免 collection 从场景树摘除后仍然持有 GPU 资源。
     if (root.contains(entry.collection)) {
@@ -359,8 +412,4 @@ function destroyRenderedTileHandle(
 
     entry.collection.destroy();
   }
-}
-
-function getRenderableSourceIds(layerFamilies: LayerFamily[]) {
-  return [...new Set(layerFamilies.map(layerFamily => layerFamily.sourceId))];
 }

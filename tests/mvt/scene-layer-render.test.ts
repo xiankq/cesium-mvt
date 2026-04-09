@@ -245,4 +245,82 @@ describe('scene-layer-render', () => {
 
     sceneLayer.destroy();
   });
+
+  it('mounts line and fill tile collections on the scene root and clears them on style change', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        shapes: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: [[-10, 0], [10, 0]],
+                },
+                properties: {
+                  kind: 'road',
+                },
+              },
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: [[[-5, -5], [5, -5], [5, 5], [-5, 5], [-5, -5]]],
+                },
+                properties: {
+                  kind: 'park',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'road',
+          type: 'line',
+          source: 'shapes',
+          paint: {
+            'line-width': 3,
+          },
+        },
+        {
+          id: 'land',
+          type: 'fill',
+          source: 'shapes',
+          paint: {
+            'fill-color': '#00aa00',
+          },
+        },
+      ],
+    };
+    const emptyStyle: StyleSpecification = {
+      version: 8,
+      sources: style.sources,
+      layers: [],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    const handle = await sceneLayer.ensureRenderedTile('shapes', 0, 0, 0);
+
+    expect(handle).toBeDefined();
+    expect(handle?.lines?.collections).toHaveLength(1);
+    expect(handle?.fills?.collections).toHaveLength(1);
+    expect(handle?.byteLength).toBeGreaterThan(0);
+
+    const root = scene.primitives.get(0) as PrimitiveCollection;
+    expect(root.length).toBe(2);
+
+    sceneLayer.updateStyle(createStyleSet(emptyStyle));
+
+    expect(root.length).toBe(0);
+
+    sceneLayer.destroy();
+  });
 });
