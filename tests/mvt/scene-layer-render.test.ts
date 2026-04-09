@@ -246,6 +246,135 @@ describe('scene-layer-render', () => {
     sceneLayer.destroy();
   });
 
+  it('hides mounted collections for tiles that leave the current frame show set and shows them again when requested', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+
+    scene.preRender.raiseEvent();
+    await sceneLayer.requestTileHint(0, 0, 0);
+    scene.postRender.raiseEvent();
+
+    const handle = await sceneLayer.ensureRenderedTile('places', 0, 0, 0);
+    const collection = handle.circles?.collections[0]?.collection;
+    const root = scene.primitives.get(0) as PrimitiveCollection;
+
+    expect(collection?.show).toBe(true);
+    expect(root.length).toBe(1);
+
+    scene.preRender.raiseEvent();
+    scene.postRender.raiseEvent();
+
+    expect(collection?.show).toBe(false);
+    expect(root.length).toBe(1);
+
+    scene.preRender.raiseEvent();
+    await sceneLayer.requestTileHint(0, 0, 0);
+    scene.postRender.raiseEvent();
+
+    expect(collection?.show).toBe(true);
+    expect(root.length).toBe(1);
+
+    sceneLayer.destroy();
+  });
+
+  it('unloads hidden tile collections after they stay untouched for another frame', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+
+    scene.preRender.raiseEvent();
+    await sceneLayer.requestTileHint(0, 0, 0);
+    scene.postRender.raiseEvent();
+
+    const renderTile = sceneLayer.getRenderTile('places', 0, 0, 0);
+    const root = scene.primitives.get(0) as PrimitiveCollection;
+
+    expect(root.length).toBe(1);
+
+    scene.preRender.raiseEvent();
+    scene.postRender.raiseEvent();
+
+    expect(root.length).toBe(1);
+    expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
+      eligibleForUnloading: false,
+      state: 'hidden',
+    });
+
+    scene.preRender.raiseEvent();
+    scene.postRender.raiseEvent();
+
+    expect(root.length).toBe(0);
+    expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
+      eligibleForUnloading: true,
+      state: 'hidden',
+    });
+
+    sceneLayer.destroy();
+  });
+
   it('mounts line and fill tile collections on the scene root and clears them on style change', async () => {
     const scene = createSceneStub();
     const sceneLayer = new SceneLayer(scene);

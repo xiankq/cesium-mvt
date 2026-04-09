@@ -4,6 +4,7 @@ import type {
 } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
 import type { RenderEntry } from './render-order';
+import { isLayerVisibleAtZoom } from '../style/layer-visibility';
 
 // RenderTile 表示某个 source tile 在当前 styleEpoch 下的渲染计划，
 // 此时还没有真正构建出可提交给 Cesium 的几何资源。
@@ -54,23 +55,23 @@ export function compileRenderTile({
   style,
   styleEpoch,
 }: CompileRenderTileOptions): RenderTile {
-  const sourceId = parseSourceIdFromRenderTileKey(key);
+  const coordinate = parseRenderTileCoordinateFromKey(key);
   const familiesById = new Map(layerFamilies.map(family => [family.id, family]));
-  const backgroundLayersById = new Map(
-    style.layers
-      .filter(isBackgroundLayer)
-      .map(layer => [layer.id, layer]),
-  );
-  const geometryBatches: GeometryBatch[] = [];
-  const seenFamilyIds = new Set<string>();
+  const layersById = new Map(style.layers.map(layer => [layer.id, layer]));
+  const geometryBatchesByFamilyId = new Map<string, GeometryBatch>();
   let background: BackgroundBatch | undefined;
 
   for (const entry of renderOrder) {
+    const layer = layersById.get(entry.layerId);
+    if (!layer || !isLayerVisibleAtZoom(layer, coordinate.level)) {
+      continue;
+    }
+
     if (entry.kind === 'background') {
-      const layer = backgroundLayersById.get(entry.layerId);
+      const backgroundLayer = layer as BackgroundLayerSpecification;
       background = {
-        color: typeof layer?.paint?.['background-color'] === 'string'
-          ? layer.paint['background-color']
+        color: typeof backgroundLayer.paint?.['background-color'] === 'string'
+          ? backgroundLayer.paint['background-color']
           : undefined,
         layerId: entry.layerId,
         order: entry.order,
@@ -78,48 +79,53 @@ export function compileRenderTile({
       continue;
     }
 
-    // 一个 family 可能对应多个样式图层，但共享的几何计划只构建一次，
-    // 同时保留原始 layerId 列表，供后续后端继续区分 paint。
-    if (entry.sourceId !== sourceId || seenFamilyIds.has(entry.familyId)) {
+    if (entry.sourceId !== coordinate.sourceId) {
       continue;
     }
 
-    const family = familiesById.get(entry.familyId);
-    if (!family) {
-      throw new Error(`Missing layer family for render entry: ${entry.familyId}`);
+    let geometryBatch = geometryBatchesByFamilyId.get(entry.familyId);
+    if (!geometryBatch) {
+      const family = familiesById.get(entry.familyId);
+      if (!family) {
+        throw new Error(`Missing layer family for render entry: ${entry.familyId}`);
+      }
+
+      geometryBatch = {
+        backend: family.type,
+        familyId: family.id,
+        layerIds: [],
+        order: entry.order,
+        sourceId: family.sourceId,
+        sourceLayer: family.sourceLayer,
+        type: family.type,
+      };
+      geometryBatchesByFamilyId.set(entry.familyId, geometryBatch);
     }
 
-    geometryBatches.push({
-      backend: family.type,
-      familyId: family.id,
-      layerIds: [...family.layerIds],
-      order: entry.order,
-      sourceId: family.sourceId,
-      sourceLayer: family.sourceLayer,
-      type: family.type,
-    });
-    seenFamilyIds.add(family.id);
+    geometryBatch.layerIds.push(entry.layerId);
   }
 
   return {
     background,
     epoch: styleEpoch,
-    geometryBatches,
+    geometryBatches: [...geometryBatchesByFamilyId.values()],
     key: `${key}@${styleEpoch}`,
   };
 }
 
-function isBackgroundLayer(
-  layer: StyleSpecification['layers'][number],
-): layer is BackgroundLayerSpecification {
-  return layer.type === 'background';
-}
-
-function parseSourceIdFromRenderTileKey(key: string) {
+function parseRenderTileCoordinateFromKey(key: string) {
   const parts = key.split('/');
   if (parts.length < 4) {
     throw new Error(`Invalid render tile key: ${key}`);
   }
 
-  return parts.slice(0, -3).join('/');
+  const level = Number(parts[parts.length - 3]);
+  if (!Number.isInteger(level)) {
+    throw new TypeError(`Invalid render tile key level: ${key}`);
+  }
+
+  return {
+    level,
+    sourceId: parts.slice(0, -3).join('/'),
+  };
 }

@@ -93,11 +93,14 @@ export class TileManager {
     for (const tile of this.tiles.values()) {
       if (tile.shownThisFrame) {
         tile.state = 'shown';
+        tile.eligibleForUnloading = false;
       }
       else if (tile.state === 'shown') {
         // 退出 show 集时先转成 hidden，由调用方决定后续是否真正卸载。
         tile.state = 'hidden';
+        tile.eligibleForUnloading = false;
         hiddenKeys.push(tile.key);
+        continue;
       }
 
       tile.eligibleForUnloading

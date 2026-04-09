@@ -13,7 +13,18 @@ describe('tile-manager', () => {
     const secondFrameResult = tileManager.endFrame();
 
     expect(secondFrameResult.hiddenKeys).toEqual(['base/1/2/3']);
-    expect(secondFrameResult.unloadableKeys).toEqual(['base/1/2/3']);
+    expect(secondFrameResult.unloadableKeys).toEqual([]);
+    expect(tileManager.getTile('base/1/2/3')).toMatchObject({
+      eligibleForUnloading: false,
+      key: 'base/1/2/3',
+      state: 'hidden',
+    });
+
+    tileManager.beginFrame(3);
+    const thirdFrameResult = tileManager.endFrame();
+
+    expect(thirdFrameResult.hiddenKeys).toEqual([]);
+    expect(thirdFrameResult.unloadableKeys).toEqual(['base/1/2/3']);
     expect(tileManager.getTile('base/1/2/3')).toMatchObject({
       eligibleForUnloading: true,
       key: 'base/1/2/3',
@@ -29,11 +40,22 @@ describe('tile-manager', () => {
     tileManager.endFrame();
 
     tileManager.beginFrame(2);
-    tileManager.touch('base/1/2/3');
     const secondFrameResult = tileManager.endFrame();
 
     expect(secondFrameResult.hiddenKeys).toEqual(['base/1/2/3']);
     expect(secondFrameResult.unloadableKeys).toEqual([]);
+    expect(tileManager.getTile('base/1/2/3')).toMatchObject({
+      eligibleForUnloading: false,
+      key: 'base/1/2/3',
+      state: 'hidden',
+    });
+
+    tileManager.beginFrame(3);
+    tileManager.touch('base/1/2/3');
+    const thirdFrameResult = tileManager.endFrame();
+
+    expect(thirdFrameResult.hiddenKeys).toEqual([]);
+    expect(thirdFrameResult.unloadableKeys).toEqual([]);
     expect(tileManager.getTile('base/1/2/3')).toMatchObject({
       eligibleForUnloading: false,
       key: 'base/1/2/3',
@@ -48,15 +70,21 @@ describe('tile-manager', () => {
     tileManager.markShown('base/1/2/3');
     tileManager.endFrame();
 
-    tileManager.setBlockers('base/1/2/3', {
-      requesting: true,
-      uploading: true,
-    });
     tileManager.beginFrame(2);
     const secondFrameResult = tileManager.endFrame();
 
     expect(secondFrameResult.hiddenKeys).toEqual(['base/1/2/3']);
     expect(secondFrameResult.unloadableKeys).toEqual([]);
+
+    tileManager.setBlockers('base/1/2/3', {
+      requesting: true,
+      uploading: true,
+    });
+    tileManager.beginFrame(3);
+    const thirdFrameResult = tileManager.endFrame();
+
+    expect(thirdFrameResult.hiddenKeys).toEqual([]);
+    expect(thirdFrameResult.unloadableKeys).toEqual([]);
     expect(tileManager.getTile('base/1/2/3')).toMatchObject({
       blockers: {
         parsing: false,

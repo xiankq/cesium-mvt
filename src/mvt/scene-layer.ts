@@ -6,6 +6,7 @@ import type { LineTileHandle } from './render/backend/line-backend';
 import type { FeatureTile } from './render/feature-tile';
 import type { RenderEntry } from './render/render-order';
 import type { RenderTile } from './render/render-tile';
+import type { TileFrameResult } from './source/tile-manager';
 import type { TileCoordinate } from './source/tile-request';
 import type { ParsedTile } from './source/vector-tile';
 import type { LayerFamily } from './style/layer-family';
@@ -76,7 +77,8 @@ export class SceneLayer {
       this.tileManager.beginFrame(this.currentFrame);
     });
     this.removePostRenderListener = this.scene.postRender?.addEventListener(() => {
-      this.tileManager.endFrame();
+      const frameResult = this.tileManager.endFrame();
+      this.applyFrameResult(frameResult);
     });
   }
 
@@ -305,6 +307,35 @@ export class SceneLayer {
     this.renderedTileHandles.clear();
   }
 
+  private applyFrameResult(frameResult: TileFrameResult) {
+    let sceneChanged = false;
+
+    for (const key of frameResult.hiddenKeys) {
+      const handle = this.renderedTileHandles.get(key);
+      if (!handle) {
+        continue;
+      }
+
+      setRenderedTileVisibility(handle, false);
+      sceneChanged = true;
+    }
+
+    for (const key of frameResult.unloadableKeys) {
+      const handle = this.renderedTileHandles.get(key);
+      if (!handle) {
+        continue;
+      }
+
+      destroyRenderedTileHandle(this.root, handle);
+      this.renderedTileHandles.delete(key);
+      sceneChanged = true;
+    }
+
+    if (sceneChanged) {
+      this.scene.requestRender();
+    }
+  }
+
   private async requestSourceTileHint(sourceId: string, level: number, x: number, y: number) {
     const renderTile = this.getRenderTile(sourceId, level, x, y);
     this.tileManager.markCandidate(renderTile.key);
@@ -313,7 +344,9 @@ export class SceneLayer {
     const cachedHandle = this.renderedTileHandles.get(renderTile.key);
     if (cachedHandle) {
       if (cachedHandle.byteLength > 0) {
+        setRenderedTileVisibility(cachedHandle, true);
         this.tileManager.markShown(renderTile.key);
+        this.scene.requestRender();
       }
       return;
     }
@@ -378,6 +411,15 @@ function destroyRenderedTileHandle(
   destroyRenderedCollections(root, handle.fills?.collections);
 }
 
+function setRenderedTileVisibility(
+  handle: RenderedTileHandle,
+  visible: boolean,
+) {
+  setRenderedCollectionsVisibility(handle.circles?.collections, visible);
+  setRenderedCollectionsVisibility(handle.lines?.collections, visible);
+  setRenderedCollectionsVisibility(handle.fills?.collections, visible);
+}
+
 function getRenderableSourceIds(layerFamilies: LayerFamily[]) {
   return [...new Set(layerFamilies.map(layerFamily => layerFamily.sourceId))];
 }
@@ -392,6 +434,19 @@ function mountRenderedCollections(
 
   for (const entry of collections) {
     root.add(entry.collection);
+  }
+}
+
+function setRenderedCollectionsVisibility(
+  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
+  visible: boolean,
+) {
+  if (!collections) {
+    return;
+  }
+
+  for (const entry of collections) {
+    entry.collection.show = visible;
   }
 }
 

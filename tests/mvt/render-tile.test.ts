@@ -151,4 +151,75 @@ describe('render-tile', () => {
       key: 'base/6/10/12@3',
     });
   });
+
+  it('filters geometry layers by tile zoom and layout visibility before batching', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/base/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'land-low',
+          'maxzoom': 5,
+          'source': 'base',
+          'source-layer': 'land',
+          'type': 'fill',
+        },
+        {
+          'id': 'land-high',
+          'minzoom': 5,
+          'source': 'base',
+          'source-layer': 'land',
+          'type': 'fill',
+        },
+        {
+          'id': 'road-hidden',
+          'layout': {
+            visibility: 'none',
+          },
+          'source': 'base',
+          'source-layer': 'road',
+          'type': 'line',
+        },
+      ],
+    };
+    const layerFamilies = createLayerFamilies(style);
+    const renderOrder = createRenderOrder(style, layerFamilies);
+
+    expect(compileRenderTile({
+      key: createRenderTileKey('base', 4, 1, 2),
+      layerFamilies,
+      renderOrder,
+      style,
+      styleEpoch: 1,
+    })).toMatchObject({
+      geometryBatches: [
+        {
+          familyId: 'base/land/fill/0',
+          layerIds: ['land-low'],
+          order: 0,
+        },
+      ],
+    });
+
+    expect(compileRenderTile({
+      key: createRenderTileKey('base', 5, 1, 2),
+      layerFamilies,
+      renderOrder,
+      style,
+      styleEpoch: 1,
+    })).toMatchObject({
+      geometryBatches: [
+        {
+          familyId: 'base/land/fill/0',
+          layerIds: ['land-high'],
+          order: 1,
+        },
+      ],
+    });
+  });
 });
