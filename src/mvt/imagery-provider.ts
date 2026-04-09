@@ -16,7 +16,9 @@ import {
   WebMercatorTilingScheme,
 } from 'cesium';
 import { SceneLayer } from './scene-layer';
+import { ensurePreviewCircleLayer } from './style/preview-style';
 import { loadStyleSet } from './style/style-loader';
+import { createStyleSet } from './style/style-set';
 
 // ImageryProvider 继续作为对外门面，真正的矢量渲染运行在 SceneLayer 中。
 export interface StyleImageryProviderOptions {
@@ -30,6 +32,11 @@ export interface StyleImageryProviderOptions {
   tileWidth?: number;
   tilingScheme?: WebMercatorTilingScheme;
 }
+
+export type StyleImageryProviderFromUrlOptions = Omit<
+  StyleImageryProviderOptions,
+  'style'
+>;
 
 type SolidImage
   = | HTMLCanvasElement
@@ -60,6 +67,25 @@ export class StyleImageryProvider implements ImageryProvider {
   private readonly solidImageCache = new Map<string, SolidImage>();
   private readonly styleSetPromise: Promise<StyleSet>;
 
+  static async fromUrl(
+    url: string | URL,
+    options: StyleImageryProviderFromUrlOptions,
+  ): Promise<StyleImageryProvider> {
+    const provider = new StyleImageryProvider({
+      ...options,
+      style: url.toString(),
+    });
+
+    try {
+      await provider.styleSetPromise;
+      return provider;
+    }
+    catch (error) {
+      provider.destroy();
+      throw error;
+    }
+  }
+
   constructor(options: StyleImageryProviderOptions) {
     this.scene = options.scene;
     this.credit = createCredit(options.credit) as Credit;
@@ -75,13 +101,17 @@ export class StyleImageryProvider implements ImageryProvider {
     this.styleSetPromise = loadStyleSet({
       style: options.style,
     }).then((styleSet) => {
+      const resolvedStyleSet = prepareStyleSet(
+        styleSet,
+        typeof options.style === 'string',
+      );
       if (this.destroyed) {
-        return styleSet;
+        return resolvedStyleSet;
       }
 
-      this.sceneLayer.updateStyle(styleSet);
+      this.sceneLayer.updateStyle(resolvedStyleSet);
       this.scene.requestRender();
-      return styleSet;
+      return resolvedStyleSet;
     }).catch((error) => {
       if (!this.destroyed) {
         this.errorEvent.raiseEvent(error);
@@ -164,6 +194,22 @@ function createCredit(credit?: Credit | string) {
   }
 
   return credit;
+}
+
+function prepareStyleSet(
+  styleSet: StyleSet,
+  shouldEnsurePreview: boolean,
+) {
+  if (!shouldEnsurePreview) {
+    return styleSet;
+  }
+
+  const preparedStyle = ensurePreviewCircleLayer(styleSet.style);
+  if (preparedStyle === styleSet.style) {
+    return styleSet;
+  }
+
+  return createStyleSet(preparedStyle, styleSet.styleUrl);
 }
 
 function createSolidImage(color: string): SolidImage {

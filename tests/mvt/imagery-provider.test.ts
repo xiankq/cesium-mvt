@@ -133,4 +133,71 @@ describe('style-imagery-provider', () => {
 
     provider.destroy();
   });
+
+  it('creates a provider from url and prepares an internal preview layer', async () => {
+    const scene = createSceneStub();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({
+        version: 8,
+        sprite: './sprite',
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            url: '../tiles/planet.json',
+          },
+        },
+        layers: [
+          {
+            id: 'background',
+            type: 'background',
+            paint: {
+              'background-color': '#123456',
+            },
+          },
+          {
+            'id': 'label-city',
+            'type': 'symbol',
+            'source': 'openmaptiles',
+            'source-layer': 'place',
+          },
+        ],
+      }))),
+    );
+
+    const provider = await StyleImageryProvider.fromUrl('https://example.com/styles/basic/style.json', {
+      scene,
+    });
+
+    const styleSet = await (provider as any).styleSetPromise;
+    expect(styleSet.style.sprite).toBe('https://example.com/styles/basic/sprite');
+    expect(styleSet.style.sources.openmaptiles.url).toBe('https://example.com/styles/tiles/planet.json');
+    expect(styleSet.style.layers.at(-1)).toMatchObject({
+      'id': '__cesium-mvt-preview-circle__',
+      'source': 'openmaptiles',
+      'source-layer': 'place',
+      'type': 'circle',
+    });
+
+    provider.destroy();
+  });
+
+  it('destroys intermediate resources when fromUrl rejects', async () => {
+    const scene = createSceneStub();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('missing', {
+        status: 404,
+        statusText: 'Not Found',
+      })),
+    );
+
+    await expect(StyleImageryProvider.fromUrl('https://example.com/styles/missing.json', {
+      scene,
+    })).rejects.toThrow('Failed to load style: https://example.com/styles/missing.json');
+
+    expect(scene.primitives.length).toBe(0);
+    expect(scene.preRender.numberOfListeners).toBe(0);
+    expect(scene.postRender.numberOfListeners).toBe(0);
+  });
 });

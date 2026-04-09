@@ -7,15 +7,16 @@ const props = defineProps<{
   viewer: Viewer;
 }>();
 
-watchEffect((onCleanup) => {
-  const provider = new StyleImageryProvider({
+const PREVIEW_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
+watchEffect(async (onCleanup) => {
+  const provider = await StyleImageryProvider.fromUrl(PREVIEW_STYLE_URL, {
     scene: props.viewer.scene,
-    style: 'https://tiles.openfreemap.org/styles/liberty',
   });
   const layer = props.viewer.imageryLayers.addImageryProvider(provider);
   onCleanup(() => {
-    props.viewer.imageryLayers.remove(layer);
-    provider.destroy();
+    layer && props.viewer.imageryLayers.remove(layer, true);
+    provider?.destroy();
   });
 });
 </script>
