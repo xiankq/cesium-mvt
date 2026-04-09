@@ -103,7 +103,19 @@ export class StyleImageryProvider implements ImageryProvider {
     this.tileHeight = options.tileHeight ?? 256;
     this.proxy = undefined as unknown as Proxy;
     this.tileDiscardPolicy = undefined as unknown as TileDiscardPolicy;
-    this.sceneLayer = new SceneLayer(this.scene);
+    this.sceneLayer = new SceneLayer(this.scene, {
+      maximumLevel: this.maximumLevel,
+      minimumLevel: this.minimumLevel,
+      onError: (error) => {
+        if (!this.destroyed) {
+          this.errorEvent.raiseEvent(error);
+          this.scene.requestRender();
+        }
+      },
+      rectangle: this.rectangle,
+      tileWidth: this.tileWidth,
+      tilingScheme: this.tilingScheme,
+    });
     this.styleSetPromise = loadStyleSet({
       style: options.style,
     }).then((styleSet) => {

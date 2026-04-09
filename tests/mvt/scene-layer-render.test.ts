@@ -1,17 +1,29 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Scene } from 'cesium';
-import { Event, PrimitiveCollection } from 'cesium';
-import { describe, expect, it } from 'vitest';
+import { Event, PrimitiveCollection, WebMercatorTilingScheme } from 'cesium';
+import { describe, expect, it, vi } from 'vitest';
 import { SceneLayer } from '../../src/mvt/scene-layer';
 import { createStyleSet } from '../../src/mvt/style/style-set';
 
-function createSceneStub() {
+function createSceneStub(overrides: Partial<Scene> = {}) {
   return {
+    camera: {
+      computeViewRectangle: () => undefined,
+    },
+    canvas: {
+      clientWidth: 256,
+      width: 256,
+    },
     postRender: new Event(),
     preRender: new Event(),
     primitives: new PrimitiveCollection(),
-    requestRender() {},
+    requestRender: vi.fn(),
+    ...overrides,
   } as unknown as Scene;
+}
+
+function flushAsyncWork() {
+  return new Promise(resolve => setTimeout(resolve, 0));
 }
 
 describe('scene-layer-render', () => {
@@ -242,6 +254,173 @@ describe('scene-layer-render', () => {
       key: renderTile.key,
       state: 'shown',
     });
+
+    sceneLayer.destroy();
+  });
+
+  it('requests and renders visible tiles from the current camera view during preRender', async () => {
+    const tilingScheme = new WebMercatorTilingScheme();
+    const scene = createSceneStub({
+      camera: {
+        computeViewRectangle: () => tilingScheme.rectangle,
+      } as Scene['camera'],
+    });
+    const sceneLayer = new SceneLayer(scene, {
+      maximumLevel: 0,
+      minimumLevel: 0,
+      tilingScheme,
+    });
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    scene.preRender.raiseEvent();
+    await flushAsyncWork();
+
+    const renderTile = sceneLayer.getRenderTile('places', 0, 0, 0);
+    const root = scene.primitives.get(0) as PrimitiveCollection;
+
+    expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
+      eligibleForUnloading: false,
+      key: renderTile.key,
+      state: 'shown',
+    });
+    expect(root.length).toBe(1);
+
+    sceneLayer.destroy();
+  });
+
+  it('keeps a ready parent tile shown while visible child tiles are still loading', async () => {
+    const tilingScheme = new WebMercatorTilingScheme();
+    let viewRectangle = tilingScheme.rectangle;
+    const scene = createSceneStub({
+      camera: {
+        computeViewRectangle: () => viewRectangle,
+      } as Scene['camera'],
+    });
+    const sceneLayer = new SceneLayer(scene, {
+      maximumLevel: 1,
+      minimumLevel: 0,
+      tilingScheme,
+    });
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [-90, 60],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    await sceneLayer.requestTileHint(0, 0, 0);
+
+    const rootHandle = await sceneLayer.ensureRenderedTile('places', 0, 0, 0);
+    const rootCollection = rootHandle.circles?.collections[0]?.collection;
+    const sourceCache = sceneLayer.getSourceCache('places');
+    if (!sourceCache) {
+      throw new Error('Missing source cache for places.');
+    }
+
+    const originalRequestTile = sourceCache.requestTile.bind(sourceCache);
+    let resolveChildTileRequest: (() => void) | undefined;
+    sourceCache.requestTile = (coordinate) => {
+      if (coordinate.level !== 1) {
+        return originalRequestTile(coordinate);
+      }
+
+      return new Promise((resolve) => {
+        resolveChildTileRequest = () => {
+          void originalRequestTile(coordinate).then(resolve);
+        };
+      });
+    };
+
+    viewRectangle = tilingScheme.tileXYToRectangle(0, 0, 1);
+    scene.preRender.raiseEvent();
+    await flushAsyncWork();
+    scene.postRender.raiseEvent();
+
+    const childRenderTile = sceneLayer.getRenderTile('places', 1, 0, 0);
+
+    expect(rootCollection?.show).toBe(true);
+    expect(sceneLayer.tileManager.getTile(rootHandle.key)).toMatchObject({
+      eligibleForUnloading: false,
+      key: rootHandle.key,
+      state: 'shown',
+    });
+    expect(sceneLayer.tileManager.getTile(childRenderTile.key)).toMatchObject({
+      blockers: {
+        parsing: false,
+        pick: false,
+        placement: false,
+        requesting: true,
+        uploading: false,
+      },
+      key: childRenderTile.key,
+    });
+
+    resolveChildTileRequest?.();
+    await flushAsyncWork();
+    scene.preRender.raiseEvent();
+    await flushAsyncWork();
+    scene.postRender.raiseEvent();
+
+    const childHandle = await sceneLayer.ensureRenderedTile('places', 1, 0, 0);
+    const childCollection = childHandle.circles?.collections[0]?.collection;
+
+    expect(childCollection?.show).toBe(true);
+    expect(rootCollection?.show).toBe(false);
 
     sceneLayer.destroy();
   });

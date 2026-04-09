@@ -1,28 +1,37 @@
 import type { SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { BufferPointCollection, BufferPolygonCollection, BufferPolylineCollection, Scene } from 'cesium';
-import type { CircleTileHandle } from './render/backend/circle-backend';
-import type { FillTileHandle } from './render/backend/fill-backend';
-import type { LineTileHandle } from './render/backend/line-backend';
+import type {
+  Rectangle,
+  Scene,
+} from 'cesium';
 import type { FeatureTile } from './render/feature-tile';
 import type { RenderEntry } from './render/render-order';
 import type { RenderTile } from './render/render-tile';
+import type { RenderedTileHandle } from './render/rendered-tile';
 import type { TileFrameResult } from './source/tile-manager';
 import type { TileCoordinate } from './source/tile-request';
 import type { ParsedTile } from './source/vector-tile';
 import type { LayerFamily } from './style/layer-family';
 import type { StyleSet } from './style/style-set';
-import { PrimitiveCollection } from 'cesium';
-import { createCircleTileHandle } from './render/backend/circle-backend';
-import { createFillTileHandle } from './render/backend/fill-backend';
-import { createLineTileHandle } from './render/backend/line-backend';
+import type { TileAvailability } from './tile-selection';
+import { PrimitiveCollection, WebMercatorTilingScheme } from 'cesium';
 import { compileFeatureTile } from './render/feature-tile';
 import { createRenderOrder } from './render/render-order';
 import { compileRenderTile, createRenderTileKey } from './render/render-tile';
+import {
+  createEmptyRenderedTileHandle,
+  createRenderedTileHandle,
+  destroyRenderedTileHandle,
+  mountRenderedTileHandle,
+
+  setRenderedTileVisibility,
+} from './render/rendered-tile';
 import { GeojsonSourceCache } from './source/geojson-source-cache';
 import { SourceCache } from './source/source-cache';
 import { TileManager } from './source/tile-manager';
 import { loadVectorTile } from './source/vector-tile';
 import { createLayerFamilies } from './style/layer-family';
+import { resolveTileSelection } from './tile-selection';
+import { collectSceneViewTileSelection } from './view-state';
 
 // SceneLayer 统一持有 Cesium 侧运行时对象：source cache、解析结果、
 // 渲染计划以及已挂载的 primitive 句柄。ImageryProvider 只把入口请求委托到这里。
@@ -34,29 +43,30 @@ interface ParsedSourceCache {
   updateSource: (source: SourceSpecification) => void;
 }
 
-type MountedCollection = BufferPointCollection | BufferPolygonCollection | BufferPolylineCollection;
-
-interface MountedCollectionEntry {
-  collection: MountedCollection;
-}
-
-export interface RenderedTileHandle {
-  byteLength: number;
-  circles?: CircleTileHandle;
-  fills?: FillTileHandle;
-  key: string;
-  lines?: LineTileHandle;
+export interface SceneLayerOptions {
+  maximumLevel?: number;
+  minimumLevel?: number;
+  onError?: (error: unknown) => void;
+  rectangle?: Rectangle;
+  tileWidth?: number;
+  tilingScheme?: WebMercatorTilingScheme;
 }
 
 export class SceneLayer {
   readonly tileManager = new TileManager();
 
   private currentFrame = 0;
+  private readonly maximumLevel: number | undefined;
+  private readonly minimumLevel: number;
+  private readonly onError?: (error: unknown) => void;
+  private readonly rectangle: Rectangle;
   private readonly scene: Scene;
   private readonly root: PrimitiveCollection;
   private readonly removePostRenderListener?: () => void;
   private readonly removePreRenderListener?: () => void;
   private readonly sourceCaches = new Map<string, ParsedSourceCache>();
+  private readonly tileWidth: number;
+  private readonly tilingScheme: WebMercatorTilingScheme;
   private destroyed = false;
   private readonly featureTilePromises = new Map<string, Promise<FeatureTile>>();
   private readonly featureTiles = new Map<string, FeatureTile>();
@@ -68,13 +78,20 @@ export class SceneLayer {
   private styleSet?: StyleSet;
   private styleEpoch = 0;
 
-  constructor(scene: Scene) {
+  constructor(scene: Scene, options: SceneLayerOptions = {}) {
     this.scene = scene;
+    this.minimumLevel = options.minimumLevel ?? 0;
+    this.maximumLevel = options.maximumLevel;
+    this.onError = options.onError;
+    this.tilingScheme = options.tilingScheme ?? new WebMercatorTilingScheme();
+    this.rectangle = options.rectangle ?? this.tilingScheme.rectangle;
+    this.tileWidth = options.tileWidth ?? 256;
     this.root = new PrimitiveCollection();
     this.scene.primitives.add(this.root);
     this.removePreRenderListener = this.scene.preRender?.addEventListener(() => {
       this.currentFrame += 1;
       this.tileManager.beginFrame(this.currentFrame);
+      this.requestVisibleTilesForCurrentView();
     });
     this.removePostRenderListener = this.scene.postRender?.addEventListener(() => {
       const frameResult = this.tileManager.endFrame();
@@ -193,41 +210,15 @@ export class SceneLayer {
           return createEmptyRenderedTileHandle(renderTile.key);
         }
 
-        const circles = createCircleTileHandle({
+        const renderedTileHandle = createRenderedTileHandle({
           featureTile,
           level,
           style: this.styleSet.style,
+          tilingScheme: this.tilingScheme,
           x,
           y,
         });
-        const lines = createLineTileHandle({
-          featureTile,
-          level,
-          style: this.styleSet.style,
-          x,
-          y,
-        });
-        const fills = createFillTileHandle({
-          featureTile,
-          level,
-          style: this.styleSet.style,
-          x,
-          y,
-        });
-
-        mountRenderedCollections(this.root, circles?.collections);
-        mountRenderedCollections(this.root, lines?.collections);
-        mountRenderedCollections(this.root, fills?.collections);
-
-        const renderedTileHandle: RenderedTileHandle = {
-          byteLength: (circles?.byteLength ?? 0)
-            + (lines?.byteLength ?? 0)
-            + (fills?.byteLength ?? 0),
-          circles,
-          fills,
-          key: renderTile.key,
-          lines,
-        };
+        mountRenderedTileHandle(this.root, renderedTileHandle);
         this.renderedTileHandles.set(renderedTileHandle.key, renderedTileHandle);
         this.scene.requestRender();
         return renderedTileHandle;
@@ -336,7 +327,69 @@ export class SceneLayer {
     }
   }
 
-  private async requestSourceTileHint(sourceId: string, level: number, x: number, y: number) {
+  private requestVisibleTilesForCurrentView(): void {
+    const tileSelection = collectSceneViewTileSelection({
+      camera: this.scene.camera,
+      maximumLevel: this.maximumLevel,
+      minimumLevel: this.minimumLevel,
+      rectangle: this.rectangle,
+      tileWidth: this.tileWidth,
+      tilingScheme: this.tilingScheme,
+      viewportWidth: resolveSceneViewportWidth(this.scene),
+    });
+    if (!tileSelection) {
+      return;
+    }
+
+    const sourceIds = getRenderableSourceIds(this.layerFamilies);
+    void Promise.all(
+      sourceIds.map(sourceId => this.requestVisibleTilesForSource(
+        sourceId,
+        tileSelection.coordinates,
+      )),
+    ).catch((error) => {
+      this.onError?.(error);
+    });
+  }
+
+  private async requestVisibleTilesForSource(
+    sourceId: string,
+    coordinates: readonly TileCoordinate[],
+  ): Promise<void> {
+    const tileSelection = resolveTileSelection({
+      coordinates,
+      getAvailability: coordinate => this.getTileAvailability(
+        sourceId,
+        coordinate.level,
+        coordinate.x,
+        coordinate.y,
+      ),
+      minimumLevel: this.minimumLevel,
+    });
+
+    for (const coordinate of tileSelection.readyCoordinates) {
+      this.showResolvedTile(sourceId, coordinate.level, coordinate.x, coordinate.y);
+    }
+
+    for (const coordinate of tileSelection.emptyCoordinates) {
+      this.retainResolvedTile(sourceId, coordinate.level, coordinate.x, coordinate.y);
+    }
+
+    for (const coordinate of tileSelection.fallbackCoordinates) {
+      this.showResolvedTile(sourceId, coordinate.level, coordinate.x, coordinate.y);
+    }
+
+    await Promise.all(
+      tileSelection.requestCoordinates.map(coordinate => this.requestSourceTileHint(
+        sourceId,
+        coordinate.level,
+        coordinate.x,
+        coordinate.y,
+      )),
+    );
+  }
+
+  private async requestSourceTileHint(sourceId: string, level: number, x: number, y: number): Promise<void> {
     const renderTile = this.getRenderTile(sourceId, level, x, y);
     this.tileManager.markCandidate(renderTile.key);
     this.tileManager.markSelected(renderTile.key);
@@ -347,6 +400,9 @@ export class SceneLayer {
         setRenderedTileVisibility(cachedHandle, true);
         this.tileManager.markShown(renderTile.key);
         this.scene.requestRender();
+      }
+      else {
+        this.tileManager.touch(renderTile.key);
       }
       return;
     }
@@ -363,6 +419,9 @@ export class SceneLayer {
       if (renderedTileHandle.byteLength > 0) {
         this.tileManager.markShown(renderTile.key);
       }
+      else {
+        this.tileManager.touch(renderTile.key);
+      }
     }
     catch (error) {
       this.tileManager.setBlockers(renderTile.key, {
@@ -370,6 +429,40 @@ export class SceneLayer {
       });
       throw error;
     }
+  }
+
+  private getTileAvailability(sourceId: string, level: number, x: number, y: number): TileAvailability {
+    const renderTile = this.getRenderTile(sourceId, level, x, y);
+    const renderedTileHandle = this.renderedTileHandles.get(renderTile.key);
+    if (!renderedTileHandle) {
+      return 'missing';
+    }
+
+    return renderedTileHandle.byteLength > 0 ? 'ready' : 'empty';
+  }
+
+  private retainResolvedTile(sourceId: string, level: number, x: number, y: number): void {
+    const renderTile = this.getRenderTile(sourceId, level, x, y);
+    this.tileManager.markCandidate(renderTile.key);
+    this.tileManager.markSelected(renderTile.key);
+    this.tileManager.touch(renderTile.key);
+  }
+
+  private showResolvedTile(sourceId: string, level: number, x: number, y: number): void {
+    const renderTile = this.getRenderTile(sourceId, level, x, y);
+    const renderedTileHandle = this.renderedTileHandles.get(renderTile.key);
+    if (!renderedTileHandle) {
+      return;
+    }
+
+    if (renderedTileHandle.byteLength === 0) {
+      this.retainResolvedTile(sourceId, level, x, y);
+      return;
+    }
+
+    setRenderedTileVisibility(renderedTileHandle, true);
+    this.tileManager.markShown(renderTile.key);
+    this.scene.requestRender();
   }
 }
 
@@ -395,76 +488,14 @@ function createParsedSourceCache(
   return undefined;
 }
 
-function createEmptyRenderedTileHandle(key: string): RenderedTileHandle {
-  return {
-    byteLength: 0,
-    key,
-  };
-}
-
-function destroyRenderedTileHandle(
-  root: PrimitiveCollection,
-  handle: RenderedTileHandle,
-) {
-  destroyRenderedCollections(root, handle.circles?.collections);
-  destroyRenderedCollections(root, handle.lines?.collections);
-  destroyRenderedCollections(root, handle.fills?.collections);
-}
-
-function setRenderedTileVisibility(
-  handle: RenderedTileHandle,
-  visible: boolean,
-) {
-  setRenderedCollectionsVisibility(handle.circles?.collections, visible);
-  setRenderedCollectionsVisibility(handle.lines?.collections, visible);
-  setRenderedCollectionsVisibility(handle.fills?.collections, visible);
-}
-
-function getRenderableSourceIds(layerFamilies: LayerFamily[]) {
+function getRenderableSourceIds(layerFamilies: LayerFamily[]): string[] {
   return [...new Set(layerFamilies.map(layerFamily => layerFamily.sourceId))];
 }
 
-function mountRenderedCollections(
-  root: PrimitiveCollection,
-  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
-) {
-  if (!collections) {
-    return;
-  }
-
-  for (const entry of collections) {
-    root.add(entry.collection);
-  }
-}
-
-function setRenderedCollectionsVisibility(
-  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
-  visible: boolean,
-) {
-  if (!collections) {
-    return;
-  }
-
-  for (const entry of collections) {
-    entry.collection.show = visible;
-  }
-}
-
-function destroyRenderedCollections(
-  root: PrimitiveCollection,
-  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
-) {
-  if (!collections) {
-    return;
-  }
-
-  for (const entry of collections) {
-    // 类型声明里没有承诺 remove 后自动释放资源，因此这里显式 destroy，
-    // 避免 collection 从场景树摘除后仍然持有 GPU 资源。
-    if (root.contains(entry.collection)) {
-      root.remove(entry.collection);
-    }
-
-    entry.collection.destroy();
-  }
+function resolveSceneViewportWidth(scene: Scene): number {
+  const canvasWidth = scene.canvas as {
+    clientWidth?: number;
+    width?: number;
+  } | undefined;
+  return canvasWidth?.clientWidth ?? canvasWidth?.width ?? 256;
 }
