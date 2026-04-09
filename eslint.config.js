@@ -8,6 +8,7 @@ export default antfu({
   stylistic: {
     semi: true,
   },
+  ignores: ['**/node_modules/**', '.agents/**', '**/dist/**'],
   vue: {
     overrides: {
       'vue/valid-template-root': 'off',
