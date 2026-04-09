@@ -1,13 +1,13 @@
 import type { ImageryTypes, Request, Scene, TilingScheme } from '@cesium/engine';
-import type { MvtStyleSpecification } from './mvt-types';
+import type { StyleSpecification } from './types';
 import { Resource, UrlTemplateImageryProvider } from '@cesium/engine';
-import { isMvtDebugLoggingEnabled, logMvtError, logMvtWarning } from './mvt-log';
-import { collectVisibleProviderTileCoordinates } from './mvt-visible-tile';
-import { pickMvtFeatureIndex } from './pick/mvt-feature-index';
-import { MvtTilesetPrimitive } from './render/mvt-tileset-primitive';
-import { MvtStyleSet } from './style/mvt-style-set';
-import { createMvtTileKey } from './tile/mvt-tile-key';
-import { MvtTileStore } from './tile/mvt-tile-store';
+import { isDebugLoggingEnabled, logError, logWarning } from './log';
+import { pickFeatureIndex } from './pick/feature-index';
+import { TilesetPrimitive } from './render/tileset-primitive';
+import { StyleSet } from './style/style-set';
+import { createTileKey } from './tile/tile-key';
+import { TileStore } from './tile/tile-store';
+import { collectVisibleProviderTileCoordinates } from './visible-tile';
 
 const fallbackImageryUrl = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 
@@ -28,7 +28,7 @@ export interface MvtImageryProviderOptions {
   source?: string;
   sourceCacheProtectedFrames?: number;
   staleFrameWindow?: number;
-  style?: MvtStyleSpecification;
+  style?: StyleSpecification;
   styleUrl?: string;
   tileSize?: number;
   tilingScheme?: TilingScheme;
@@ -38,11 +38,11 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
   private readonly debugLogging: boolean;
   private hasLoggedVisibleTileCollectionWarning = false;
   private readonly placeholderCache = new PlaceholderCanvasCache();
-  private readonly primitive: MvtTilesetPrimitive;
+  private readonly primitive: TilesetPrimitive;
   private readonly scene: Scene;
-  private styleSet?: MvtStyleSet;
-  readonly styleReadyPromise: Promise<MvtStyleSet>;
-  private readonly tileStore: MvtTileStore;
+  private styleSet?: StyleSet;
+  readonly styleReadyPromise: Promise<StyleSet>;
+  private readonly tileStore: TileStore;
 
   constructor(options: MvtImageryProviderOptions) {
     super({
@@ -60,13 +60,13 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
     }
 
     this.scene = options.scene;
-    this.debugLogging = isMvtDebugLoggingEnabled(options.debugLogging);
-    this.tileStore = new MvtTileStore({
+    this.debugLogging = isDebugLoggingEnabled(options.debugLogging);
+    this.tileStore = new TileStore({
       maxCpuCacheBytes: options.maxCpuCacheBytes,
       maxGpuCacheBytes: options.maxGpuCacheBytes,
       protectedFrames: options.protectedFrames,
     });
-    this.primitive = new MvtTilesetPrimitive({
+    this.primitive = new TilesetPrimitive({
       debugLogging: this.debugLogging,
       maxParseBytesPerFrame: options.maxParseBytesPerFrame,
       maxParseTilesPerFrame: options.maxParseTilesPerFrame,
@@ -83,7 +83,7 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
     this.scene.primitives.add(this.primitive as unknown as object);
 
     const styleReadyPromise = this.loadStyleSet(options).catch((error) => {
-      logMvtError(this.debugLogging, 'MVT style 加载失败。', {
+      logError(this.debugLogging, 'MVT style 加载失败。', {
         error,
         source: options.source,
         styleUrl: options.styleUrl,
@@ -107,13 +107,13 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
     level: number,
     longitude: number,
     latitude: number,
-  ): Promise<ReturnType<typeof pickMvtFeatureIndex>> | undefined {
-    const tile = this.tileStore.getTile(createMvtTileKey({ x, y, z: level }));
+  ): Promise<ReturnType<typeof pickFeatureIndex>> | undefined {
+    const tile = this.tileStore.getTile(createTileKey({ x, y, z: level }));
     if (!tile?.featureIndex) {
       return undefined;
     }
 
-    const pickedFeatures = pickMvtFeatureIndex({
+    const pickedFeatures = pickFeatureIndex({
       coordinate: tile.coordinate,
       featureIndex: tile.featureIndex,
       imageryLayer: this,
@@ -148,7 +148,7 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
     const visibleTileResult = collectVisibleProviderTileCoordinates(this.scene, this);
     if (!visibleTileResult.available) {
       if (!this.hasLoggedVisibleTileCollectionWarning) {
-        logMvtWarning(
+        logWarning(
           this.debugLogging,
           '无法从 Cesium 当前 globe tile 集收集可见 MVT tile，当前帧将回退到最近请求集。',
         );
@@ -161,11 +161,11 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
     return visibleTileResult.coordinates;
   }
 
-  private async loadStyleSet(options: MvtImageryProviderOptions): Promise<MvtStyleSet> {
+  private async loadStyleSet(options: MvtImageryProviderOptions): Promise<StyleSet> {
     const styleDocument = options.style
       ? { specification: options.style, url: undefined }
       : await fetchStyleSpecification(options.styleUrl!);
-    const styleSet = await MvtStyleSet
+    const styleSet = await StyleSet
       .fromSpecification(styleDocument.specification, {
         baseUrl: styleDocument.url,
         source: options.source,
@@ -183,7 +183,7 @@ export class MvtImageryProvider extends UrlTemplateImageryProvider {
 
 async function fetchStyleSpecification(
   styleUrl: string,
-): Promise<{ specification: MvtStyleSpecification; url: string }> {
+): Promise<{ specification: StyleSpecification; url: string }> {
   const resource = new Resource({ url: styleUrl });
   const styleSpecification = resource.fetchJson();
   if (!styleSpecification) {
@@ -191,7 +191,7 @@ async function fetchStyleSpecification(
   }
 
   return {
-    specification: await styleSpecification as MvtStyleSpecification,
+    specification: await styleSpecification as StyleSpecification,
     url: resource.url || styleUrl,
   };
 }
@@ -238,7 +238,7 @@ function createPlaceholderCanvas(color: string): ImageryTypes {
 
 function syncProviderLevelBounds(
   provider: UrlTemplateImageryProvider,
-  styleSet: MvtStyleSet,
+  styleSet: StyleSet,
   options: MvtImageryProviderOptions,
 ): void {
   const source = styleSet.source;

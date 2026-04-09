@@ -1,0 +1,26 @@
+import { describe, expect, it } from 'vitest';
+import { createTileKey, isSameTileCoordinate, parseTileKey } from '../src/mvt/tile/tile-key';
+
+describe('tile-key', () => {
+  it('creates and parses tile keys', () => {
+    const key = createTileKey({ x: 13524, y: 6212, z: 14 });
+
+    expect(key).toBe('14/13524/6212');
+    expect(parseTileKey(key)).toEqual({
+      x: 13524,
+      y: 6212,
+      z: 14,
+    });
+  });
+
+  it('compares tile coordinates', () => {
+    expect(isSameTileCoordinate(
+      { x: 1, y: 2, z: 3 },
+      { x: 1, y: 2, z: 3 },
+    )).toBe(true);
+    expect(isSameTileCoordinate(
+      { x: 1, y: 2, z: 3 },
+      { x: 1, y: 2, z: 4 },
+    )).toBe(false);
+  });
+});

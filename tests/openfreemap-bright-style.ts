@@ -1,11 +1,11 @@
-import type { MvtStyleSpecification } from '../src/mvt/mvt-types';
-import { MvtStyleSet } from '../src/mvt/style/mvt-style-set';
+import type { MvtStyleSpecification } from '../src/mvt/types';
+import { StyleSet } from '../src/mvt/style/style-set';
 
 export const openFreeMapBrightStyleUrl = 'https://tiles.openfreemap.org/styles/bright';
 export const openFreeMapBrightSourceId = 'openmaptiles';
 
 let stylePromise: Promise<MvtStyleSpecification> | undefined;
-let styleSetPromise: Promise<MvtStyleSet> | undefined;
+let styleSetPromise: Promise<StyleSet> | undefined;
 
 export function loadOpenFreeMapBrightStyle(): Promise<MvtStyleSpecification> {
   if (!stylePromise) {
@@ -22,10 +22,10 @@ export function loadOpenFreeMapBrightStyle(): Promise<MvtStyleSpecification> {
   return stylePromise;
 }
 
-export function loadOpenFreeMapBrightStyleSet(): Promise<MvtStyleSet> {
+export function loadOpenFreeMapBrightStyleSet(): Promise<StyleSet> {
   if (!styleSetPromise) {
     styleSetPromise = loadOpenFreeMapBrightStyle()
-      .then(styleSpecification => MvtStyleSet
+      .then(styleSpecification => StyleSet
         .fromSpecification(styleSpecification, {
           baseUrl: openFreeMapBrightStyleUrl,
           source: openFreeMapBrightSourceId,
