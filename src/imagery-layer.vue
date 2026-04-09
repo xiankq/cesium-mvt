@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Viewer } from 'cesium';
 import { watchEffect } from 'vue';
+import { StyleImageryProvider } from './mvt/imagery-provider';
 
 const props = defineProps<{
   viewer: Viewer;
@@ -8,7 +9,7 @@ const props = defineProps<{
 
 watchEffect((onCleanup) => {
   const layer = props.viewer.imageryLayers.addImageryProvider(
-    new MvtImageryProvider({
+    new StyleImageryProvider({
       scene: props.viewer.scene,
       style: 'https://tiles.openfreemap.org/styles/liberty',
     }),
