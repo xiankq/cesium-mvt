@@ -141,15 +141,14 @@ export class StyleImageryProvider implements ImageryProvider {
   }
 
   async requestImage(
-    x: number,
-    y: number,
-    level: number,
+    _x: number,
+    _y: number,
+    _level: number,
     _request?: Request,
   ): Promise<ImageryTypes> {
     // requestImage 只负责维持 Cesium 的 imagery 生命周期。
     // 真正的矢量内容通过 SceneLayer 挂载到 primitive 管线中。
     const styleSet = await this.styleSetPromise;
-    void this.requestTileHint(level, x, y);
     const backgroundColor = styleSet?.backgroundColor ?? TRANSPARENT_COLOR;
     return this.getSolidImage(backgroundColor) as ImageryTypes;
   }
@@ -191,18 +190,6 @@ export class StyleImageryProvider implements ImageryProvider {
     const image = createSolidImage(color);
     this.solidImageCache.set(color, image);
     return image;
-  }
-
-  private async requestTileHint(level: number, x: number, y: number) {
-    try {
-      await this.sceneLayer.requestTileHint(level, x, y);
-    }
-    catch (error) {
-      if (!this.destroyed) {
-        this.errorEvent.raiseEvent(error);
-        this.scene.requestRender();
-      }
-    }
   }
 }
 

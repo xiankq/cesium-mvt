@@ -86,7 +86,7 @@ describe('style-imagery-provider', () => {
     provider.destroy();
   });
 
-  it('uses requestImage as a tile hint to mount vector primitives', async () => {
+  it('keeps requestImage as an imagery facade without mounting vector primitives', async () => {
     const scene = createSceneStub();
     const style: StyleSpecification = {
       version: 8,
@@ -128,8 +128,8 @@ describe('style-imagery-provider', () => {
     await flushAsyncWork();
 
     const root = scene.primitives.get(0) as PrimitiveCollection;
-    expect(root.length).toBe(1);
-    expect(scene.requestRender).toHaveBeenCalledTimes(2);
+    expect(root.length).toBe(0);
+    expect(scene.requestRender).toHaveBeenCalledTimes(1);
 
     provider.destroy();
   });

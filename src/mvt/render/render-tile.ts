@@ -48,6 +48,13 @@ export function createRenderTileKey(
   return `${sourceId}/${level}/${x}/${y}`;
 }
 
+export function createScopedRenderTileKey(
+  key: string,
+  styleEpoch: number,
+) {
+  return `${key}@${styleEpoch}`;
+}
+
 export function compileRenderTile({
   key,
   layerFamilies,
@@ -109,7 +116,7 @@ export function compileRenderTile({
     background,
     epoch: styleEpoch,
     geometryBatches: [...geometryBatchesByFamilyId.values()],
-    key: `${key}@${styleEpoch}`,
+    key: createScopedRenderTileKey(key, styleEpoch),
   };
 }
 

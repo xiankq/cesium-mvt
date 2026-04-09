@@ -41,6 +41,7 @@ export interface CollectSceneViewTileCoordinatesOptions {
 
 export interface SceneViewTileSelection {
   coordinates: TileCoordinate[];
+  key: string;
   level: number;
   rectangle: Rectangle;
 }
@@ -174,9 +175,25 @@ export function collectSceneViewTileSelection({
 
   return {
     coordinates,
+    key: createSceneViewSelectionKey(coverageRectangle, level, viewportWidth),
     level,
     rectangle: coverageRectangle,
   };
+}
+
+function createSceneViewSelectionKey(
+  rectangle: Rectangle,
+  level: number,
+  viewportWidth: number,
+) {
+  return [
+    level,
+    Math.max(1, Math.round(viewportWidth)),
+    rectangle.west.toFixed(6),
+    rectangle.south.toFixed(6),
+    rectangle.east.toFixed(6),
+    rectangle.north.toFixed(6),
+  ].join('/');
 }
 
 function splitRectangleOnAntimeridian(rectangle: Rectangle) {
