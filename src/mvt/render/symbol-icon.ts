@@ -1,11 +1,11 @@
 import type { StyleSet } from '../style/style-set';
 import type { BucketFeature, CompiledStyleLayer, StyleSpriteEntry } from '../types';
 import type { WarningContext } from '../warning-context';
-import type { ResolvedSymbolIcon, SymbolAnchor, SymbolCollisionBox } from './symbol-types';
-import { BoundingRectangle, Cartesian2, Cartesian3, Math as CesiumMath, Color, HorizontalOrigin, VerticalOrigin } from '@cesium/engine';
+import type { ResolvedSymbolIcon, ResolvedSymbolLabel } from './symbol-types';
+import { BoundingRectangle, Cartesian2, Math as CesiumMath, Color } from '@cesium/engine';
 import { warnOnce } from '../warning-context';
 import { ICON_BYTE_SIZE } from './constants';
-import { resolveSymbolTranslate, withOpacity } from './symbol-utils';
+import { resolveOrigins, resolveSymbolTranslate, withOpacity } from './symbol-utils';
 
 export function resolveSymbolIcon(
   styleSet: StyleSet,
@@ -66,44 +66,6 @@ export function resolveSymbolIcon(
     rotation: CesiumMath.toRadians(styleSet.evaluateLayoutNumber(layer, 'icon-rotate', zoom, feature, 0)),
     verticalOrigin,
     width: iconPixelSize.width,
-  };
-}
-
-export function createSymbolIconCollisionBox(
-  anchor: SymbolAnchor,
-  height: number,
-  horizontalOrigin: HorizontalOrigin,
-  pixelOffset: Cartesian2,
-  padding: number,
-  verticalOrigin: VerticalOrigin,
-  width: number,
-): SymbolCollisionBox {
-  const offsetX = pixelOffset.x * anchor.mapScale;
-  const offsetY = pixelOffset.y * anchor.mapScale;
-  const widthInMapUnits = width * anchor.mapScale;
-  const heightInMapUnits = height * anchor.mapScale;
-  const paddingInMapUnits = Math.max(0, padding) * anchor.mapScale;
-
-  const centerX = anchor.mapX + offsetX;
-  const centerY = anchor.mapY + offsetY;
-
-  const longitude = centerX * 360 - 180;
-  const latitude = Math.atan(Math.sinh(centerY * Math.PI)) * 180 / Math.PI;
-
-  return {
-    height,
-    horizontalOrigin,
-    latitude,
-    longitude,
-    padding,
-    pixelOffset,
-    position: Cartesian3.clone(anchor.position),
-    tileMaxX: centerX + widthInMapUnits * 0.5 + paddingInMapUnits,
-    tileMaxY: centerY + heightInMapUnits * 0.5 + paddingInMapUnits,
-    tileMinX: centerX - widthInMapUnits * 0.5 - paddingInMapUnits,
-    tileMinY: centerY - heightInMapUnits * 0.5 - paddingInMapUnits,
-    verticalOrigin,
-    width,
   };
 }
 
@@ -189,29 +151,42 @@ function createSpriteSubRegion(imageHeight: number, spriteEntry: StyleSpriteEntr
   );
 }
 
-function resolveOrigins(anchor?: string): {
-  horizontalOrigin: HorizontalOrigin;
-  verticalOrigin: VerticalOrigin;
-} {
-  switch (anchor) {
-    case 'left':
-      return { horizontalOrigin: HorizontalOrigin.LEFT, verticalOrigin: VerticalOrigin.CENTER };
-    case 'right':
-      return { horizontalOrigin: HorizontalOrigin.RIGHT, verticalOrigin: VerticalOrigin.CENTER };
-    case 'top':
-      return { horizontalOrigin: HorizontalOrigin.CENTER, verticalOrigin: VerticalOrigin.TOP };
-    case 'bottom':
-      return { horizontalOrigin: HorizontalOrigin.CENTER, verticalOrigin: VerticalOrigin.BOTTOM };
-    case 'top-left':
-      return { horizontalOrigin: HorizontalOrigin.LEFT, verticalOrigin: VerticalOrigin.TOP };
-    case 'top-right':
-      return { horizontalOrigin: HorizontalOrigin.RIGHT, verticalOrigin: VerticalOrigin.TOP };
-    case 'bottom-left':
-      return { horizontalOrigin: HorizontalOrigin.LEFT, verticalOrigin: VerticalOrigin.BOTTOM };
-    case 'bottom-right':
-      return { horizontalOrigin: HorizontalOrigin.RIGHT, verticalOrigin: VerticalOrigin.BOTTOM };
-    case 'center':
-    default:
-      return { horizontalOrigin: HorizontalOrigin.CENTER, verticalOrigin: VerticalOrigin.CENTER };
+export function resolveIconTextFitPadding(
+  styleSet: StyleSet,
+  layer: CompiledStyleLayer,
+  zoom: number,
+  feature: BucketFeature,
+): [number, number, number, number] {
+  const padding = styleSet.evaluateLayoutValue(layer, 'icon-text-fit-padding', zoom, feature);
+  if (Array.isArray(padding) && padding.length >= 4) {
+    return padding.map(v => typeof v === 'number' ? v : 0) as [number, number, number, number];
   }
+  return [0, 0, 0, 0];
+}
+
+export function applyIconTextFit(
+  icon: ResolvedSymbolIcon,
+  label: ResolvedSymbolLabel,
+  fit: string,
+  padding: [number, number, number, number],
+): ResolvedSymbolIcon {
+  const [top, right, bottom, left] = padding;
+  const paddedTextWidth = label.blockWidth + left + right;
+  const paddedTextHeight = label.blockHeight + top + bottom;
+
+  let { height, width } = icon;
+  switch (fit) {
+    case 'width':
+      width = paddedTextWidth;
+      break;
+    case 'height':
+      height = paddedTextHeight;
+      break;
+    case 'both':
+      width = paddedTextWidth;
+      height = paddedTextHeight;
+      break;
+  }
+
+  return { ...icon, height, width };
 }

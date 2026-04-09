@@ -631,6 +631,6 @@ function isDescendantTile(tile: MvtTile, ancestorTile: MvtTile): boolean {
   }
 
   const zoomDelta = tile.coordinate.z - ancestorTile.coordinate.z;
-  return Math.floor(tile.coordinate.x / 2 ** zoomDelta) === ancestorTile.coordinate.x
-    && Math.floor(tile.coordinate.y / 2 ** zoomDelta) === ancestorTile.coordinate.y;
+  return Math.floor(tile.coordinate.x / (1 << zoomDelta)) === ancestorTile.coordinate.x
+    && Math.floor(tile.coordinate.y / (1 << zoomDelta)) === ancestorTile.coordinate.y;
 }

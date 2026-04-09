@@ -227,7 +227,7 @@ function resolveLineTolerance(
   sourceCoordinate: TileCoordinate,
 ): number {
   const zoomDelta = Math.max(0, displayCoordinate.z - sourceCoordinate.z);
-  const coordinateScale = 2 ** zoomDelta;
+  const coordinateScale = 1 << zoomDelta;
   const lineWidth = typeof layer.paint['line-width'] === 'number' ? layer.paint['line-width'] : 4;
   return (Math.max(2, lineWidth) / 512) * (1 / coordinateScale);
 }
@@ -238,7 +238,7 @@ function resolvePointTolerance(
   sourceCoordinate: TileCoordinate,
 ): number {
   const zoomDelta = Math.max(0, displayCoordinate.z - sourceCoordinate.z);
-  const coordinateScale = 2 ** zoomDelta;
+  const coordinateScale = 1 << zoomDelta;
   if (layer.type === 'circle') {
     const circleRadius = typeof layer.paint['circle-radius'] === 'number' ? layer.paint['circle-radius'] : 6;
     return (Math.max(4, circleRadius * 2) / 512) * (1 / coordinateScale);

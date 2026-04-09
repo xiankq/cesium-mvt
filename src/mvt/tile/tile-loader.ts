@@ -30,7 +30,7 @@ export class DefaultTileLoader implements TileLoader {
   }
 
   buildTileUrl(coordinate: TileCoordinate): string {
-    const dimension = 2 ** coordinate.z;
+    const dimension = 1 << coordinate.z;
     const reverseX = dimension - coordinate.x - 1;
     const reverseY = dimension - coordinate.y - 1;
 

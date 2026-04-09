@@ -1,9 +1,8 @@
-import type { HorizontalOrigin, VerticalOrigin } from '@cesium/engine';
 import type { StyleSet } from '../style/style-set';
 import type { BucketFeature, CompiledStyleLayer } from '../types';
 import type { WarningContext } from '../warning-context';
-import type { ResolvedSymbolLabel, SymbolAnchor, SymbolCollisionBox, SymbolLabelItem } from './symbol-types';
-import { Cartesian2, Cartesian3, Color, LabelStyle } from '@cesium/engine';
+import type { ResolvedSymbolLabel, SymbolAnchor, SymbolLabelItem } from './symbol-types';
+import { Cartesian2, Color, LabelStyle } from '@cesium/engine';
 import { getLayerHeightOffset, liftLocalPosition } from './layer-height';
 import { extractPlainTextValue, resolveTextBlock } from './symbol-text';
 import { resolveOrigins, resolveSymbolTranslate, withOpacity } from './symbol-utils';
@@ -59,44 +58,6 @@ export function resolveSymbolLabel(
     pixelOffset: resolveTextPixelOffset(styleSet, layer, zoom, feature, fontSize),
     style: outlineWidth > 0 ? LabelStyle.FILL_AND_OUTLINE : LabelStyle.FILL,
     verticalOrigin,
-  };
-}
-
-export function createSymbolLabelCollisionBox(
-  anchor: SymbolAnchor,
-  height: number,
-  horizontalOrigin: HorizontalOrigin,
-  pixelOffset: Cartesian2,
-  padding: number,
-  verticalOrigin: VerticalOrigin,
-  width: number,
-): SymbolCollisionBox {
-  const offsetX = pixelOffset.x * anchor.mapScale;
-  const offsetY = pixelOffset.y * anchor.mapScale;
-  const widthInMapUnits = width * anchor.mapScale;
-  const heightInMapUnits = height * anchor.mapScale;
-  const paddingInMapUnits = Math.max(0, padding) * anchor.mapScale;
-
-  const centerX = anchor.mapX + offsetX;
-  const centerY = anchor.mapY + offsetY;
-
-  const longitude = centerX * 360 - 180;
-  const latitude = Math.atan(Math.sinh(centerY * Math.PI)) * 180 / Math.PI;
-
-  return {
-    height,
-    horizontalOrigin,
-    latitude,
-    longitude,
-    padding,
-    pixelOffset,
-    position: Cartesian3.clone(anchor.position),
-    tileMaxX: centerX + widthInMapUnits * 0.5 + paddingInMapUnits,
-    tileMaxY: centerY + heightInMapUnits * 0.5 + paddingInMapUnits,
-    tileMinX: centerX - widthInMapUnits * 0.5 - paddingInMapUnits,
-    tileMinY: centerY - heightInMapUnits * 0.5 - paddingInMapUnits,
-    verticalOrigin,
-    width,
   };
 }
 

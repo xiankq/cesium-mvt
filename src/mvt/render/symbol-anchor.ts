@@ -56,7 +56,7 @@ export function createSymbolAnchor(
   extent: number,
   transform: ReturnType<typeof createTileTransform>,
 ): SymbolAnchor {
-  const zoomScale = 2 ** transform.displayCoordinate.z;
+  const zoomScale = 1 << transform.displayCoordinate.z;
   const mapScale = 1 / (TILE_PIXEL_SIZE * zoomScale);
 
   return {

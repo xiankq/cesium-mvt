@@ -73,3 +73,11 @@ export function withOpacity(color: Color, opacity: number): Color {
     color.alpha * Math.max(0, Math.min(1, opacity)),
   );
 }
+
+export function canUpdateCesiumCollections(frameState: unknown): frameState is { commandList: unknown[]; context: object } {
+  if (!frameState || typeof frameState !== 'object') {
+    return false;
+  }
+  const candidate = frameState as Record<string, unknown>;
+  return Array.isArray(candidate.commandList) && typeof candidate.context === 'object' && candidate.context !== null;
+}

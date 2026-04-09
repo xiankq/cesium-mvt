@@ -18,10 +18,3 @@ export function parseTileKey(tileKey: string): TileCoordinate {
     y: Number(match[3]),
   };
 }
-
-export function isSameTileCoordinate(
-  left: TileCoordinate,
-  right: TileCoordinate,
-): boolean {
-  return left.x === right.x && left.y === right.y && left.z === right.z;
-}

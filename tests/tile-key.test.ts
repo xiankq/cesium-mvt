@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createTileKey, isSameTileCoordinate, parseTileKey } from '../src/mvt/tile/tile-key';
+import { createTileKey, parseTileKey } from '../src/mvt/tile/tile-key';
 
 describe('tile-key', () => {
   it('creates and parses tile keys', () => {
@@ -11,16 +11,5 @@ describe('tile-key', () => {
       y: 6212,
       z: 14,
     });
-  });
-
-  it('compares tile coordinates', () => {
-    expect(isSameTileCoordinate(
-      { x: 1, y: 2, z: 3 },
-      { x: 1, y: 2, z: 3 },
-    )).toBe(true);
-    expect(isSameTileCoordinate(
-      { x: 1, y: 2, z: 3 },
-      { x: 1, y: 2, z: 4 },
-    )).toBe(false);
   });
 });

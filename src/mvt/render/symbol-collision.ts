@@ -1,10 +1,10 @@
 import type { Scene } from '@cesium/engine';
-import type { SymbolCollisionBox } from './symbol-types';
+import type { SymbolAnchor, SymbolCollisionBox, SymbolPlacementGroup } from './symbol-types';
 import { Cartesian2, Cartesian3, Ellipsoid, HorizontalOrigin, SceneTransforms, VerticalOrigin } from '@cesium/engine';
 import { GridIndex } from './grid-index';
 
 type OverlapMode = 'always' | 'never';
-type ZOrderMode = 'auto' | 'viewport-y' | 'source';
+export type ZOrderMode = 'auto' | 'viewport-y' | 'source';
 
 interface CollisionKey {
   crossTileID?: string;
@@ -396,4 +396,141 @@ export class SymbolCollisionIndex {
   }
 }
 
-export type { SortablePlacement, ZOrderMode };
+export type { SortablePlacement };
+
+export function resolveZOrderMode(value: unknown): ZOrderMode {
+  if (value === 'viewport-y' || value === 'source')
+    return value;
+  return 'auto';
+}
+
+function sortPlacementGroups(
+  placementGroups: readonly SymbolPlacementGroup[],
+  collisionIndex: SymbolCollisionIndex | undefined,
+  zOrder: ZOrderMode,
+  hasSortKey: boolean,
+): readonly SymbolPlacementGroup[] {
+  if (!collisionIndex || !collisionIndex.hasScene())
+    return placementGroups;
+  const shouldSortByViewportY = zOrder === 'viewport-y' || (zOrder === 'auto' && !hasSortKey);
+  if (!shouldSortByViewportY)
+    return placementGroups;
+  return [...placementGroups].sort((a, b) => {
+    const screenYA = calculatePlacementScreenY(a, collisionIndex);
+    const screenYB = calculatePlacementScreenY(b, collisionIndex);
+    return screenYA - screenYB;
+  });
+}
+
+function calculatePlacementScreenY(
+  placementGroup: SymbolPlacementGroup,
+  collisionIndex: SymbolCollisionIndex,
+): number {
+  const position = placementGroup.icon?.collisionBox?.position ?? placementGroup.label?.collisionBox?.position;
+  return position ? collisionIndex.calculateScreenY(position) : 0;
+}
+
+function collidesWithPlacementGroup(
+  placementGroup: SymbolPlacementGroup,
+  collisionIndex: SymbolCollisionIndex,
+): boolean {
+  return Boolean(
+    (placementGroup.icon?.collisionBox && collisionIndex.collides(placementGroup.icon.collisionBox))
+    || (placementGroup.label?.collisionBox && collisionIndex.collides(placementGroup.label.collisionBox)),
+  );
+}
+
+function insertPlacementCollisionBoxes(
+  placementGroup: SymbolPlacementGroup,
+  collisionIndex?: SymbolCollisionIndex,
+): void {
+  if (!collisionIndex)
+    return;
+  if (placementGroup.icon?.collisionBox)
+    collisionIndex.insert(placementGroup.icon.collisionBox);
+  if (placementGroup.label?.collisionBox)
+    collisionIndex.insert(placementGroup.label.collisionBox);
+}
+
+function setPlacementGroupVisible(
+  placementGroup: SymbolPlacementGroup,
+  visible: boolean,
+): void {
+  if (placementGroup.visible === visible)
+    return;
+  placementGroup.visible = visible;
+  if (placementGroup.icon?.billboard)
+    placementGroup.icon.billboard.show = visible;
+  for (const item of placementGroup.label?.items ?? []) {
+    if (item.label)
+      item.label.show = visible;
+  }
+}
+
+export function applyPlacementVisibility(
+  placementGroups: readonly SymbolPlacementGroup[],
+  collisionIndex?: SymbolCollisionIndex,
+  zOrder: ZOrderMode = 'auto',
+  hasSortKey: boolean = false,
+): number {
+  let visiblePlacementCount = 0;
+  const sortedGroups = sortPlacementGroups(placementGroups, collisionIndex, zOrder, hasSortKey);
+  for (const placementGroup of sortedGroups) {
+    const collisionBox = placementGroup.icon?.collisionBox ?? placementGroup.label?.collisionBox;
+    if (!collisionBox) {
+      setPlacementGroupVisible(placementGroup, false);
+      continue;
+    }
+    const image = placementGroup.icon?.image;
+    if (collisionIndex?.isAlreadyPlaced(collisionBox.longitude, collisionBox.latitude, placementGroup.layerId, placementGroup.text, image)) {
+      setPlacementGroupVisible(placementGroup, false);
+      continue;
+    }
+    const visible = !collisionIndex || !collidesWithPlacementGroup(placementGroup, collisionIndex);
+    if (visible) {
+      insertPlacementCollisionBoxes(placementGroup, collisionIndex);
+      collisionIndex?.markAsPlaced(collisionBox.longitude, collisionBox.latitude, placementGroup.layerId, placementGroup.text, image);
+      visiblePlacementCount += 1;
+    }
+    setPlacementGroupVisible(placementGroup, visible);
+  }
+  return visiblePlacementCount;
+}
+
+export function createSymbolCollisionBox(
+  anchor: SymbolAnchor,
+  height: number,
+  horizontalOrigin: HorizontalOrigin,
+  pixelOffset: Cartesian2,
+  padding: number,
+  verticalOrigin: VerticalOrigin,
+  width: number,
+): SymbolCollisionBox {
+  const offsetX = pixelOffset.x * anchor.mapScale;
+  const offsetY = pixelOffset.y * anchor.mapScale;
+  const widthInMapUnits = width * anchor.mapScale;
+  const heightInMapUnits = height * anchor.mapScale;
+  const paddingInMapUnits = Math.max(0, padding) * anchor.mapScale;
+
+  const centerX = anchor.mapX + offsetX;
+  const centerY = anchor.mapY + offsetY;
+
+  const longitude = centerX * 360 - 180;
+  const latitude = Math.atan(Math.sinh(centerY * Math.PI * 2)) * 180 / Math.PI;
+
+  return {
+    height,
+    horizontalOrigin,
+    latitude,
+    longitude,
+    padding,
+    pixelOffset,
+    position: Cartesian3.clone(anchor.position),
+    tileMaxX: centerX + widthInMapUnits * 0.5 + paddingInMapUnits,
+    tileMaxY: centerY + heightInMapUnits * 0.5 + paddingInMapUnits,
+    tileMinX: centerX - widthInMapUnits * 0.5 - paddingInMapUnits,
+    tileMinY: centerY - heightInMapUnits * 0.5 - paddingInMapUnits,
+    verticalOrigin,
+    width,
+  };
+}

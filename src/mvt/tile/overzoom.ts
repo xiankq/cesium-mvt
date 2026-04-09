@@ -24,7 +24,7 @@ export function createOverzoomTransform(
     };
   }
 
-  const coordinateScale = 2 ** zoomDelta;
+  const coordinateScale = 1 << zoomDelta;
   return {
     coordinateScale,
     displayCoordinate,
@@ -44,8 +44,8 @@ export function getSourceTileCoordinate(
 
   const zoomDelta = displayCoordinate.z - sourceMaxzoom;
   return {
-    x: Math.floor(displayCoordinate.x / 2 ** zoomDelta),
-    y: Math.floor(displayCoordinate.y / 2 ** zoomDelta),
+    x: Math.floor(displayCoordinate.x / (1 << zoomDelta)),
+    y: Math.floor(displayCoordinate.y / (1 << zoomDelta)),
     z: sourceMaxzoom,
   };
 }
