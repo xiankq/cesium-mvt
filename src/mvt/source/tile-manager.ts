@@ -59,18 +59,23 @@ export class TileManager {
     const tile = this.getOrCreateTile(key);
     tile.candidateThisFrame = true;
     tile.selectedThisFrame = true;
+    tile.eligibleForUnloading = false;
   }
 
   markShown(key: string) {
     const tile = this.getOrCreateTile(key);
     tile.candidateThisFrame = true;
+    tile.eligibleForUnloading = false;
     tile.selectedThisFrame = true;
+    tile.state = 'shown';
     tile.shownThisFrame = true;
     tile.touchedThisFrame = true;
   }
 
   touch(key: string) {
-    this.getOrCreateTile(key).touchedThisFrame = true;
+    const tile = this.getOrCreateTile(key);
+    tile.eligibleForUnloading = false;
+    tile.touchedThisFrame = true;
   }
 
   setBlockers(key: string, blockers: Partial<TileBlockers>) {

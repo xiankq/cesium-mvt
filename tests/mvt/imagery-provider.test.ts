@@ -13,6 +13,10 @@ function createSceneStub() {
   } as unknown as Scene;
 }
 
+function flushAsyncWork() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 describe('style-imagery-provider', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -78,6 +82,54 @@ describe('style-imagery-provider', () => {
       'Failed to load style: https://example.com/styles/missing.json',
     );
     expect(onError).toHaveBeenCalledTimes(1);
+
+    provider.destroy();
+  });
+
+  it('uses requestImage as a tile hint to mount vector primitives', async () => {
+    const scene = createSceneStub();
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    const provider = new StyleImageryProvider({
+      scene,
+      style,
+    });
+
+    await provider.requestImage(0, 0, 0);
+    await flushAsyncWork();
+
+    const root = scene.primitives.get(0) as PrimitiveCollection;
+    expect(root.length).toBe(1);
+    expect(scene.requestRender).toHaveBeenCalledTimes(2);
 
     provider.destroy();
   });

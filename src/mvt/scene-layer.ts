@@ -48,6 +48,7 @@ export class SceneLayer {
   private readonly featureTilePromises = new Map<string, Promise<FeatureTile>>();
   private readonly featureTiles = new Map<string, FeatureTile>();
   private layerFamilies: LayerFamily[] = [];
+  private readonly renderedTilePromises = new Map<string, Promise<RenderedTileHandle>>();
   private readonly renderedTileHandles = new Map<string, RenderedTileHandle>();
   private readonly renderTiles = new Map<string, RenderTile>();
   private renderOrder: RenderEntry[] = [];
@@ -73,6 +74,7 @@ export class SceneLayer {
     this.styleEpoch += 1;
     this.layerFamilies = createLayerFamilies(styleSet.style);
     this.clearRenderedTileHandles();
+    this.renderedTilePromises.clear();
     this.featureTilePromises.clear();
     this.featureTiles.clear();
     this.renderOrder = createRenderOrder(styleSet.style, this.layerFamilies);
@@ -166,30 +168,52 @@ export class SceneLayer {
       return cachedHandle;
     }
 
-    const featureTile = await this.getFeatureTile(sourceId, level, x, y);
-    const circles = createCircleTileHandle({
-      featureTile,
-      level,
-      style: this.styleSet.style,
-      x,
-      y,
-    });
-
-    if (circles) {
-      // 后端生成的 collection 统一挂到 scene-layer 根节点下，便于集中清理。
-      for (const entry of circles.collections) {
-        this.root.add(entry.collection);
-      }
+    const pendingHandle = this.renderedTilePromises.get(renderTile.key);
+    if (pendingHandle) {
+      return pendingHandle;
     }
 
-    const renderedTileHandle: RenderedTileHandle = {
-      byteLength: circles?.byteLength ?? 0,
-      circles,
-      key: renderTile.key,
-    };
-    this.renderedTileHandles.set(renderedTileHandle.key, renderedTileHandle);
-    this.scene.requestRender();
-    return renderedTileHandle;
+    const renderedTilePromise = this.getFeatureTile(sourceId, level, x, y)
+      .then((featureTile) => {
+        if (this.destroyed || renderTile.epoch !== this.styleEpoch || !this.styleSet) {
+          return createEmptyRenderedTileHandle(renderTile.key);
+        }
+
+        const circles = createCircleTileHandle({
+          featureTile,
+          level,
+          style: this.styleSet.style,
+          x,
+          y,
+        });
+
+        if (circles) {
+          // 后端生成的 collection 统一挂到 scene-layer 根节点下，便于集中清理。
+          for (const entry of circles.collections) {
+            this.root.add(entry.collection);
+          }
+        }
+
+        const renderedTileHandle: RenderedTileHandle = {
+          byteLength: circles?.byteLength ?? 0,
+          circles,
+          key: renderTile.key,
+        };
+        this.renderedTileHandles.set(renderedTileHandle.key, renderedTileHandle);
+        this.scene.requestRender();
+        return renderedTileHandle;
+      })
+      .finally(() => {
+        this.renderedTilePromises.delete(renderTile.key);
+      });
+
+    this.renderedTilePromises.set(renderTile.key, renderedTilePromise);
+    return renderedTilePromise;
+  }
+
+  async requestTileHint(level: number, x: number, y: number) {
+    const sourceIds = getRenderableSourceIds(this.layerFamilies);
+    await Promise.all(sourceIds.map(sourceId => this.requestSourceTileHint(sourceId, level, x, y)));
   }
 
   isDestroyed() {
@@ -206,6 +230,7 @@ export class SceneLayer {
     }
     this.sourceCaches.clear();
     this.clearRenderedTileHandles();
+    this.renderedTilePromises.clear();
     this.featureTilePromises.clear();
     this.featureTiles.clear();
     this.layerFamilies = [];
@@ -252,6 +277,40 @@ export class SceneLayer {
     }
     this.renderedTileHandles.clear();
   }
+
+  private async requestSourceTileHint(sourceId: string, level: number, x: number, y: number) {
+    const renderTile = this.getRenderTile(sourceId, level, x, y);
+    this.tileManager.markCandidate(renderTile.key);
+    this.tileManager.markSelected(renderTile.key);
+
+    const cachedHandle = this.renderedTileHandles.get(renderTile.key);
+    if (cachedHandle) {
+      if (cachedHandle.byteLength > 0) {
+        this.tileManager.markShown(renderTile.key);
+      }
+      return;
+    }
+
+    this.tileManager.setBlockers(renderTile.key, {
+      requesting: true,
+    });
+
+    try {
+      const renderedTileHandle = await this.ensureRenderedTile(sourceId, level, x, y);
+      this.tileManager.setBlockers(renderTile.key, {
+        requesting: false,
+      });
+      if (renderedTileHandle.byteLength > 0) {
+        this.tileManager.markShown(renderTile.key);
+      }
+    }
+    catch (error) {
+      this.tileManager.setBlockers(renderTile.key, {
+        requesting: false,
+      });
+      throw error;
+    }
+  }
 }
 
 function createParsedSourceCache(
@@ -276,6 +335,13 @@ function createParsedSourceCache(
   return undefined;
 }
 
+function createEmptyRenderedTileHandle(key: string): RenderedTileHandle {
+  return {
+    byteLength: 0,
+    key,
+  };
+}
+
 function destroyRenderedTileHandle(
   root: PrimitiveCollection,
   handle: RenderedTileHandle,
@@ -293,4 +359,8 @@ function destroyRenderedTileHandle(
 
     entry.collection.destroy();
   }
+}
+
+function getRenderableSourceIds(layerFamilies: LayerFamily[]) {
+  return [...new Set(layerFamilies.map(layerFamily => layerFamily.sourceId))];
 }

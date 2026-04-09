@@ -131,4 +131,118 @@ describe('scene-layer-render', () => {
 
     sceneLayer.destroy();
   });
+
+  it('deduplicates in-flight rendered tile creation for the same tile', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    const [firstHandle, secondHandle] = await Promise.all([
+      sceneLayer.ensureRenderedTile('places', 0, 0, 0),
+      sceneLayer.ensureRenderedTile('places', 0, 0, 0),
+    ]);
+
+    const root = scene.primitives.get(0) as PrimitiveCollection;
+    expect(firstHandle).toBe(secondHandle);
+    expect(root.length).toBe(1);
+
+    sceneLayer.destroy();
+  });
+
+  it('marks a requested tile hint as shown after rendering completes', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    const renderTile = sceneLayer.getRenderTile('places', 0, 0, 0);
+    const pendingHint = sceneLayer.requestTileHint(0, 0, 0);
+
+    expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
+      blockers: {
+        parsing: false,
+        pick: false,
+        placement: false,
+        requesting: true,
+        uploading: false,
+      },
+      key: renderTile.key,
+    });
+
+    await pendingHint;
+
+    expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
+      blockers: {
+        parsing: false,
+        pick: false,
+        placement: false,
+        requesting: false,
+        uploading: false,
+      },
+      eligibleForUnloading: false,
+      key: renderTile.key,
+      state: 'shown',
+    });
+
+    sceneLayer.destroy();
+  });
 });
