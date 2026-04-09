@@ -7,15 +7,20 @@ describe('fill-bucket-builder-integration', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockPolygonFeature([
@@ -43,15 +48,20 @@ describe('fill-bucket-builder-integration', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockPolygonFeature([
@@ -64,9 +74,9 @@ describe('fill-bucket-builder-integration', () => {
         ],
         [
           { x: 50, y: 50 },
-          { x: 150, y: 50 },
-          { x: 150, y: 150 },
           { x: 50, y: 150 },
+          { x: 150, y: 150 },
+          { x: 150, y: 50 },
           { x: 50, y: 50 },
         ],
       ]);

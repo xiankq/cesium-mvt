@@ -1,5 +1,5 @@
 import type { VectorTileFeature } from '@mapbox/vector-tile';
-import type { TilingScheme } from 'cesium';
+import type { TileProjectionData } from '../geometry/tile-projection';
 import type { Bucket, CircleBucketData, CircleBucketStats } from './bucket-types';
 import { createTileProjectionContext, projectTilePoint } from '../geometry/tile-projection';
 import { calculateBucketByteLength, calculateFeatureIndexByteLength } from './bucket-types';
@@ -9,10 +9,8 @@ export interface BucketBuilderOptions {
   familyId: string;
   layerIds: string[];
   sourceLayer?: string;
-  tilingScheme: TilingScheme;
-  level: number;
-  x: number;
-  y: number;
+  tileProjection: TileProjectionData;
+  tileKey: string;
 }
 
 export class CircleBucketBuilder {
@@ -49,12 +47,7 @@ export class CircleBucketBuilder {
     this.familyId = options.familyId;
     this.layerIds = options.layerIds;
     this.sourceLayer = options.sourceLayer;
-    this.projectionContext = createTileProjectionContext(
-      options.level,
-      options.x,
-      options.y,
-      options.tilingScheme,
-    );
+    this.projectionContext = createTileProjectionContext(options.tileProjection);
   }
 
   addFeature(feature: VectorTileFeature, localId: number): void {

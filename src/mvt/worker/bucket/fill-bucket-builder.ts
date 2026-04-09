@@ -1,6 +1,8 @@
 import type { VectorTileFeature } from '@mapbox/vector-tile';
-import type { TilingScheme } from 'cesium';
+import type { Cartesian3 } from 'cesium';
+import type { TileProjectionData } from '../geometry/tile-projection';
 import type { Bucket, FillBucketData, FillBucketStats } from './bucket-types';
+import { classifyRings } from '@mapbox/vector-tile';
 import earcut from 'earcut';
 import { subdivideRing } from '../geometry/line-subdivision';
 import { createTileProjectionContext, projectTilePoint } from '../geometry/tile-projection';
@@ -11,11 +13,11 @@ export interface BucketBuilderOptions {
   familyId: string;
   layerIds: string[];
   sourceLayer?: string;
-  tilingScheme: TilingScheme;
-  level: number;
-  x: number;
-  y: number;
+  tileProjection: TileProjectionData;
+  tileKey: string;
 }
+
+const DEFAULT_MAX_CHORD_ERROR = 10000;
 
 export class FillBucketBuilder {
   readonly type = 'fill' as const;
@@ -56,12 +58,7 @@ export class FillBucketBuilder {
     this.familyId = options.familyId;
     this.layerIds = options.layerIds;
     this.sourceLayer = options.sourceLayer;
-    this.projectionContext = createTileProjectionContext(
-      options.level,
-      options.x,
-      options.y,
-      options.tilingScheme,
-    );
+    this.projectionContext = createTileProjectionContext(options.tileProjection);
   }
 
   addFeature(feature: VectorTileFeature, localId: number): void {
@@ -76,52 +73,66 @@ export class FillBucketBuilder {
     });
 
     const geometry = feature.loadGeometry();
-    const projectedRings: Array<Array<{ x: number; y: number; z: number }>> = [];
+    const classifiedRings = classifyRings(geometry);
 
-    for (const ring of geometry) {
-      const projectedRing: Array<{ x: number; y: number; z: number }> = [];
+    for (const polygonRings of classifiedRings) {
+      this.addPolygon(polygonRings, localId);
+    }
+  }
 
+  private addPolygon(
+    rings: Array<Array<{ x: number; y: number }>>,
+    localId: number,
+  ): void {
+    const normalizedRings = rings
+      .map(ring => this.normalizeRing(ring))
+      .filter(ring => ring.length >= 3);
+
+    if (normalizedRings.length === 0) {
+      return;
+    }
+
+    const projectedRings: Array<Array<Cartesian3>> = [];
+
+    for (const ring of normalizedRings) {
+      const projectedRing: Cartesian3[] = [];
       for (const point of ring) {
         const projected = projectTilePoint(point, this.extent, this.projectionContext);
-        projectedRing.push({
-          x: projected.x,
-          y: projected.y,
-          z: projected.z,
-        });
+        projectedRing.push(projected);
       }
-
-      const subdivided = subdivideRing(
-        projectedRing.map(p => ({ x: p.x, y: p.y, z: p.z } as any)),
-        10,
-      );
-
-      projectedRings.push(subdivided.map(p => ({ x: p.x, y: p.y, z: p.z })));
+      const subdividedRing = subdivideRing(projectedRing, DEFAULT_MAX_CHORD_ERROR);
+      projectedRings.push(subdividedRing);
     }
 
     const flatPositions: number[] = [];
     const flatHoles: number[] = [];
-    const flatPositions2D: number[] = [];
+    const triangulationPositions: number[] = [];
     let vertexOffset = 0;
 
-    for (let i = 0; i < projectedRings.length; i++) {
-      const ring = projectedRings[i];
+    for (let ringIndex = 0; ringIndex < projectedRings.length; ringIndex++) {
+      const ring = projectedRings[ringIndex];
 
-      if (i > 0) {
+      if (ringIndex > 0) {
         flatHoles.push(vertexOffset);
       }
 
       for (const vertex of ring) {
         flatPositions.push(vertex.x, vertex.y, vertex.z);
-        flatPositions2D.push(vertex.x, vertex.y);
+        triangulationPositions.push(vertex.x, vertex.y);
         this.featureIds.push(localId);
         vertexOffset++;
       }
     }
 
-    const indices = earcut(flatPositions2D, flatHoles.length > 0 ? flatHoles : undefined, 2);
+    const indices = earcut(triangulationPositions, flatHoles.length > 0 ? flatHoles : undefined, 2);
 
+    if (indices.length === 0) {
+      return;
+    }
+
+    const baseIndex = this.positions.length / 3;
     for (const index of indices) {
-      this.triangles.push(this.positions.length / 3 + index);
+      this.triangles.push(baseIndex + index);
     }
 
     this.positions.push(...flatPositions);
@@ -132,6 +143,20 @@ export class FillBucketBuilder {
     this._stats.vertexCount += vertexOffset;
     this._stats.triangleCount += indices.length / 3;
     this._stats.holeCount += flatHoles.length;
+  }
+
+  private normalizeRing(ring: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+    if (ring.length < 2) {
+      return ring;
+    }
+
+    const firstPoint = ring[0];
+    const lastPoint = ring[ring.length - 1];
+    if (firstPoint.x !== lastPoint.x || firstPoint.y !== lastPoint.y) {
+      return ring;
+    }
+
+    return ring.slice(0, -1);
   }
 
   build(): Bucket {

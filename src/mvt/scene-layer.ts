@@ -3,38 +3,37 @@ import type {
   Rectangle,
   Scene,
 } from 'cesium';
-import type { FeatureTile } from './render/feature-tile';
+import type { BucketRenderedTileHandle } from './render/bucket-rendered-tile';
 import type { RenderEntry } from './render/render-order';
 import type { RenderTile } from './render/render-tile';
-import type { RenderedTileHandle } from './render/rendered-tile';
 import type { TileFrameResult } from './source/tile-manager';
 import type { TileCoordinate } from './source/tile-request';
 import type { LayerFamily } from './style/layer-family';
 import type { StyleSet } from './style/style-set';
 import type { TileAvailability } from './tile-selection';
 import type { SceneViewTileSelection } from './view-state';
+import type { ParsedTileResult } from './worker/bucket/bucket-types';
 import { PrimitiveCollection, WebMercatorTilingScheme } from 'cesium';
+import {
+  createBucketRenderedTileHandle,
+  createEmptyBucketRenderedTileHandle,
+  destroyBucketRenderedTileHandle,
+  mountBucketRenderedTileHandle,
+  setBucketRenderedTileVisibility,
+} from './render/bucket-rendered-tile';
 import { createRenderOrder } from './render/render-order';
 import {
   compileRenderTile,
   createRenderTileKey,
   createScopedRenderTileKey,
 } from './render/render-tile';
-import {
-  createEmptyRenderedTileHandle,
-  createRenderedTileHandle,
-  destroyRenderedTileHandle,
-  mountRenderedTileHandle,
-
-  setRenderedTileVisibility,
-} from './render/rendered-tile';
 import { GeojsonSourceCache } from './source/geojson-source-cache';
 import { SourceCache } from './source/source-cache';
 import { TileManager } from './source/tile-manager';
 import { createLayerFamilies } from './style/layer-family';
 import { resolveTileSelection } from './tile-selection';
 import { collectSceneViewTileSelection } from './view-state';
-import { createFeatureTileDispatcher } from './worker/feature-tile-dispatcher';
+import { createBucketTileDispatcher } from './worker/bucket-tile-dispatcher';
 
 // SceneLayer 统一持有 Cesium 侧运行时对象：source cache、解析结果、
 // 渲染计划以及已挂载的 primitive 句柄。ImageryProvider 只把入口请求委托到这里。
@@ -47,7 +46,7 @@ interface TileSourceCache {
   updateSource: (source: SourceSpecification) => void;
 }
 
-interface PendingFeatureTileRequest {
+interface PendingBucketTileRequest {
   abortController: AbortController;
   cleanup: () => void;
 }
@@ -77,16 +76,16 @@ export class SceneLayer {
   private readonly tileWidth: number;
   private readonly tilingScheme: WebMercatorTilingScheme;
   private destroyed = false;
-  private readonly featureTileDispatcher = createFeatureTileDispatcher();
+  private readonly bucketTileDispatcher = createBucketTileDispatcher();
   private frameUpdateActive = false;
   private frameUpdatePending = true;
-  private readonly featureTileRequests = new Map<string, PendingFeatureTileRequest>();
-  private readonly featureTilePromises = new Map<string, Promise<FeatureTile>>();
-  private readonly featureTiles = new Map<string, FeatureTile>();
+  private readonly bucketTileRequests = new Map<string, PendingBucketTileRequest>();
+  private readonly bucketTilePromises = new Map<string, Promise<ParsedTileResult>>();
+  private readonly bucketTiles = new Map<string, ParsedTileResult>();
   private layerFamilies: LayerFamily[] = [];
   private lastViewSelectionKey?: string;
-  private readonly renderedTilePromises = new Map<string, Promise<RenderedTileHandle>>();
-  private readonly renderedTileHandles = new Map<string, RenderedTileHandle>();
+  private readonly renderedTilePromises = new Map<string, Promise<BucketRenderedTileHandle>>();
+  private readonly renderedTileHandles = new Map<string, BucketRenderedTileHandle>();
   private readonly renderTiles = new Map<string, RenderTile>();
   private renderOrder: RenderEntry[] = [];
   private styleSet?: StyleSet;
@@ -118,14 +117,13 @@ export class SceneLayer {
 
   updateStyle(styleSet: StyleSet) {
     this.styleSet = styleSet;
-    // styleEpoch 变化后，上一版样式派生出来的 render/feature cache 都要失效。
     this.styleEpoch += 1;
     this.layerFamilies = createLayerFamilies(styleSet.style);
     this.clearRenderedTileHandles();
-    this.cancelPendingFeatureTiles();
+    this.cancelPendingBucketTiles();
     this.renderedTilePromises.clear();
-    this.featureTilePromises.clear();
-    this.featureTiles.clear();
+    this.bucketTilePromises.clear();
+    this.bucketTiles.clear();
     this.renderOrder = createRenderOrder(styleSet.style, this.layerFamilies);
     this.renderTiles.clear();
     this.frameUpdatePending = true;
@@ -172,7 +170,7 @@ export class SceneLayer {
     return renderTile;
   }
 
-  async getFeatureTile(sourceId: string, level: number, x: number, y: number) {
+  async getBucketTile(sourceId: string, level: number, x: number, y: number) {
     if (!this.styleSet) {
       throw new Error('Style has not been initialized.');
     }
@@ -184,14 +182,14 @@ export class SceneLayer {
 
     const baseKey = createRenderTileKey(sourceId, level, x, y);
     const renderTileKey = createScopedRenderTileKey(baseKey, this.styleEpoch);
-    const cachedFeatureTile = this.featureTiles.get(renderTileKey);
-    if (cachedFeatureTile) {
-      return cachedFeatureTile;
+    const cachedBucketTile = this.bucketTiles.get(renderTileKey);
+    if (cachedBucketTile) {
+      return cachedBucketTile;
     }
 
-    const pendingFeatureTile = this.featureTilePromises.get(renderTileKey);
-    if (pendingFeatureTile) {
-      return pendingFeatureTile;
+    const pendingBucketTile = this.bucketTilePromises.get(renderTileKey);
+    if (pendingBucketTile) {
+      return pendingBucketTile;
     }
 
     const sourceTileKey = createRenderTileKey(sourceId, level, x, y);
@@ -200,7 +198,7 @@ export class SceneLayer {
       sourceCache.abortTile?.(sourceTileKey);
     };
     abortController.signal.addEventListener('abort', abortSourceRequest, { once: true });
-    this.featureTileRequests.set(renderTileKey, {
+    this.bucketTileRequests.set(renderTileKey, {
       abortController,
       cleanup: () => {
         abortController.signal.removeEventListener('abort', abortSourceRequest);
@@ -210,7 +208,8 @@ export class SceneLayer {
     const renderOrder = this.renderOrder;
     const style = this.styleSet.style;
     const styleEpoch = this.styleEpoch;
-    const featureTilePromise = sourceCache.requestTile({
+    const tilingScheme = this.tilingScheme;
+    const bucketTilePromise = sourceCache.requestTile({
       level,
       x,
       y,
@@ -224,22 +223,23 @@ export class SceneLayer {
           styleEpoch,
         });
       this.renderTiles.set(renderTile.key, renderTile);
-      return this.featureTileDispatcher.compile({
+      return this.bucketTileDispatcher.compile({
         renderTile,
         signal: abortController.signal,
         tileData: tile,
+        tilingScheme,
       });
-    }).then((featureTile) => {
-      this.featureTiles.set(featureTile.key, featureTile);
-      return featureTile;
+    }).then((bucketTile) => {
+      this.bucketTiles.set(bucketTile.key, bucketTile);
+      return bucketTile;
     }).finally(() => {
-      this.featureTileRequests.get(renderTileKey)?.cleanup();
-      this.featureTileRequests.delete(renderTileKey);
-      this.featureTilePromises.delete(renderTileKey);
+      this.bucketTileRequests.get(renderTileKey)?.cleanup();
+      this.bucketTileRequests.delete(renderTileKey);
+      this.bucketTilePromises.delete(renderTileKey);
     });
 
-    this.featureTilePromises.set(renderTileKey, featureTilePromise);
-    return featureTilePromise;
+    this.bucketTilePromises.set(renderTileKey, bucketTilePromise);
+    return bucketTilePromise;
   }
 
   async ensureRenderedTile(sourceId: string, level: number, x: number, y: number) {
@@ -259,21 +259,21 @@ export class SceneLayer {
       return pendingHandle;
     }
 
-    const renderedTilePromise = this.getFeatureTile(sourceId, level, x, y)
-      .then((featureTile) => {
+    const renderedTilePromise = this.getBucketTile(sourceId, level, x, y)
+      .then((bucketTile) => {
         if (this.destroyed || styleEpoch !== this.styleEpoch || !this.styleSet) {
-          return createEmptyRenderedTileHandle(renderTileKey);
+          return createEmptyBucketRenderedTileHandle(renderTileKey);
         }
 
-        const renderedTileHandle = createRenderedTileHandle({
-          featureTile,
+        const renderedTileHandle = createBucketRenderedTileHandle({
+          bucketTile,
           level,
           style: this.styleSet.style,
           tilingScheme: this.tilingScheme,
           x,
           y,
         });
-        mountRenderedTileHandle(this.root, renderedTileHandle);
+        mountBucketRenderedTileHandle(this.root, renderedTileHandle);
         this.renderedTileHandles.set(renderedTileHandle.key, renderedTileHandle);
         this.frameUpdatePending = true;
         if (renderedTileHandle.byteLength > 0) {
@@ -307,12 +307,12 @@ export class SceneLayer {
       sourceCache.destroy();
     }
     this.sourceCaches.clear();
-    this.cancelPendingFeatureTiles();
-    this.featureTileDispatcher.destroy();
+    this.cancelPendingBucketTiles();
+    this.bucketTileDispatcher.destroy();
     this.clearRenderedTileHandles();
     this.renderedTilePromises.clear();
-    this.featureTilePromises.clear();
-    this.featureTiles.clear();
+    this.bucketTilePromises.clear();
+    this.bucketTiles.clear();
     this.layerFamilies = [];
     this.renderTiles.clear();
     this.renderOrder = [];
@@ -351,9 +351,9 @@ export class SceneLayer {
     }
   }
 
-  private clearRenderedTileHandles() {
+  private clearRenderedTileHandles(): void {
     for (const handle of this.renderedTileHandles.values()) {
-      destroyRenderedTileHandle(this.root, handle);
+      destroyBucketRenderedTileHandle(this.root, handle);
     }
     this.renderedTileHandles.clear();
   }
@@ -367,7 +367,7 @@ export class SceneLayer {
         continue;
       }
 
-      sceneChanged = setRenderedTileVisibility(handle, false) || sceneChanged;
+      sceneChanged = setBucketRenderedTileVisibility(handle, false) || sceneChanged;
     }
 
     for (const key of frameResult.unloadableKeys) {
@@ -376,7 +376,7 @@ export class SceneLayer {
         continue;
       }
 
-      destroyRenderedTileHandle(this.root, handle);
+      destroyBucketRenderedTileHandle(this.root, handle);
       this.renderedTileHandles.delete(key);
       sceneChanged = handle.byteLength > 0 || sceneChanged;
     }
@@ -397,6 +397,7 @@ export class SceneLayer {
       tilingScheme: this.tilingScheme,
       viewportWidth: resolveSceneViewportWidth(this.scene),
     });
+
     if (!this.shouldUpdateFrame(tileSelection)) {
       return;
     }
@@ -427,6 +428,10 @@ export class SceneLayer {
     }
 
     if (!tileSelection && this.renderedTileHandles.size > 0) {
+      return true;
+    }
+
+    if (tileSelection && this.renderedTileHandles.size === 0) {
       return true;
     }
 
@@ -478,7 +483,7 @@ export class SceneLayer {
     const cachedHandle = this.renderedTileHandles.get(renderTileKey);
     if (cachedHandle) {
       if (cachedHandle.byteLength > 0) {
-        const visibilityChanged = setRenderedTileVisibility(cachedHandle, true);
+        const visibilityChanged = setBucketRenderedTileVisibility(cachedHandle, true);
         this.tileManager.markShown(renderTileKey);
         if (visibilityChanged) {
           this.scene.requestRender();
@@ -547,7 +552,7 @@ export class SceneLayer {
       return;
     }
 
-    const visibilityChanged = setRenderedTileVisibility(renderedTileHandle, true);
+    const visibilityChanged = setBucketRenderedTileVisibility(renderedTileHandle, true);
     this.tileManager.markShown(renderTileKey);
     if (visibilityChanged) {
       this.scene.requestRender();
@@ -561,11 +566,11 @@ export class SceneLayer {
     );
   }
 
-  private cancelPendingFeatureTiles(): void {
-    for (const request of this.featureTileRequests.values()) {
+  private cancelPendingBucketTiles(): void {
+    for (const request of this.bucketTileRequests.values()) {
       request.abortController.abort();
     }
-    this.featureTileRequests.clear();
+    this.bucketTileRequests.clear();
   }
 }
 

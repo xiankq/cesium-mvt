@@ -1,7 +1,8 @@
 import type { VectorTileFeature } from '@mapbox/vector-tile';
-import type { TilingScheme } from 'cesium';
+import type { TileProjectionData } from '../geometry/tile-projection';
 import type { Bucket, LineBucketData, LineBucketStats } from './bucket-types';
-import { subdivideRing } from '../geometry/line-subdivision';
+import { Cartesian3 } from 'cesium';
+import { subdivideLine } from '../geometry/line-subdivision';
 import { createTileProjectionContext, projectTilePoint } from '../geometry/tile-projection';
 import { calculateBucketByteLength, calculateFeatureIndexByteLength } from './bucket-types';
 
@@ -10,11 +11,11 @@ export interface BucketBuilderOptions {
   familyId: string;
   layerIds: string[];
   sourceLayer?: string;
-  tilingScheme: TilingScheme;
-  level: number;
-  x: number;
-  y: number;
+  tileProjection: TileProjectionData;
+  tileKey: string;
 }
+
+const DEFAULT_MAX_CHORD_ERROR = 10000;
 
 export class LineBucketBuilder {
   readonly type = 'line' as const;
@@ -52,16 +53,48 @@ export class LineBucketBuilder {
     this.familyId = options.familyId;
     this.layerIds = options.layerIds;
     this.sourceLayer = options.sourceLayer;
-    this.projectionContext = createTileProjectionContext(
-      options.level,
-      options.x,
-      options.y,
-      options.tilingScheme,
-    );
+    this.projectionContext = createTileProjectionContext(options.tileProjection);
   }
 
   addFeature(feature: VectorTileFeature, localId: number): void {
     if (feature.type !== 2) {
+      return;
+    }
+
+    const geometry = feature.loadGeometry();
+
+    let hasValidLine = false;
+    const tempPositions: number[] = [];
+    const tempVertexCounts: number[] = [];
+    const tempFeatureIds: number[] = [];
+    let tempPolylineCount = 0;
+    let tempTotalVertexCount = 0;
+
+    for (const line of geometry) {
+      if (line.length < 2) {
+        continue;
+      }
+
+      const projectedLine = this.projectAndSubdivideLine(line);
+      const vertexCount = projectedLine.length / 3;
+
+      if (vertexCount === 0) {
+        continue;
+      }
+
+      hasValidLine = true;
+
+      for (let i = 0; i < vertexCount; i++) {
+        tempPositions.push(projectedLine[i * 3], projectedLine[i * 3 + 1], projectedLine[i * 3 + 2]);
+        tempFeatureIds.push(localId);
+      }
+
+      tempVertexCounts.push(vertexCount);
+      tempTotalVertexCount += vertexCount;
+      tempPolylineCount += 1;
+    }
+
+    if (!hasValidLine) {
       return;
     }
 
@@ -71,36 +104,56 @@ export class LineBucketBuilder {
       type: 'line',
     });
 
-    const geometry = feature.loadGeometry();
-
-    for (const line of geometry) {
-      const projectedLine: Array<{ x: number; y: number; z: number }> = [];
-
-      for (const point of line) {
-        const projected = projectTilePoint(point, this.extent, this.projectionContext);
-        projectedLine.push({
-          x: projected.x,
-          y: projected.y,
-          z: projected.z,
-        });
-      }
-
-      const subdivided = subdivideRing(
-        projectedLine as any,
-        10,
-      );
-
-      for (const vertex of subdivided) {
-        this.positions.push(vertex.x, vertex.y, vertex.z);
-        this.featureIds.push(localId);
-      }
-
-      this.vertexCounts.push(subdivided.length);
-      this._stats.totalVertexCount += subdivided.length;
-    }
+    this.positions.push(...tempPositions);
+    this.vertexCounts.push(...tempVertexCounts);
+    this.featureIds.push(...tempFeatureIds);
 
     this._stats.featureCount += 1;
-    this._stats.polylineCount += geometry.length;
+    this._stats.polylineCount += tempPolylineCount;
+    this._stats.totalVertexCount += tempTotalVertexCount;
+  }
+
+  private projectAndSubdivideLine(line: Array<{ x: number; y: number }>): number[] {
+    const result: number[] = [];
+    const projectedPoints: Cartesian3[] = [];
+
+    for (const point of line) {
+      const projected = projectTilePoint(point, this.extent, this.projectionContext);
+      projectedPoints.push(projected);
+    }
+
+    let hasValidSegment = false;
+    const epsilon = 1e-10;
+    for (let i = 0; i < projectedPoints.length - 1; i++) {
+      const start = projectedPoints[i];
+      const end = projectedPoints[i + 1];
+
+      const distance = Cartesian3.distance(start, end);
+      if (distance > epsilon) {
+        hasValidSegment = true;
+        break;
+      }
+    }
+
+    if (!hasValidSegment) {
+      return [];
+    }
+
+    for (let i = 0; i < line.length - 1; i++) {
+      const start = projectedPoints[i];
+      const end = projectedPoints[i + 1];
+
+      const subdivided = subdivideLine(start, end, DEFAULT_MAX_CHORD_ERROR);
+
+      for (const point of subdivided.slice(0, -1)) {
+        result.push(point.x, point.y, point.z);
+      }
+    }
+
+    const lastPoint = projectedPoints[projectedPoints.length - 1];
+    result.push(lastPoint.x, lastPoint.y, lastPoint.z);
+
+    return result;
   }
 
   build(): Bucket {

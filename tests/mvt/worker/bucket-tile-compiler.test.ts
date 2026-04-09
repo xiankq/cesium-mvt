@@ -7,13 +7,20 @@ describe('bucket-tile-compiler', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const renderTile = createMockRenderTile();
       const tile = createMockParsedTile();
 
       const result = compileBucketTile({
         renderTile,
         tile,
-        tilingScheme,
+        tileProjection,
       });
 
       expect(result.buckets).toBeDefined();
@@ -27,13 +34,20 @@ describe('bucket-tile-compiler', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const renderTile = createMockRenderTile('fill');
       const tile = createMockParsedTile();
 
       const result = compileBucketTile({
         renderTile,
         tile,
-        tilingScheme,
+        tileProjection,
       });
 
       expect(result.buckets).toHaveLength(1);
@@ -45,13 +59,20 @@ describe('bucket-tile-compiler', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const renderTile = createMockRenderTile('line');
       const tile = createMockParsedTile();
 
       const result = compileBucketTile({
         renderTile,
         tile,
-        tilingScheme,
+        tileProjection,
       });
 
       expect(result.buckets).toHaveLength(1);
@@ -63,13 +84,20 @@ describe('bucket-tile-compiler', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const renderTile = createMockRenderTile('circle');
       const tile = createMockParsedTile();
 
       const result = compileBucketTile({
         renderTile,
         tile,
-        tilingScheme,
+        tileProjection,
       });
 
       expect(result.buckets).toHaveLength(1);

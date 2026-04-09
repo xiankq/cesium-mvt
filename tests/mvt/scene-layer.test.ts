@@ -316,28 +316,34 @@ describe('scene-layer', () => {
     vi.stubGlobal('fetch', fetchSpy);
 
     sceneLayer.updateStyle(createStyleSet(firstStyle));
-    const firstFeatureTile = await sceneLayer.getFeatureTile('base', 0, 0, 0);
+    const firstBucketTile = await sceneLayer.getBucketTile('base', 0, 0, 0);
 
-    expect(firstFeatureTile).toMatchObject({
+    expect(firstBucketTile).toMatchObject({
       epoch: 1,
-      geometryBatches: [
-        {
-          featureCount: 1,
+      buckets: [
+        expect.objectContaining({
           type: 'circle',
-        },
+        }),
       ],
       key: 'base/0/0/0@1',
     });
-    expect(await sceneLayer.getFeatureTile('base', 0, 0, 0)).toBe(firstFeatureTile);
+    expect(await sceneLayer.getBucketTile('base', 0, 0, 0)).toBe(firstBucketTile);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     sceneLayer.updateStyle(createStyleSet(secondStyle));
-    const secondFeatureTile = await sceneLayer.getFeatureTile('base', 0, 0, 0);
+    const secondBucketTile = await sceneLayer.getBucketTile('base', 0, 0, 0);
 
-    expect(secondFeatureTile).not.toBe(firstFeatureTile);
-    expect(secondFeatureTile).toMatchObject({
+    expect(secondBucketTile).not.toBe(firstBucketTile);
+    expect(secondBucketTile).toMatchObject({
       epoch: 2,
-      geometryBatches: [],
+      buckets: [
+        expect.objectContaining({
+          type: 'line',
+          stats: expect.objectContaining({
+            featureCount: 0,
+          }),
+        }),
+      ],
       key: 'base/0/0/0@2',
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -380,21 +386,19 @@ describe('scene-layer', () => {
     };
 
     sceneLayer.updateStyle(createStyleSet(style));
-    const featureTile = await sceneLayer.getFeatureTile('places', 0, 0, 0);
+    const bucketTile = await sceneLayer.getBucketTile('places', 0, 0, 0);
 
-    expect(featureTile).toMatchObject({
+    expect(bucketTile).toMatchObject({
       epoch: 1,
-      geometryBatches: [
-        {
-          featureCount: 1,
-          sourceId: 'places',
-          sourceLayer: '_geojson',
+      buckets: [
+        expect.objectContaining({
           type: 'circle',
-        },
+          sourceLayer: '_geojson',
+        }),
       ],
       key: 'places/0/0/0@1',
     });
-    expect(featureTile.geometryBatches[0]?.features[0]).toMatchObject({
+    expect(bucketTile.buckets[0]?.featureIndex.entries[0]).toMatchObject({
       properties: {
         name: 'poi-a',
       },

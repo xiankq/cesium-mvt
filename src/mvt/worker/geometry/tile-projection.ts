@@ -1,8 +1,3 @@
-import type {
-  Rectangle,
-  TilingScheme,
-  WebMercatorProjection,
-} from 'cesium';
 import {
   Cartesian3,
   Cartographic,
@@ -10,29 +5,37 @@ import {
   Ellipsoid,
 } from 'cesium';
 
-export interface TileProjectionContext {
-  level: number;
-  x: number;
-  y: number;
-  projection: WebMercatorProjection;
-  tileRectangle: Rectangle;
+export interface TileProjectionData {
+  east: number;
+  north: number;
+  south: number;
+  west: number;
 }
 
-export function createTileProjectionContext(
+export interface TileProjectionContext {
+  tileRectangle: TileProjectionData;
+}
+
+export function createTileProjectionData(
   level: number,
   x: number,
   y: number,
-  tilingScheme: TilingScheme,
-): TileProjectionContext {
-  const tileRectangle = tilingScheme.tileXYToRectangle(x, y, level);
-  const projection = tilingScheme.projection as WebMercatorProjection;
-
+  tileXYToRectangle: (x: number, y: number, level: number) => { west: number; south: number; east: number; north: number },
+): TileProjectionData {
+  const rect = tileXYToRectangle(x, y, level);
   return {
-    level,
-    x,
-    y,
-    projection,
-    tileRectangle,
+    east: rect.east,
+    north: rect.north,
+    south: rect.south,
+    west: rect.west,
+  };
+}
+
+export function createTileProjectionContext(
+  data: TileProjectionData,
+): TileProjectionContext {
+  return {
+    tileRectangle: data,
   };
 }
 
@@ -43,12 +46,25 @@ export function projectTilePoint(
 ): Cartesian3 {
   const { tileRectangle } = context;
 
+  if (!isValidNumber(tileRectangle.west) || !isValidNumber(tileRectangle.south)
+    || !isValidNumber(tileRectangle.east) || !isValidNumber(tileRectangle.north)) {
+    return new Cartesian3(0, 0, 0);
+  }
+
   const u = CesiumMath.clamp(point.x / extent, 0, 1);
   const v = CesiumMath.clamp(point.y / extent, 0, 1);
 
   const longitude = CesiumMath.lerp(tileRectangle.west, tileRectangle.east, u);
   const latitude = CesiumMath.lerp(tileRectangle.south, tileRectangle.north, 1 - v);
 
+  if (!isValidNumber(longitude) || !isValidNumber(latitude)) {
+    return new Cartesian3(0, 0, 0);
+  }
+
   const cartographic = new Cartographic(longitude, latitude, 0);
   return Ellipsoid.WGS84.cartographicToCartesian(cartographic, new Cartesian3());
+}
+
+function isValidNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }

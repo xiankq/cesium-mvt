@@ -31,7 +31,7 @@ self.addEventListener('message', (event: MessageEvent<BucketTileWorkerMessage>) 
       const bucketTile = compileBucketTileFromData({
         renderTile: compileMessage.renderTile,
         tileData: compileMessage.tileData,
-        tilingScheme: compileMessage.tilingScheme,
+        tileProjection: compileMessage.tileProjection,
       });
       if (cancelledRequestIds.has(compileMessage.id)) {
         cancelledRequestIds.delete(compileMessage.id);

@@ -55,6 +55,18 @@ export function createBucketFillTileHandle({
     const stats = bucket.stats as FillBucketStats;
     const data = bucket.data as FillBucketData;
 
+    if (stats.vertexCount === 0 || data.positions.length === 0) {
+      continue;
+    }
+
+    if (!validateFillBucketData(data)) {
+      continue;
+    }
+
+    if (!validatePositions(data.positions)) {
+      continue;
+    }
+
     for (const layerId of bucket.layerIds) {
       const layer = layersById.get(layerId);
       if (!layer) {
@@ -63,29 +75,25 @@ export function createBucketFillTileHandle({
 
       const collection = new BufferPolygonCollection({
         holeCountMax: stats.holeCount || 0,
-        primitiveCountMax: stats.polygonCount || 0,
+        primitiveCountMax: stats.polygonCount || 1,
         triangleCountMax: stats.triangleCount || 0,
         vertexCountMax: stats.vertexCount || 0,
       });
       const flyweight = new BufferPolygon();
       const material = createFillMaterial(layer);
 
-      const featureGroups = groupByFeature(data);
-
-      for (const group of featureGroups) {
-        collection.add({
-          holes: group.holes,
-          material,
-          positions: group.positions,
-          triangles: group.triangles,
-        }, flyweight);
-      }
+      collection.add({
+        holes: data.holes,
+        material,
+        positions: data.positions,
+        triangles: data.triangles,
+      }, flyweight);
 
       collections.push({
         byteLength: collection.byteLength,
         collection,
         layerId,
-        polygonCount: stats.polygonCount || 0,
+        polygonCount: stats.polygonCount || 1,
       });
     }
   }
@@ -102,6 +110,31 @@ export function createBucketFillTileHandle({
     collections,
     key: bucketTile.key,
   };
+}
+
+function validateFillBucketData(data: FillBucketData): boolean {
+  if (!data.positions || !(data.positions instanceof Float64Array)) {
+    return false;
+  }
+  if (!data.triangles || !(data.triangles instanceof Uint32Array)) {
+    return false;
+  }
+  if (!data.holes || !(data.holes instanceof Uint32Array)) {
+    return false;
+  }
+  if (!data.featureIds || !(data.featureIds instanceof Float32Array)) {
+    return false;
+  }
+  return true;
+}
+
+function validatePositions(positions: Float64Array): boolean {
+  for (let i = 0; i < positions.length; i++) {
+    if (!Number.isFinite(positions[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isFillBucket(bucket: Bucket): bucket is Bucket & { data: FillBucketData } {
@@ -158,78 +191,4 @@ function applyOpacity(color: Color, opacity: number) {
 
 function clampOpacity(value: number) {
   return Math.min(1, Math.max(0, value));
-}
-
-interface FeatureGroup {
-  holes: Uint32Array;
-  positions: Float64Array;
-  triangles: Uint32Array;
-}
-
-function groupByFeature(data: FillBucketData): FeatureGroup[] {
-  const featureIds = data.featureIds;
-  const positions = data.positions;
-  const triangles = data.triangles;
-  const holes = data.holes;
-
-  const featureIdSet = new Set<number>();
-  for (let i = 0; i < featureIds.length; i++) {
-    featureIdSet.add(featureIds[i]);
-  }
-
-  const sortedFeatureIds = Array.from(featureIdSet).sort((a, b) => a - b);
-
-  const groups: FeatureGroup[] = [];
-
-  for (const featureId of sortedFeatureIds) {
-    const vertexIndices: number[] = [];
-    for (let i = 0; i < featureIds.length; i++) {
-      if (featureIds[i] === featureId) {
-        vertexIndices.push(i);
-      }
-    }
-
-    const indexMap = new Map<number, number>();
-    const newPositions: number[] = [];
-    for (let i = 0; i < vertexIndices.length; i++) {
-      const oldIndex = vertexIndices[i];
-      indexMap.set(oldIndex, i);
-
-      newPositions.push(
-        positions[oldIndex * 3],
-        positions[oldIndex * 3 + 1],
-        positions[oldIndex * 3 + 2],
-      );
-    }
-
-    const newTriangles: number[] = [];
-    for (let i = 0; i < triangles.length; i += 3) {
-      const idx0 = triangles[i];
-      const idx1 = triangles[i + 1];
-      const idx2 = triangles[i + 2];
-
-      if (featureIds[idx0] === featureId && featureIds[idx1] === featureId && featureIds[idx2] === featureId) {
-        newTriangles.push(
-          indexMap.get(idx0)!,
-          indexMap.get(idx1)!,
-          indexMap.get(idx2)!,
-        );
-      }
-    }
-
-    const newHoles: number[] = [];
-    for (const holeIndex of holes) {
-      if (holeIndex < vertexIndices.length) {
-        newHoles.push(holeIndex);
-      }
-    }
-
-    groups.push({
-      holes: new Uint32Array(newHoles),
-      positions: new Float64Array(newPositions),
-      triangles: new Uint32Array(newTriangles),
-    });
-  }
-
-  return groups;
 }

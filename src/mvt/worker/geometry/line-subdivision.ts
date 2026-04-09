@@ -9,6 +9,10 @@ export function subdivideLine(
     return [start];
   }
 
+  if (!isValidCartesian3(start) || !isValidCartesian3(end)) {
+    return [start, end];
+  }
+
   const distance = Cartesian3.distance(start, end);
 
   if (distance < maxChordError * 2) {
@@ -18,7 +22,7 @@ export function subdivideLine(
   const ellipsoidMaximumRadius = Ellipsoid.WGS84.maximumRadius;
 
   const chordErrorRatio = maxChordError / ellipsoidMaximumRadius;
-  const subdivisionAngle = 2 * Math.acos(1 - chordErrorRatio);
+  const subdivisionAngle = 2 * Math.acos(Math.max(-1, Math.min(1, 1 - chordErrorRatio)));
   const subdivisions = Math.ceil(Math.PI / subdivisionAngle);
 
   const actualSubdivisions = Math.max(2, Math.min(subdivisions, Math.floor(distance / maxChordError)));
@@ -35,13 +39,16 @@ export function subdivideLine(
     // 归一化和缩放是必要的：
     // lerp产生的是弦上的点（在地球内部），不是弧上的点（在地球表面）
     // 需要通过归一化+缩放将点投影回椭球表面
-    const normalized = Cartesian3.normalize(point, new Cartesian3());
-    const scaled = Cartesian3.multiplyByScalar(
-      normalized,
-      Ellipsoid.WGS84.maximumRadius,
-      new Cartesian3(),
-    );
-    points.push(scaled);
+    const magnitude = Cartesian3.magnitude(point);
+    if (magnitude > 0) {
+      const normalized = Cartesian3.normalize(point, new Cartesian3());
+      const scaled = Cartesian3.multiplyByScalar(
+        normalized,
+        Ellipsoid.WGS84.maximumRadius,
+        new Cartesian3(),
+      );
+      points.push(scaled);
+    }
   }
   points.push(end);
 
@@ -66,4 +73,12 @@ export function subdivideRing(
   subdivided.push(ring[ring.length - 1]);
 
   return subdivided;
+}
+
+function isValidCartesian3(point: Cartesian3): boolean {
+  return isValidNumber(point.x) && isValidNumber(point.y) && isValidNumber(point.z);
+}
+
+function isValidNumber(value: number): boolean {
+  return Number.isFinite(value);
 }

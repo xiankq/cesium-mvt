@@ -7,15 +7,20 @@ describe('circle-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new CircleBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/circle/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       expect(builder.type).toBe('circle');
@@ -28,15 +33,20 @@ describe('circle-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new CircleBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/circle/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockPointFeature({ x: 100, y: 100 });
@@ -51,15 +61,20 @@ describe('circle-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new CircleBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/circle/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockLineFeature([
@@ -78,15 +93,20 @@ describe('circle-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new CircleBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/circle/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockPointFeature({ x: 100, y: 100 });

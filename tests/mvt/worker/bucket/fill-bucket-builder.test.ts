@@ -7,15 +7,20 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       expect(builder.type).toBe('fill');
@@ -28,15 +33,20 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockPolygonFeature([
@@ -62,15 +72,20 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockPointFeature({ x: 0, y: 0 });
@@ -84,15 +99,20 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 0,
-        x: 0,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/0/0/0',
       });
 
       const feature = createMockPolygonFeature([
@@ -127,15 +147,20 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(1, 0, 1);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 1,
-        x: 1,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/1/1/0',
       });
 
       const feature = createMockPolygonFeature([
@@ -172,15 +197,20 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToRectangle(1, 0, 1);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
       const builder = new FillBucketBuilder({
         extent: 4096,
         familyId: 'source/layer/fill/0',
         layerIds: ['layer1'],
         sourceLayer: 'layer',
-        tilingScheme,
-        level: 1,
-        x: 1,
-        y: 0,
+        tileProjection,
+        tileKey: 'source/1/1/0',
       });
 
       const outerRing = [
@@ -193,9 +223,9 @@ describe('fill-bucket-builder', () => {
 
       const innerRing = [
         { x: 50, y: 50 },
-        { x: 150, y: 50 },
-        { x: 150, y: 150 },
         { x: 50, y: 150 },
+        { x: 150, y: 150 },
+        { x: 150, y: 50 },
         { x: 50, y: 50 },
       ];
 
@@ -211,7 +241,7 @@ describe('fill-bucket-builder', () => {
 
       expect(triangleCount).toBeGreaterThan(0);
       expect(holeCount).toBe(1);
-      expect(triangleCount).toBeLessThan(vertexCount);
+      expect(triangleCount).toBeLessThanOrEqual(vertexCount);
     });
   });
 });

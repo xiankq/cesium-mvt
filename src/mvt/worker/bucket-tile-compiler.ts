@@ -1,7 +1,7 @@
-import type { TilingScheme } from 'cesium';
 import type { GeometryBatch, RenderTile } from '../render/render-tile';
 import type { ParsedTile } from '../source/vector-tile';
 import type { ParsedTileResult } from './bucket/bucket-types';
+import type { TileProjectionData } from './geometry/tile-projection';
 import { getSourceLayer, parseVectorTile } from '../source/vector-tile';
 import { CircleBucketBuilder } from './bucket/circle-bucket-builder';
 import { FillBucketBuilder } from './bucket/fill-bucket-builder';
@@ -10,13 +10,13 @@ import { LineBucketBuilder } from './bucket/line-bucket-builder';
 export interface CompileBucketTileOptions {
   renderTile: RenderTile;
   tile: ParsedTile;
-  tilingScheme: TilingScheme;
+  tileProjection: TileProjectionData;
 }
 
 export interface CompileBucketTileFromDataOptions {
   renderTile: RenderTile;
   tileData: ArrayBuffer;
-  tilingScheme: TilingScheme;
+  tileProjection: TileProjectionData;
 }
 
 export function compileBucketTileFromData(
@@ -25,20 +25,20 @@ export function compileBucketTileFromData(
   return compileBucketTile({
     renderTile: options.renderTile,
     tile: parseVectorTile(options.tileData),
-    tilingScheme: options.tilingScheme,
+    tileProjection: options.tileProjection,
   });
 }
 
 export function compileBucketTile(
   options: CompileBucketTileOptions,
 ): ParsedTileResult {
-  const { renderTile, tile, tilingScheme } = options;
+  const { renderTile, tile, tileProjection } = options;
 
   const buckets: ParsedTileResult['buckets'] = [];
   let totalByteLength = 0;
 
   for (const batch of renderTile.geometryBatches) {
-    const bucket = compileGeometryBatch(batch, tile, tilingScheme, renderTile.key);
+    const bucket = compileGeometryBatch(batch, tile, tileProjection, renderTile.key);
     if (bucket) {
       buckets.push(bucket);
       totalByteLength += bucket.stats.byteLength;
@@ -56,7 +56,7 @@ export function compileBucketTile(
 function compileGeometryBatch(
   batch: GeometryBatch,
   tile: ParsedTile,
-  tilingScheme: TilingScheme,
+  tileProjection: TileProjectionData,
   tileKey: string,
 ) {
   if (!batch.sourceLayer) {
@@ -68,7 +68,7 @@ function compileGeometryBatch(
     return undefined;
   }
 
-  const builder = createBucketBuilder(batch, sourceLayer.extent, tilingScheme, tileKey);
+  const builder = createBucketBuilder(batch, sourceLayer.extent, tileProjection, tileKey);
   if (!builder) {
     return undefined;
   }
@@ -84,20 +84,16 @@ function compileGeometryBatch(
 function createBucketBuilder(
   batch: GeometryBatch,
   extent: number,
-  tilingScheme: TilingScheme,
+  tileProjection: TileProjectionData,
   tileKey: string,
 ) {
-  const { level, x, y } = parseTileCoordinateFromKey(tileKey);
-
   const options = {
     extent,
     familyId: batch.familyId,
     layerIds: batch.layerIds,
     sourceLayer: batch.sourceLayer,
-    tilingScheme,
-    level,
-    x,
-    y,
+    tileProjection,
+    tileKey,
   };
 
   switch (batch.type) {
@@ -110,23 +106,4 @@ function createBucketBuilder(
     default:
       return undefined;
   }
-}
-
-function parseTileCoordinateFromKey(key: string) {
-  const scopedKey = key.split('@')[0];
-  const parts = scopedKey.split('/');
-
-  if (parts.length < 4) {
-    return { level: 0, x: 0, y: 0 };
-  }
-
-  const level = Number(parts[parts.length - 3]);
-  const x = Number(parts[parts.length - 2]);
-  const y = Number(parts[parts.length - 1]);
-
-  if (!Number.isInteger(level) || !Number.isInteger(x) || !Number.isInteger(y)) {
-    return { level: 0, x: 0, y: 0 };
-  }
-
-  return { level, x, y };
 }
