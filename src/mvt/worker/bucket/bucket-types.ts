@@ -97,6 +97,17 @@ export function calculateBucketByteLength(stats: GeometryBucketStats): number {
   }
 }
 
+/**
+ * 计算FeatureIndex的字节长度估算值
+ *
+ * 估算依据：
+ * - FeatureIndexEntry包含：
+ *   - id: number | undefined (约8 bytes)
+ *   - properties: Record<string, unknown> (变长，平均约150 bytes)
+ *   - type: 'point' | 'line' | 'polygon' (约10 bytes)
+ * - 总计约170 bytes，预留30 bytes用于序列化开销
+ * - 最终估算值：200 bytes per entry
+ */
 export function calculateFeatureIndexByteLength(entryCount: number): number {
   return entryCount * 200;
 }
