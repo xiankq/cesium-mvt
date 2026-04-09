@@ -17,7 +17,7 @@
 
 ### TODO 列表
 
-- [ ] **创建项目目录结构**
+- [x] **创建项目目录结构**
 
   ```
   src/mvt/
@@ -36,28 +36,28 @@
     maplibre-port/
   ```
 
-- [ ] **实现 StyleImageryProvider 基础框架**
+- [x] **实现 StyleImageryProvider 基础框架**
   - 接受 style url 或 style json
   - 实现 `requestImage` 返回透明占位图像
   - 维护 `solid-image-cache` 按背景色复用 1x1 图片
   - 对外暴露 `ImageryProvider` 语义
 
-- [ ] **实现 style-loader**
+- [x] **实现 style-loader**
   - 拉取 style json
   - 解析相对路径
   - 补齐 source/sprite/glyph 资源定位
   - 解析 source、sprite、glyph、tilejson
 
-- [ ] **实现 scene-layer 基础壳**
+- [x] **实现 scene-layer 基础壳**
   - 初始化到 `scene.primitives`
   - 与 provider 建立引用关系
   - 实现 `preRender` / `postRender` 钩子
 
-- [ ] **建立生命周期管理**
+- [x] **建立生命周期管理**
   - provider destroy 时释放所有资源
   - 断开 provider 与 viewer/scene 的引用
 
-- [ ] **验收标准**
+- [x] **验收标准**
   - viewer 中可成功加载 style
   - scene layer 正常初始化与销毁
   - requestRender 模式下不会卡死
@@ -68,29 +68,29 @@
 
 ### TODO 列表
 
-- [ ] **实现 worker tile parse**
+- [x] **实现 worker tile parse**
   - PBF 解码成 feature
   - 按 style layer family 构建 bucket 中间结果
   - 输出 bucket stats 和 typed arrays
   - 输出不要带 WebGL 对象
 
-- [ ] **实现 fill/line/circle bucket builder**
+- [x] **实现 fill/line/circle bucket builder**
   - fill bucket builder
   - line bucket builder
   - circle bucket builder
 
-- [ ] **实现 globe 投影与几何细分**
+- [x] **实现 globe 投影与几何细分**
   - 所有 line 与 fill 边界在投影到 globe 前做自适应细分
   - 细分条件基于 chord error、角度变化或 screen-space error
   - 同一 tile 边界与相邻 tile 使用一致规则，避免裂缝
 
-- [ ] **实现 Buffer 后端**
+- [x] **实现 Buffer 后端**
   - `BufferPolygonCollection` 承接 fill
   - `BufferPolylineCollection` 承接基础 line
   - `BufferPointCollection` 承接 circle
   - worker 先做统计，主线程一次性按精确容量分配 collection
 
-- [ ] **实现 tile buffer 与裁剪策略**
+- [x] **实现 tile buffer 与裁剪策略**
   - parse 保留 buffer 区域几何
   - render 视需要在 tile bounds 内裁剪
 
@@ -98,7 +98,7 @@
   - scene 背景色或专用全屏 pass
   - 不应走 tile 几何
 
-- [ ] **验收标准**
+- [x] **验收标准**
   - 能正确渲染开源 bright style 中的基础地物
   - tile 切换无明显闪烁
   - cache 可工作
@@ -236,37 +236,45 @@
 - `hidden`：当前帧不再 `shown`，但内容仍保留在 cache 中
 - `eligible-for-unloading`：当前帧未 `touched` 且无外部占用，才允许真正释放
 
+### Fallback 机制
+
+当目标层级的瓦片不可用时，需要使用祖先瓦片作为 fallback：
+
+- **查找策略**：从目标瓦片的父级开始向上查找，跳过 `'empty'` 状态的瓦片，直到找到 `'ready'` 状态的祖先瓦片
+- **生命周期**：fallback 瓦片在新瓦片加载期间保持 `shown` 状态，新瓦片加载完成后转为 `hidden`，下一帧才能卸载
+- **空瓦片处理**：瓦片加载失败或返回空数据时，创建空的 handle 并标记为 `'empty'`，避免状态一直是 `'missing'`
+
 ### 帧内流程
 
-- [ ] **begin-frame**
+- [x] **begin-frame**
   - 读取 `frameState`
   - 生成 `view-state`
   - 重置所有 tile 的本帧标记
 
-- [ ] **collect-candidates**
+- [x] **collect-candidates**
   - 从 root tile、上帧热 tile、in-flight tile、fallback tile 出发生成候选集
 
-- [ ] **compute-visibility**
+- [x] **compute-visibility**
   - 基于 frustum、horizon/occluder、source rectangle、level 范围计算 tile 是否进入可见遍历
 
-- [ ] **select-tiles**
+- [x] **select-tiles**
   - 结合 target level、refine 条件、父子 readiness、fallback 策略，确定当前帧 selected set
 
-- [ ] **request-and-promote**
+- [x] **request-and-promote**
   - 对 selected 但未 ready 的 tile 发起请求
   - 对关键祖先与必要 sibling 做低优先级预取
 
-- [ ] **placement-and-show**
+- [x] **placement-and-show**
   - 先做几何层的 show set
   - 再做 symbol placement / collision
 
-- [ ] **hide-unused**
+- [x] **hide-unused**
   - 上帧 `shown` 但本帧未进入 show set 的 tile，先转成 `hidden`
 
-- [ ] **touch-retained**
+- [x] **touch-retained**
   - 当前帧 `shown` / fallback / 依赖的 tile 必须 `touch`
 
-- [ ] **post-frame-trim**
+- [x] **post-frame-trim**
   - 取消本帧未 `touch` 的 in-flight 请求
   - 检查 cache budget
   - 对"未 `touch` 且 `eligible-for-unloading`"的 tile 执行真实 unload
@@ -283,6 +291,22 @@
 ---
 
 ## 缓存管理
+
+### 缓存机制的重要性
+
+**当前缺失的关键功能**：缓存机制尚未实现，这导致以下问题：
+
+1. **瓦片过早卸载**：瓦片在移出视口后，如果没有被 `touched`，就会被立即卸载
+2. **Fallback 失效**：当所有层级的瓦片都加载失败或返回空数据时，没有 fallback 可用
+3. **内存压力**：没有基于内存预算的动态调整机制
+
+### MapLibre 的缓存策略（参考）
+
+MapLibre 使用 LRU（最近最少使用）缓存策略：
+
+- **动态缓存容量**：根据视口大小动态计算缓存容量
+- **父子瓦片关联**：通过 `findLoadedParent()` 在缓存中查找已加载的父级瓦片
+- **保留机制**：`_updateRetainedTiles` 保留父子瓦片，确保 fallback 可用
 
 ### Provider 作为缓存根对象
 
