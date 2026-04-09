@@ -16,6 +16,7 @@ export interface BucketBuilderOptions {
 }
 
 const DEFAULT_MAX_CHORD_ERROR = 10000;
+const MIN_SEGMENT_DISTANCE = 1e-10;
 
 export class LineBucketBuilder {
   readonly type = 'line' as const;
@@ -122,24 +123,16 @@ export class LineBucketBuilder {
       projectedPoints.push(projected);
     }
 
-    let hasValidSegment = false;
-    const epsilon = 1e-10;
-    for (let i = 0; i < projectedPoints.length - 1; i++) {
-      const start = projectedPoints[i];
+    const hasValidSegment = projectedPoints.slice(0, -1).some((start, i) => {
       const end = projectedPoints[i + 1];
-
-      const distance = Cartesian3.distance(start, end);
-      if (distance > epsilon) {
-        hasValidSegment = true;
-        break;
-      }
-    }
+      return Cartesian3.distance(start, end) > MIN_SEGMENT_DISTANCE;
+    });
 
     if (!hasValidSegment) {
       return [];
     }
 
-    for (let i = 0; i < line.length - 1; i++) {
+    for (let i = 0; i < projectedPoints.length - 1; i++) {
       const start = projectedPoints[i];
       const end = projectedPoints[i + 1];
 

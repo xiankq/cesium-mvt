@@ -4,6 +4,7 @@ import {
   Math as CesiumMath,
   Ellipsoid,
 } from 'cesium';
+import { isValidNumber } from './utils';
 
 export interface TileProjectionData {
   east: number;
@@ -14,21 +15,6 @@ export interface TileProjectionData {
 
 export interface TileProjectionContext {
   tileRectangle: TileProjectionData;
-}
-
-export function createTileProjectionData(
-  level: number,
-  x: number,
-  y: number,
-  tileXYToRectangle: (x: number, y: number, level: number) => { west: number; south: number; east: number; north: number },
-): TileProjectionData {
-  const rect = tileXYToRectangle(x, y, level);
-  return {
-    east: rect.east,
-    north: rect.north,
-    south: rect.south,
-    west: rect.west,
-  };
 }
 
 export function createTileProjectionContext(
@@ -63,8 +49,4 @@ export function projectTilePoint(
 
   const cartographic = new Cartographic(longitude, latitude, 0);
   return Ellipsoid.WGS84.cartographicToCartesian(cartographic, new Cartesian3());
-}
-
-function isValidNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
 }

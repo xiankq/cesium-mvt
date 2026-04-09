@@ -1,4 +1,5 @@
 import { Cartesian3, Ellipsoid } from 'cesium';
+import { isValidNumber } from './utils';
 
 export function subdivideLine(
   start: Cartesian3,
@@ -36,9 +37,6 @@ export function subdivideLine(
     const t = i / actualSubdivisions;
     const point = Cartesian3.lerp(start, end, t, new Cartesian3());
 
-    // 归一化和缩放是必要的：
-    // lerp产生的是弦上的点（在地球内部），不是弧上的点（在地球表面）
-    // 需要通过归一化+缩放将点投影回椭球表面
     const magnitude = Cartesian3.magnitude(point);
     if (magnitude > 0) {
       const normalized = Cartesian3.normalize(point, new Cartesian3());
@@ -77,8 +75,4 @@ export function subdivideRing(
 
 function isValidCartesian3(point: Cartesian3): boolean {
   return isValidNumber(point.x) && isValidNumber(point.y) && isValidNumber(point.z);
-}
-
-function isValidNumber(value: number): boolean {
-  return Number.isFinite(value);
 }
