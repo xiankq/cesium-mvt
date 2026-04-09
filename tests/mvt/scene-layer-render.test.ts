@@ -258,6 +258,97 @@ describe('scene-layer-render', () => {
     sceneLayer.destroy();
   });
 
+  it('does not request another render when a visible cached tile stays visible', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    await sceneLayer.requestTileHint(0, 0, 0);
+
+    const requestRender = vi.mocked(scene.requestRender);
+    requestRender.mockClear();
+
+    await sceneLayer.requestTileHint(0, 0, 0);
+
+    expect(requestRender).not.toHaveBeenCalled();
+
+    sceneLayer.destroy();
+  });
+
+  it('does not request render for resolved tiles with no mounted geometry', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        shapes: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {},
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'road',
+          type: 'line',
+          source: 'shapes',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+
+    const requestRender = vi.mocked(scene.requestRender);
+    requestRender.mockClear();
+
+    await sceneLayer.requestTileHint(0, 0, 0);
+
+    expect(requestRender).not.toHaveBeenCalled();
+
+    sceneLayer.destroy();
+  });
+
   it('requests and renders visible tiles from the current camera view during preRender', async () => {
     const tilingScheme = new WebMercatorTilingScheme();
     const scene = createSceneStub({

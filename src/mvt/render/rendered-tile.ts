@@ -23,9 +23,11 @@ interface MountedCollectionEntry {
 export interface RenderedTileHandle {
   byteLength: number;
   circles?: CircleTileHandle;
+  collections: MountedCollectionEntry[];
   fills?: FillTileHandle;
   key: string;
   lines?: LineTileHandle;
+  visible: boolean;
 }
 
 export interface CreateRenderedTileHandleOptions {
@@ -69,22 +71,33 @@ export function createRenderedTileHandle({
     x,
     y,
   });
+  const collections = createOrderedCollectionEntries({
+    circles,
+    fills,
+    lines,
+    style,
+  });
+  const byteLength = (circles?.byteLength ?? 0)
+    + (lines?.byteLength ?? 0)
+    + (fills?.byteLength ?? 0);
 
   return {
-    byteLength: (circles?.byteLength ?? 0)
-      + (lines?.byteLength ?? 0)
-      + (fills?.byteLength ?? 0),
+    byteLength,
     circles,
+    collections,
     fills,
     key: featureTile.key,
     lines,
+    visible: byteLength > 0,
   };
 }
 
 export function createEmptyRenderedTileHandle(key: string): RenderedTileHandle {
   return {
     byteLength: 0,
+    collections: [],
     key,
+    visible: false,
   };
 }
 
@@ -92,50 +105,80 @@ export function mountRenderedTileHandle(
   root: PrimitiveCollection,
   handle: RenderedTileHandle,
 ) {
-  mountRenderedCollections(root, handle.circles?.collections);
-  mountRenderedCollections(root, handle.lines?.collections);
-  mountRenderedCollections(root, handle.fills?.collections);
+  mountRenderedCollections(root, handle.collections);
 }
 
 export function setRenderedTileVisibility(
   handle: RenderedTileHandle,
   visible: boolean,
-) {
-  setRenderedCollectionsVisibility(handle.circles?.collections, visible);
-  setRenderedCollectionsVisibility(handle.lines?.collections, visible);
-  setRenderedCollectionsVisibility(handle.fills?.collections, visible);
+): boolean {
+  if (handle.visible === visible) {
+    return false;
+  }
+
+  setRenderedCollectionsVisibility(handle.collections, visible);
+  handle.visible = visible;
+  return true;
 }
 
 export function destroyRenderedTileHandle(
   root: PrimitiveCollection,
   handle: RenderedTileHandle,
 ) {
-  destroyRenderedCollections(root, handle.circles?.collections);
-  destroyRenderedCollections(root, handle.lines?.collections);
-  destroyRenderedCollections(root, handle.fills?.collections);
+  destroyRenderedCollections(root, handle.collections);
+  handle.visible = false;
+}
+
+function createOrderedCollectionEntries({
+  circles,
+  fills,
+  lines,
+  style,
+}: {
+  circles: CircleTileHandle | undefined;
+  fills: FillTileHandle | undefined;
+  lines: LineTileHandle | undefined;
+  style: StyleSpecification;
+}): MountedCollectionEntry[] {
+  const layerOrder = new Map(
+    style.layers.map((layer, index) => [layer.id, index]),
+  );
+  const entries = [
+    ...(circles?.collections ?? []),
+    ...(lines?.collections ?? []),
+    ...(fills?.collections ?? []),
+  ].map((entry, index) => ({
+    collection: entry.collection,
+    index,
+    order: layerOrder.get(entry.layerId) ?? Number.MAX_SAFE_INTEGER,
+  }));
+
+  entries.sort((left, right) => {
+    if (left.order !== right.order) {
+      return left.order - right.order;
+    }
+
+    return left.index - right.index;
+  });
+
+  return entries.map(({ collection }) => ({
+    collection,
+  }));
 }
 
 function mountRenderedCollections(
   root: PrimitiveCollection,
-  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
-) {
-  if (!collections) {
-    return;
-  }
-
+  collections: ReadonlyArray<MountedCollectionEntry>,
+): void {
   for (const entry of collections) {
     root.add(entry.collection);
   }
 }
 
 function setRenderedCollectionsVisibility(
-  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
+  collections: ReadonlyArray<MountedCollectionEntry>,
   visible: boolean,
 ) {
-  if (!collections) {
-    return;
-  }
-
   for (const entry of collections) {
     entry.collection.show = visible;
   }
@@ -143,12 +186,8 @@ function setRenderedCollectionsVisibility(
 
 function destroyRenderedCollections(
   root: PrimitiveCollection,
-  collections: ReadonlyArray<MountedCollectionEntry> | undefined,
-) {
-  if (!collections) {
-    return;
-  }
-
+  collections: ReadonlyArray<MountedCollectionEntry>,
+): void {
   for (const entry of collections) {
     // 类型声明里没有承诺 remove 后自动释放资源，因此这里显式 destroy，
     // 避免 collection 从场景树摘除后仍然持有 GPU 资源。

@@ -220,7 +220,9 @@ export class SceneLayer {
         });
         mountRenderedTileHandle(this.root, renderedTileHandle);
         this.renderedTileHandles.set(renderedTileHandle.key, renderedTileHandle);
-        this.scene.requestRender();
+        if (renderedTileHandle.byteLength > 0) {
+          this.scene.requestRender();
+        }
         return renderedTileHandle;
       })
       .finally(() => {
@@ -307,8 +309,7 @@ export class SceneLayer {
         continue;
       }
 
-      setRenderedTileVisibility(handle, false);
-      sceneChanged = true;
+      sceneChanged = setRenderedTileVisibility(handle, false) || sceneChanged;
     }
 
     for (const key of frameResult.unloadableKeys) {
@@ -319,7 +320,7 @@ export class SceneLayer {
 
       destroyRenderedTileHandle(this.root, handle);
       this.renderedTileHandles.delete(key);
-      sceneChanged = true;
+      sceneChanged = handle.byteLength > 0 || sceneChanged;
     }
 
     if (sceneChanged) {
@@ -397,9 +398,11 @@ export class SceneLayer {
     const cachedHandle = this.renderedTileHandles.get(renderTile.key);
     if (cachedHandle) {
       if (cachedHandle.byteLength > 0) {
-        setRenderedTileVisibility(cachedHandle, true);
+        const visibilityChanged = setRenderedTileVisibility(cachedHandle, true);
         this.tileManager.markShown(renderTile.key);
-        this.scene.requestRender();
+        if (visibilityChanged) {
+          this.scene.requestRender();
+        }
       }
       else {
         this.tileManager.touch(renderTile.key);
@@ -460,9 +463,11 @@ export class SceneLayer {
       return;
     }
 
-    setRenderedTileVisibility(renderedTileHandle, true);
+    const visibilityChanged = setRenderedTileVisibility(renderedTileHandle, true);
     this.tileManager.markShown(renderTile.key);
-    this.scene.requestRender();
+    if (visibilityChanged) {
+      this.scene.requestRender();
+    }
   }
 }
 
