@@ -4,11 +4,9 @@ import type {
 } from '@maplibre/maplibre-gl-style-spec';
 import type { GeoJsonObject } from 'geojson';
 import type { TileCoordinate } from './tile-request';
-import type { ParsedTile } from './vector-tile';
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { createTileKey } from './tile-request';
-import { parseVectorTile } from './vector-tile';
 
 // GeoJSON source 会先转成内存中的“向量瓦片形态”，这样下游渲染链路可以保持单轨实现。
 export const GEOJSON_SOURCE_LAYER = '_geojson';
@@ -19,9 +17,9 @@ interface SourceEntryRecord {
   abortController?: AbortController;
   error?: unknown;
   key: string;
-  promise?: Promise<ParsedTile>;
+  promise?: Promise<ArrayBuffer>;
   state: SourceEntryState;
-  value?: ParsedTile;
+  value?: ArrayBuffer;
 }
 
 interface GeojsonSourceCacheOptions {
@@ -33,7 +31,7 @@ interface GeojsonSourceCacheOptions {
   sourceId: string;
 }
 
-const EMPTY_TILE = parseVectorTile(new ArrayBuffer(0));
+const EMPTY_TILE_DATA = new ArrayBuffer(0);
 type GeojsonTileIndexInput = ConstructorParameters<typeof GeoJSONVT>[0];
 type GeojsonVtLayers = Parameters<typeof fromGeojsonVt>[0];
 
@@ -84,13 +82,13 @@ export class GeojsonSourceCache {
     entry.abortController = abortController;
     entry.error = undefined;
     entry.state = 'requesting';
-    entry.promise = this.getTileIndex()
+    entry.promise = this.waitForTileIndex(abortController.signal)
       .then((tileIndex) => {
         if (abortController.signal.aborted) {
           throw createAbortError();
         }
 
-        return getParsedTile(tileIndex, coordinate);
+        return getTileData(tileIndex, coordinate);
       })
       .then((value) => {
         if (abortController.signal.aborted) {
@@ -118,6 +116,14 @@ export class GeojsonSourceCache {
       });
 
     return entry.promise;
+  }
+
+  abortTile(key: string) {
+    const entry = this.entries.get(key);
+    entry?.abortController?.abort();
+    if (!this.hasActiveTileRequests(key)) {
+      this.tileIndexAbortController?.abort();
+    }
   }
 
   updateSource(source: SourceSpecification) {
@@ -183,6 +189,47 @@ export class GeojsonSourceCache {
     return this.tileIndexPromise;
   }
 
+  private waitForTileIndex(signal: AbortSignal): Promise<GeoJSONVT> {
+    if (signal.aborted) {
+      return Promise.reject(createAbortError());
+    }
+
+    return new Promise<GeoJSONVT>((resolve, reject) => {
+      const rejectAbort = () => {
+        signal.removeEventListener('abort', rejectAbort);
+        reject(createAbortError());
+      };
+
+      signal.addEventListener('abort', rejectAbort, {
+        once: true,
+      });
+      void this.getTileIndex().then((tileIndex) => {
+        signal.removeEventListener('abort', rejectAbort);
+        resolve(tileIndex);
+      }).catch((error) => {
+        signal.removeEventListener('abort', rejectAbort);
+        reject(error);
+      });
+    });
+  }
+
+  private hasActiveTileRequests(excludedKey?: string): boolean {
+    for (const [key, entry] of this.entries) {
+      if (key === excludedKey) {
+        continue;
+      }
+
+      if (
+        entry.state === 'requesting'
+        && !entry.abortController?.signal.aborted
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private reset() {
     this.tileIndexAbortController?.abort();
     this.tileIndexAbortController = undefined;
@@ -194,14 +241,14 @@ export class GeojsonSourceCache {
   }
 }
 
-function getParsedTile(tileIndex: GeoJSONVT, coordinate: TileCoordinate) {
+function getTileData(tileIndex: GeoJSONVT, coordinate: TileCoordinate) {
   const tile = tileIndex.getTile(
     coordinate.level,
     coordinate.x,
     coordinate.y,
   );
   if (!tile) {
-    return EMPTY_TILE;
+    return EMPTY_TILE_DATA;
   }
 
   // geojson-vt 的输出会重新编码成一张“合成向量瓦片”，
@@ -211,7 +258,7 @@ function getParsedTile(tileIndex: GeoJSONVT, coordinate: TileCoordinate) {
   } as GeojsonVtLayers);
   const tileBuffer = new ArrayBuffer(encoded.byteLength);
   new Uint8Array(tileBuffer).set(encoded);
-  return parseVectorTile(tileBuffer);
+  return tileBuffer;
 }
 
 async function loadGeojsonData(

@@ -6,7 +6,7 @@ import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { Event, PrimitiveCollection } from 'cesium';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SceneLayer } from '../../src/mvt/scene-layer';
-import { listSourceLayers } from '../../src/mvt/source/vector-tile';
+import { listSourceLayers, parseVectorTile } from '../../src/mvt/source/vector-tile';
 import { createStyleSet } from '../../src/mvt/style/style-set';
 
 function createSceneStub() {
@@ -267,7 +267,7 @@ describe('scene-layer', () => {
     });
 
     expect(tile).toBeDefined();
-    expect(tile && listSourceLayers(tile)).toEqual(['poi']);
+    expect(tile && listSourceLayers(parseVectorTile(tile))).toEqual(['poi']);
 
     sceneLayer.destroy();
   });

@@ -9,13 +9,11 @@ import type { RenderTile } from './render/render-tile';
 import type { RenderedTileHandle } from './render/rendered-tile';
 import type { TileFrameResult } from './source/tile-manager';
 import type { TileCoordinate } from './source/tile-request';
-import type { ParsedTile } from './source/vector-tile';
 import type { LayerFamily } from './style/layer-family';
 import type { StyleSet } from './style/style-set';
 import type { TileAvailability } from './tile-selection';
 import type { SceneViewTileSelection } from './view-state';
 import { PrimitiveCollection, WebMercatorTilingScheme } from 'cesium';
-import { compileFeatureTile } from './render/feature-tile';
 import { createRenderOrder } from './render/render-order';
 import {
   compileRenderTile,
@@ -33,19 +31,25 @@ import {
 import { GeojsonSourceCache } from './source/geojson-source-cache';
 import { SourceCache } from './source/source-cache';
 import { TileManager } from './source/tile-manager';
-import { loadVectorTile } from './source/vector-tile';
 import { createLayerFamilies } from './style/layer-family';
 import { resolveTileSelection } from './tile-selection';
 import { collectSceneViewTileSelection } from './view-state';
+import { createFeatureTileDispatcher } from './worker/feature-tile-dispatcher';
 
 // SceneLayer 统一持有 Cesium 侧运行时对象：source cache、解析结果、
 // 渲染计划以及已挂载的 primitive 句柄。ImageryProvider 只把入口请求委托到这里。
-interface ParsedSourceCache {
+interface TileSourceCache {
+  abortTile?: (key: string) => void;
   readonly sourceType: SourceSpecification['type'];
   destroy: () => void;
   isDestroyed: () => boolean;
-  requestTile: (coordinate: TileCoordinate) => Promise<ParsedTile>;
+  requestTile: (coordinate: TileCoordinate) => Promise<ArrayBuffer>;
   updateSource: (source: SourceSpecification) => void;
+}
+
+interface PendingFeatureTileRequest {
+  abortController: AbortController;
+  cleanup: () => void;
 }
 
 export interface SceneLayerOptions {
@@ -69,12 +73,14 @@ export class SceneLayer {
   private readonly root: PrimitiveCollection;
   private readonly removePostRenderListener?: () => void;
   private readonly removePreRenderListener?: () => void;
-  private readonly sourceCaches = new Map<string, ParsedSourceCache>();
+  private readonly sourceCaches = new Map<string, TileSourceCache>();
   private readonly tileWidth: number;
   private readonly tilingScheme: WebMercatorTilingScheme;
   private destroyed = false;
+  private readonly featureTileDispatcher = createFeatureTileDispatcher();
   private frameUpdateActive = false;
   private frameUpdatePending = true;
+  private readonly featureTileRequests = new Map<string, PendingFeatureTileRequest>();
   private readonly featureTilePromises = new Map<string, Promise<FeatureTile>>();
   private readonly featureTiles = new Map<string, FeatureTile>();
   private layerFamilies: LayerFamily[] = [];
@@ -116,6 +122,7 @@ export class SceneLayer {
     this.styleEpoch += 1;
     this.layerFamilies = createLayerFamilies(styleSet.style);
     this.clearRenderedTileHandles();
+    this.cancelPendingFeatureTiles();
     this.renderedTilePromises.clear();
     this.featureTilePromises.clear();
     this.featureTiles.clear();
@@ -187,6 +194,18 @@ export class SceneLayer {
       return pendingFeatureTile;
     }
 
+    const sourceTileKey = createRenderTileKey(sourceId, level, x, y);
+    const abortController = new AbortController();
+    const abortSourceRequest = () => {
+      sourceCache.abortTile?.(sourceTileKey);
+    };
+    abortController.signal.addEventListener('abort', abortSourceRequest, { once: true });
+    this.featureTileRequests.set(renderTileKey, {
+      abortController,
+      cleanup: () => {
+        abortController.signal.removeEventListener('abort', abortSourceRequest);
+      },
+    });
     const layerFamilies = this.layerFamilies;
     const renderOrder = this.renderOrder;
     const style = this.styleSet.style;
@@ -205,13 +224,17 @@ export class SceneLayer {
           styleEpoch,
         });
       this.renderTiles.set(renderTile.key, renderTile);
-      const featureTile = compileFeatureTile({
+      return this.featureTileDispatcher.compile({
         renderTile,
-        tile,
+        signal: abortController.signal,
+        tileData: tile,
       });
+    }).then((featureTile) => {
       this.featureTiles.set(featureTile.key, featureTile);
       return featureTile;
     }).finally(() => {
+      this.featureTileRequests.get(renderTileKey)?.cleanup();
+      this.featureTileRequests.delete(renderTileKey);
       this.featureTilePromises.delete(renderTileKey);
     });
 
@@ -284,6 +307,8 @@ export class SceneLayer {
       sourceCache.destroy();
     }
     this.sourceCaches.clear();
+    this.cancelPendingFeatureTiles();
+    this.featureTileDispatcher.destroy();
     this.clearRenderedTileHandles();
     this.renderedTilePromises.clear();
     this.featureTilePromises.clear();
@@ -310,7 +335,7 @@ export class SceneLayer {
       sourceCache?.destroy();
       this.sourceCaches.delete(sourceId);
 
-      const nextSourceCache = createParsedSourceCache(sourceId, source);
+      const nextSourceCache = createTileSourceCache(sourceId, source);
       if (nextSourceCache) {
         this.sourceCaches.set(sourceId, nextSourceCache);
       }
@@ -485,6 +510,9 @@ export class SceneLayer {
       this.tileManager.setBlockers(renderTileKey, {
         requesting: false,
       });
+      if (isAbortError(error)) {
+        return;
+      }
       throw error;
     }
   }
@@ -532,15 +560,21 @@ export class SceneLayer {
       this.styleEpoch,
     );
   }
+
+  private cancelPendingFeatureTiles(): void {
+    for (const request of this.featureTileRequests.values()) {
+      request.abortController.abort();
+    }
+    this.featureTileRequests.clear();
+  }
 }
 
-function createParsedSourceCache(
+function createTileSourceCache(
   sourceId: string,
   source: SourceSpecification,
-): ParsedSourceCache | undefined {
+): TileSourceCache | undefined {
   if (source.type === 'vector') {
-    return new SourceCache({
-      loadTile: loadVectorTile,
+    return new SourceCache<ArrayBuffer>({
       source,
       sourceId,
     });
@@ -566,4 +600,8 @@ function resolveSceneViewportWidth(scene: Scene): number {
     width?: number;
   } | undefined;
   return canvasWidth?.clientWidth ?? canvasWidth?.width ?? 256;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
