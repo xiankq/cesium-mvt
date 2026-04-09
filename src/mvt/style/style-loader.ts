@@ -71,11 +71,9 @@ function normalizeSource(source: SourceSpecification, styleUrl: string) {
     source.tiles = source.tiles.map(tileUrl => resolveUrl(tileUrl, styleUrl));
   }
 
-  if (
-    source.type === 'geojson'
-    && typeof (source as GeoJSONSourceSpecification).data === 'string'
-  ) {
-    source.data = resolveUrl(source.data, styleUrl);
+  const geojsonSource = source as GeoJSONSourceSpecification;
+  if (source.type === 'geojson' && typeof geojsonSource.data === 'string') {
+    geojsonSource.data = resolveUrl(geojsonSource.data, styleUrl);
   }
 }
 

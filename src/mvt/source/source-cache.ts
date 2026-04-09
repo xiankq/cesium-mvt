@@ -38,6 +38,8 @@ interface SourceCacheOptions<TValue> {
 const DEFAULT_SOURCE_ENTRY_STATE: SourceEntryState = 'idle';
 
 export class SourceCache<TValue = ArrayBuffer> {
+  readonly sourceType: SourceSpecification['type'];
+
   private destroyed = false;
   private readonly entries = new Map<string, SourceEntryRecord<TValue>>();
   private readonly loadTile: (
@@ -65,6 +67,7 @@ export class SourceCache<TValue = ArrayBuffer> {
         ) => Promise<TValue>);
     this.loadTileJson = options.loadTileJson ?? loadTileJson;
     this.source = options.source;
+    this.sourceType = options.source.type;
     this.sourceId = options.sourceId;
     this.sourceSignature = JSON.stringify(options.source);
   }
