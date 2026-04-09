@@ -18,7 +18,7 @@ import {
 import { SceneLayer } from './scene-layer';
 import { loadStyleSet } from './style/style-loader';
 
-interface StyleImageryProviderOptions {
+export interface StyleImageryProviderOptions {
   credit?: Credit | string;
   maximumLevel?: number;
   minimumLevel?: number;
@@ -97,7 +97,7 @@ export class StyleImageryProvider implements ImageryProvider {
     _level: number,
     _request?: Request,
   ): Promise<ImageryTypes> {
-    const styleSet = await this.styleSetPromise.catch(() => undefined);
+    const styleSet = await this.styleSetPromise;
     const backgroundColor = styleSet?.backgroundColor ?? TRANSPARENT_COLOR;
     return this.getSolidImage(backgroundColor) as ImageryTypes;
   }

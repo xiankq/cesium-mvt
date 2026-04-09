@@ -1,0 +1,300 @@
+import type {
+  SourceSpecification,
+  VectorSourceSpecification,
+} from '@maplibre/maplibre-gl-style-spec';
+import type { TileCoordinate, TileRequest } from './tile-request';
+import {
+  createTileKey,
+  createTileRequest,
+
+} from './tile-request';
+
+export interface TileJson {
+  scheme?: 'tms' | 'xyz';
+  tiles?: string[];
+}
+
+export interface SourceEntry<TValue> {
+  error?: unknown;
+  key: string;
+  state: SourceEntryState;
+  value?: TValue;
+}
+
+export type SourceEntryState = 'failed' | 'idle' | 'ready' | 'requesting';
+
+interface SourceEntryRecord<TValue> extends SourceEntry<TValue> {
+  abortController?: AbortController;
+  promise?: Promise<TValue>;
+}
+
+interface SourceCacheOptions<TValue> {
+  loadTile?: (request: TileRequest, signal: AbortSignal) => Promise<TValue>;
+  loadTileJson?: (url: string, signal: AbortSignal) => Promise<TileJson>;
+  source: SourceSpecification;
+  sourceId: string;
+}
+
+const DEFAULT_SOURCE_ENTRY_STATE: SourceEntryState = 'idle';
+
+export class SourceCache<TValue = ArrayBuffer> {
+  private destroyed = false;
+  private readonly entries = new Map<string, SourceEntryRecord<TValue>>();
+  private readonly loadTile: (
+    request: TileRequest,
+    signal: AbortSignal,
+  ) => Promise<TValue>;
+
+  private readonly loadTileJson: (
+    url: string,
+    signal: AbortSignal,
+  ) => Promise<TileJson>;
+
+  private source: SourceSpecification;
+  private sourceSignature: string;
+  private readonly sourceId: string;
+  private tileJsonAbortController?: AbortController;
+  private tileJsonPromise?: Promise<TileJson>;
+
+  constructor(options: SourceCacheOptions<TValue>) {
+    this.loadTile
+      = options.loadTile
+        ?? (loadTileBuffer as (
+          request: TileRequest,
+          signal: AbortSignal,
+        ) => Promise<TValue>);
+    this.loadTileJson = options.loadTileJson ?? loadTileJson;
+    this.source = options.source;
+    this.sourceId = options.sourceId;
+    this.sourceSignature = JSON.stringify(options.source);
+  }
+
+  async requestTile(coordinate: TileCoordinate) {
+    const key = createTileKey(
+      this.sourceId,
+      coordinate.level,
+      coordinate.x,
+      coordinate.y,
+    );
+    const existingEntry = this.entries.get(key);
+    if (existingEntry?.state === 'ready' && existingEntry.value !== undefined) {
+      return existingEntry.value;
+    }
+    if (existingEntry?.promise) {
+      return existingEntry.promise;
+    }
+
+    const entry = existingEntry ?? this.createEntry(key);
+    const abortController = new AbortController();
+    entry.abortController = abortController;
+    entry.error = undefined;
+    entry.state = 'requesting';
+    entry.promise = this.resolveTileRequest(coordinate)
+      .then(request => this.loadTile(request, abortController.signal))
+      .then((value) => {
+        if (abortController.signal.aborted) {
+          throw createAbortError();
+        }
+
+        entry.abortController = undefined;
+        entry.promise = undefined;
+        entry.state = 'ready';
+        entry.value = value;
+        return value;
+      })
+      .catch((error) => {
+        entry.abortController = undefined;
+        entry.promise = undefined;
+        if (abortController.signal.aborted || isAbortError(error)) {
+          entry.error = undefined;
+          entry.state = 'idle';
+          throw error;
+        }
+
+        entry.error = error;
+        entry.state = 'failed';
+        throw error;
+      });
+
+    return entry.promise;
+  }
+
+  abortTile(key: string) {
+    this.entries.get(key)?.abortController?.abort();
+  }
+
+  getEntry(key: string): SourceEntry<TValue> | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) {
+      return undefined;
+    }
+
+    return {
+      error: entry.error,
+      key: entry.key,
+      state: entry.state,
+      value: entry.value,
+    };
+  }
+
+  updateSource(source: SourceSpecification) {
+    const nextSignature = JSON.stringify(source);
+    if (nextSignature === this.sourceSignature) {
+      return;
+    }
+
+    this.source = source;
+    this.sourceSignature = nextSignature;
+    this.reset();
+  }
+
+  isDestroyed() {
+    return this.destroyed;
+  }
+
+  destroy() {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.reset();
+    this.destroyed = true;
+  }
+
+  private createEntry(key: string) {
+    const entry: SourceEntryRecord<TValue> = {
+      key,
+      state: DEFAULT_SOURCE_ENTRY_STATE,
+    };
+    this.entries.set(key, entry);
+    return entry;
+  }
+
+  private reset() {
+    this.tileJsonAbortController?.abort();
+    this.tileJsonAbortController = undefined;
+    this.tileJsonPromise = undefined;
+    for (const entry of this.entries.values()) {
+      entry.abortController?.abort();
+    }
+    this.entries.clear();
+  }
+
+  private async resolveTileRequest(coordinate: TileCoordinate) {
+    const tileJson = await this.getTileJson();
+    return createTileRequest({
+      coordinate,
+      scheme: tileJson.scheme ?? getSourceScheme(this.source),
+      sourceId: this.sourceId,
+      tiles: tileJson.tiles ?? [],
+    });
+  }
+
+  private async getTileJson(): Promise<TileJson> {
+    if (hasInlineTiles(this.source)) {
+      return {
+        scheme: getSourceScheme(this.source),
+        tiles: this.source.tiles,
+      };
+    }
+
+    const tileJsonUrl = getTileJsonUrl(this.source);
+    if (!tileJsonUrl) {
+      throw new Error(`Unsupported source for tile requests: ${this.sourceId}`);
+    }
+
+    if (this.tileJsonPromise) {
+      return this.tileJsonPromise;
+    }
+
+    const abortController = new AbortController();
+    this.tileJsonAbortController = abortController;
+    this.tileJsonPromise = this.loadTileJson(
+      tileJsonUrl,
+      abortController.signal,
+    ).then((tileJson) => {
+      if (abortController.signal.aborted) {
+        throw createAbortError();
+      }
+
+      return normalizeTileJson(
+        tileJson,
+        tileJsonUrl,
+        getSourceScheme(this.source),
+      );
+    }).catch((error) => {
+      this.tileJsonAbortController = undefined;
+      this.tileJsonPromise = undefined;
+      throw error;
+    });
+
+    return this.tileJsonPromise;
+  }
+}
+
+function hasInlineTiles(source: SourceSpecification): source is VectorSourceSpecification {
+  return 'tiles' in source
+    && Array.isArray(source.tiles)
+    && source.tiles.length > 0;
+}
+
+function getTileJsonUrl(source: SourceSpecification) {
+  return 'url' in source && typeof source.url === 'string'
+    ? source.url
+    : undefined;
+}
+
+function getSourceScheme(source: SourceSpecification) {
+  return 'scheme' in source && source.scheme === 'tms'
+    ? 'tms'
+    : 'xyz';
+}
+
+function normalizeTileJson(
+  tileJson: TileJson,
+  tileJsonUrl: string,
+  fallbackScheme: 'tms' | 'xyz',
+): TileJson {
+  return {
+    scheme: tileJson.scheme ?? fallbackScheme,
+    tiles: tileJson.tiles?.map(tileUrl => resolveUrl(tileUrl, tileJsonUrl)),
+  };
+}
+
+async function loadTileJson(url: string, signal: AbortSignal) {
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    throw new Error(`Failed to load tilejson: ${url}`);
+  }
+
+  return await response.json() as TileJson;
+}
+
+async function loadTileBuffer(
+  request: TileRequest,
+  signal: AbortSignal,
+): Promise<ArrayBuffer> {
+  const response = await fetch(request.url, { signal });
+  if (!response.ok) {
+    throw new Error(`Failed to load tile: ${request.url}`);
+  }
+
+  return await response.arrayBuffer();
+}
+
+function createAbortError() {
+  return Object.assign(new Error('aborted'), {
+    name: 'AbortError',
+  });
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function resolveUrl(resourceUrl: string, baseUrl: string) {
+  return new URL(resourceUrl, baseUrl)
+    .toString()
+    .replaceAll('%7B', '{')
+    .replaceAll('%7D', '}');
+}

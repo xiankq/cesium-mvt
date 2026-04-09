@@ -8,13 +8,15 @@ const props = defineProps<{
 }>();
 
 watchEffect((onCleanup) => {
-  const layer = props.viewer.imageryLayers.addImageryProvider(
-    new StyleImageryProvider({
-      scene: props.viewer.scene,
-      style: 'https://tiles.openfreemap.org/styles/liberty',
-    }),
-  );
-  onCleanup(() => layer && props.viewer.imageryLayers.remove(layer));
+  const provider = new StyleImageryProvider({
+    scene: props.viewer.scene,
+    style: 'https://tiles.openfreemap.org/styles/liberty',
+  });
+  const layer = props.viewer.imageryLayers.addImageryProvider(provider);
+  onCleanup(() => {
+    props.viewer.imageryLayers.remove(layer);
+    provider.destroy();
+  });
 });
 </script>
 
