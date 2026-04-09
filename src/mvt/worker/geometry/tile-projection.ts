@@ -37,8 +37,8 @@ export function projectTilePoint(
     return new Cartesian3(0, 0, 0);
   }
 
-  const u = CesiumMath.clamp(point.x / extent, 0, 1);
-  const v = CesiumMath.clamp(point.y / extent, 0, 1);
+  const u = point.x / extent;
+  const v = point.y / extent;
 
   const longitude = CesiumMath.lerp(tileRectangle.west, tileRectangle.east, u);
   const latitude = CesiumMath.lerp(tileRectangle.south, tileRectangle.north, 1 - v);
