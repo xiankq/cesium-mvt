@@ -1,13 +1,14 @@
+import type { ParsedTile } from '../../../src/mvt/source/vector-tile';
 import { describe, expect, it } from 'vitest';
 
 describe('bucket-tile-compiler', () => {
   describe('compileBucketTile', () => {
     it('should compile render tile to bucket tile', async () => {
-      const { compileBucketTile } = await import('../../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -15,7 +16,7 @@ describe('bucket-tile-compiler', () => {
         north: rect.north,
       };
       const renderTile = createMockRenderTile();
-      const tile = createMockParsedTile();
+      const tile = createMockParsedTile() as unknown as ParsedTile;
 
       const result = compileBucketTile({
         renderTile,
@@ -30,11 +31,11 @@ describe('bucket-tile-compiler', () => {
     });
 
     it('should create fill bucket for fill batch', async () => {
-      const { compileBucketTile } = await import('../../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -42,7 +43,7 @@ describe('bucket-tile-compiler', () => {
         north: rect.north,
       };
       const renderTile = createMockRenderTile('fill');
-      const tile = createMockParsedTile();
+      const tile = createMockParsedTile() as unknown as ParsedTile;
 
       const result = compileBucketTile({
         renderTile,
@@ -55,11 +56,11 @@ describe('bucket-tile-compiler', () => {
     });
 
     it('should create line bucket for line batch', async () => {
-      const { compileBucketTile } = await import('../../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -67,7 +68,7 @@ describe('bucket-tile-compiler', () => {
         north: rect.north,
       };
       const renderTile = createMockRenderTile('line');
-      const tile = createMockParsedTile();
+      const tile = createMockParsedTile() as unknown as ParsedTile;
 
       const result = compileBucketTile({
         renderTile,
@@ -80,11 +81,11 @@ describe('bucket-tile-compiler', () => {
     });
 
     it('should create circle bucket for circle batch', async () => {
-      const { compileBucketTile } = await import('../../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -92,7 +93,7 @@ describe('bucket-tile-compiler', () => {
         north: rect.north,
       };
       const renderTile = createMockRenderTile('circle');
-      const tile = createMockParsedTile();
+      const tile = createMockParsedTile() as unknown as ParsedTile;
 
       const result = compileBucketTile({
         renderTile,

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 describe('bucket-tile-dispatcher', () => {
   describe('createBucketTileDispatcher', () => {
     it('should create dispatcher with inline mode when worker factory returns undefined', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -15,7 +15,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should create dispatcher with worker mode when worker factory returns worker', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -30,7 +30,7 @@ describe('bucket-tile-dispatcher', () => {
 
   describe('compile', () => {
     it('should compile bucket tile in inline mode', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -45,7 +45,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should compile bucket tile in worker mode', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -74,8 +74,55 @@ describe('bucket-tile-dispatcher', () => {
       expect(result.key).toBe(job.renderTile.key);
     });
 
+    it('should pass native mercator tile bounds to worker', async () => {
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+
+      const mockWorker = createMockWorker();
+      const dispatcher = createBucketTileDispatcher({
+        workerFactory: () => mockWorker,
+      });
+
+      const nativeRectangle = {
+        west: -20037508.342789244,
+        south: -20037508.342789244,
+        east: 20037508.342789244,
+        north: 20037508.342789244,
+      };
+      const geographicRectangle = {
+        west: -Math.PI,
+        south: -Math.PI / 2,
+        east: Math.PI,
+        north: Math.PI / 2,
+      };
+      const job = createMockJob({
+        tilingScheme: {
+          tileXYToNativeRectangle: vi.fn(() => nativeRectangle),
+          tileXYToRectangle: vi.fn(() => geographicRectangle),
+        } as any,
+      });
+      const compilePromise = dispatcher.compile(job);
+
+      const lastMessage = mockWorker.postMessage.mock.calls[mockWorker.postMessage.mock.calls.length - 1][0];
+      expect(lastMessage.tileProjection).toEqual(nativeRectangle);
+      expect(job.tilingScheme.tileXYToNativeRectangle).toHaveBeenCalledWith(0, 0, 0);
+      expect(job.tilingScheme.tileXYToRectangle).not.toHaveBeenCalled();
+
+      mockWorker.simulateMessage({
+        bucketTile: {
+          buckets: [],
+          byteLength: 0,
+          epoch: 1,
+          key: job.renderTile.key,
+        },
+        id: lastMessage.id,
+        type: 'bucket-tile-result',
+      });
+
+      await expect(compilePromise).resolves.toBeDefined();
+    });
+
     it('should reject when signal is already aborted', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -90,7 +137,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should reject when dispatcher is destroyed', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -103,7 +150,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should handle worker error', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -123,7 +170,7 @@ describe('bucket-tile-dispatcher', () => {
 
   describe('destroy', () => {
     it('should terminate worker and reject pending requests', async () => {
-      const { createBucketTileDispatcher } = await import('../../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -168,7 +215,14 @@ function createMockWorker() {
   };
 }
 
-function createMockJob() {
+function createMockJob(overrides: Partial<ReturnType<typeof createMockJobBase>> = {}) {
+  return {
+    ...createMockJobBase(),
+    ...overrides,
+  };
+}
+
+function createMockJobBase() {
   return {
     renderTile: {
       epoch: 1,
@@ -179,6 +233,12 @@ function createMockJob() {
     },
     tileData: new ArrayBuffer(0),
     tilingScheme: {
+      tileXYToNativeRectangle: () => ({
+        west: -20037508.342789244,
+        south: -20037508.342789244,
+        east: 20037508.342789244,
+        north: 20037508.342789244,
+      }),
       tileXYToRectangle: () => ({
         west: -Math.PI,
         south: -Math.PI / 2,

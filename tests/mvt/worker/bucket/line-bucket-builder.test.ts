@@ -7,7 +7,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -33,7 +33,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -69,7 +69,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -96,7 +96,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -141,7 +141,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme, Cartesian3, Math: CesiumMath } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(1, 0, 1);
+      const rect = tilingScheme.tileXYToNativeRectangle(1, 0, 1);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -192,7 +192,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -219,7 +219,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -246,7 +246,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -279,7 +279,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -319,7 +319,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -352,7 +352,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -389,7 +389,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -422,7 +422,7 @@ describe('line-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,

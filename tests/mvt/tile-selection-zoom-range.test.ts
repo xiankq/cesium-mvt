@@ -32,9 +32,13 @@ describe('tile-selection minzoom/maxzoom', () => {
       { level: 8, x: 100, y: 100 },
     ];
 
-    const availabilityMap = new Map<string, 'empty' | 'missing' | 'ready'>([
-      ['10/400/400', 'ready'],
-    ]);
+    // level=8 的一个瓦片对应 level=10 的 16 个子瓦片 (2^2 × 2^2)
+    const availabilityMap = new Map<string, 'empty' | 'missing' | 'ready'>();
+    for (let dx = 0; dx < 4; dx++) {
+      for (let dy = 0; dy < 4; dy++) {
+        availabilityMap.set(`10/${400 + dx}/${400 + dy}`, 'ready');
+      }
+    }
 
     const selection = resolveTileSelection({
       coordinates,
@@ -46,10 +50,16 @@ describe('tile-selection minzoom/maxzoom', () => {
       maximumLevel: 16,
     });
 
+    // level=8 的一个瓦片对应 level=10 的 16 个子瓦片
     expect(selection.requestCoordinates).toHaveLength(0);
     expect(selection.fallbackCoordinates).toHaveLength(0);
-    expect(selection.readyCoordinates).toHaveLength(1);
-    expect(selection.readyCoordinates[0]).toEqual({ level: 10, x: 400, y: 400 });
+    expect(selection.readyCoordinates).toHaveLength(16);
+    // 验证生成的所有子瓦片坐标
+    for (let dx = 0; dx < 4; dx++) {
+      for (let dy = 0; dy < 4; dy++) {
+        expect(selection.readyCoordinates).toContainEqual({ level: 10, x: 400 + dx, y: 400 + dy });
+      }
+    }
   });
 
   it('should handle tiles within minzoom/maxzoom range', () => {

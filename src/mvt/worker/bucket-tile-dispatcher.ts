@@ -1,4 +1,4 @@
-import type { TilingScheme } from 'cesium';
+import type { WebMercatorTilingScheme } from 'cesium';
 import type { RenderTile } from '../render/render-tile';
 import type { ParsedTileResult } from './bucket/bucket-types';
 import type { TileProjectionData } from './geometry/tile-projection';
@@ -8,7 +8,7 @@ export interface CompileBucketTileJob {
   renderTile: RenderTile;
   signal?: AbortSignal;
   tileData: ArrayBuffer;
-  tilingScheme: TilingScheme;
+  tilingScheme: WebMercatorTilingScheme;
 }
 
 export interface BucketTileResultResponse {
@@ -253,10 +253,10 @@ function createAbortError() {
 
 function extractTileProjection(
   tileKey: string,
-  tilingScheme: TilingScheme,
+  tilingScheme: WebMercatorTilingScheme,
 ): TileProjectionData {
   const { level, x, y } = parseTileCoordinateFromKey(tileKey);
-  const rect = tilingScheme.tileXYToRectangle(x, y, level);
+  const rect = tilingScheme.tileXYToNativeRectangle(x, y, level);
   return {
     east: rect.east,
     north: rect.north,

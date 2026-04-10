@@ -1,8 +1,6 @@
 import {
   Cartesian3,
-  Cartographic,
-  Math as CesiumMath,
-  Ellipsoid,
+  WebMercatorProjection,
 } from 'cesium';
 import { isValidNumber } from './utils';
 
@@ -14,6 +12,7 @@ export interface TileProjectionData {
 }
 
 export interface TileProjectionContext {
+  projection: WebMercatorProjection;
   tileRectangle: TileProjectionData;
 }
 
@@ -21,6 +20,7 @@ export function createTileProjectionContext(
   data: TileProjectionData,
 ): TileProjectionContext {
   return {
+    projection: new WebMercatorProjection(),
     tileRectangle: data,
   };
 }
@@ -30,7 +30,7 @@ export function projectTilePoint(
   extent: number,
   context: TileProjectionContext,
 ): Cartesian3 {
-  const { tileRectangle } = context;
+  const { projection, tileRectangle } = context;
 
   if (!isValidNumber(tileRectangle.west) || !isValidNumber(tileRectangle.south)
     || !isValidNumber(tileRectangle.east) || !isValidNumber(tileRectangle.north)) {
@@ -39,14 +39,27 @@ export function projectTilePoint(
 
   const u = point.x / extent;
   const v = point.y / extent;
-
-  const longitude = CesiumMath.lerp(tileRectangle.west, tileRectangle.east, u);
-  const latitude = CesiumMath.lerp(tileRectangle.south, tileRectangle.north, 1 - v);
-
-  if (!isValidNumber(longitude) || !isValidNumber(latitude)) {
+  if (!isValidNumber(u) || !isValidNumber(v)) {
     return new Cartesian3(0, 0, 0);
   }
 
-  const cartographic = new Cartographic(longitude, latitude, 0);
-  return Ellipsoid.WGS84.cartographicToCartesian(cartographic, new Cartesian3());
+  const nativeWidth = tileRectangle.east - tileRectangle.west;
+  const nativeHeight = tileRectangle.north - tileRectangle.south;
+  const nativeX = tileRectangle.west + u * nativeWidth;
+  // 向量瓦片坐标以左上角为原点，y 轴向下增长，需要翻转成 WebMercator 原生坐标。
+  const nativeY = tileRectangle.north - v * nativeHeight;
+  if (!isValidNumber(nativeX) || !isValidNumber(nativeY)) {
+    return new Cartesian3(0, 0, 0);
+  }
+
+  const cartographic = projection.unproject(new Cartesian3(nativeX, nativeY, 0));
+  if (!isValidNumber(cartographic.longitude) || !isValidNumber(cartographic.latitude)) {
+    return new Cartesian3(0, 0, 0);
+  }
+
+  return Cartesian3.fromRadians(
+    cartographic.longitude,
+    cartographic.latitude,
+    0,
+  );
 }

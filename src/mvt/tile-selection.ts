@@ -27,6 +27,9 @@ export function resolveTileSelection({
   const requestCoordinates: TileCoordinate[] = [];
   const availabilityByKey = new Map<string, TileAvailability>();
 
+  // 当请求的层级低于数据源最小层级时，需要生成所有对应的子瓦片
+  // 例如：level=8 的一个瓦片对应 level=10 的 4 个子瓦片
+  const expandedCoordinates: TileCoordinate[] = [];
   for (const coordinate of coordinates) {
     let adjustedCoordinate = coordinate;
 
@@ -41,17 +44,30 @@ export function resolveTileSelection({
       };
     }
 
-    // 当请求的瓦片层级低于数据源的最小层级时，需要将坐标映射到最小层级
-    // 例如：请求 level=8，但数据源最小从 level=10 开始，则映射到 level=10 的子瓦片
+    // 当请求的瓦片层级低于数据源的最小层级时，需要生成所有对应的子瓦片
+    // 例如：请求 level=8，但数据源最小从 level=10 开始，则生成 level=10 的所有子瓦片
     if (adjustedCoordinate.level < minimumLevel) {
       const levelDiff = minimumLevel - adjustedCoordinate.level;
-      adjustedCoordinate = {
-        level: minimumLevel,
-        x: adjustedCoordinate.x * 2 ** levelDiff,
-        y: adjustedCoordinate.y * 2 ** levelDiff,
-      };
-    }
+      const baseX = adjustedCoordinate.x * 2 ** levelDiff;
+      const baseY = adjustedCoordinate.y * 2 ** levelDiff;
+      const count = 2 ** levelDiff;
 
+      for (let dx = 0; dx < count; dx++) {
+        for (let dy = 0; dy < count; dy++) {
+          expandedCoordinates.push({
+            level: minimumLevel,
+            x: baseX + dx,
+            y: baseY + dy,
+          });
+        }
+      }
+    }
+    else {
+      expandedCoordinates.push(adjustedCoordinate);
+    }
+  }
+
+  for (const adjustedCoordinate of expandedCoordinates) {
     const availability = getAvailability(adjustedCoordinate);
     availabilityByKey.set(createCoordinateKey(adjustedCoordinate), availability);
 

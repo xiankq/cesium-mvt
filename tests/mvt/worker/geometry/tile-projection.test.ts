@@ -1,42 +1,29 @@
+import {
+  Cartesian3,
+  Math as CesiumMath,
+  WebMercatorProjection,
+  WebMercatorTilingScheme,
+} from 'cesium';
 import { describe, expect, it } from 'vitest';
+import {
+  createTileProjectionContext,
+  projectTilePoint,
+} from '../../../../src/mvt/worker/geometry/tile-projection';
 
 describe('tile-projection', () => {
   describe('createTileProjectionContext', () => {
-    it('should create projection context from tile projection data', async () => {
-      const { createTileProjectionContext } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-
-      const tileProjection = {
-        west: -Math.PI,
-        south: -Math.PI / 2,
-        east: Math.PI,
-        north: Math.PI / 2,
-      };
+    it('should create projection context from native tile projection data', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
       const context = createTileProjectionContext(tileProjection);
 
-      expect(context.tileRectangle).toBeDefined();
-      expect(context.tileRectangle.west).toBe(-Math.PI);
-      expect(context.tileRectangle.south).toBe(-Math.PI / 2);
-      expect(context.tileRectangle.east).toBe(Math.PI);
-      expect(context.tileRectangle.north).toBe(Math.PI / 2);
+      expect(context.tileRectangle).toEqual(tileProjection);
     });
   });
 
   describe('projectTilePoint', () => {
-    it('should project tile point to Cartesian3', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Cartesian3 } = await import('cesium');
-
-      const tileProjection = {
-        west: -Math.PI,
-        south: -Math.PI / 2,
-        east: Math.PI,
-        north: Math.PI / 2,
-      };
-      const context = createTileProjectionContext(tileProjection);
-
-      const point = { x: 2048, y: 2048 };
-      const extent = 4096;
-      const projected = projectTilePoint(point, extent, context);
+    it('should project tile point to Cartesian3', () => {
+      const context = createTileProjectionContext(createNativeTileProjection(0, 0, 0));
+      const projected = projectTilePoint({ x: 2048, y: 2048 }, 4096, context);
 
       expect(projected).toBeInstanceOf(Cartesian3);
       expect(projected.x).toBeDefined();
@@ -44,70 +31,42 @@ describe('tile-projection', () => {
       expect(projected.z).toBeDefined();
     });
 
-    it('should project center of tile at level 0', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Cartesian3, WebMercatorTilingScheme } = await import('cesium');
+    it('should project center of tile at level 0', () => {
+      const context = createTileProjectionContext(createNativeTileProjection(0, 0, 0));
+      const projected = projectTilePoint({ x: 2048, y: 2048 }, 4096, context);
 
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
-      const context = createTileProjectionContext(tileProjection);
-
-      const point = { x: 2048, y: 2048 };
-      const extent = 4096;
-      const projected = projectTilePoint(point, extent, context);
-
-      const magnitude = Cartesian3.magnitude(projected);
-      expect(magnitude).toBeCloseTo(6378137, -3);
+      expect(Cartesian3.magnitude(projected)).toBeCloseTo(6378137, -3);
     });
 
-    it('should project out-of-bounds coordinates correctly without clamping', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Math: CesiumMath, WebMercatorTilingScheme, Cartographic, Ellipsoid, Cartesian3 } = await import('cesium');
-
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
+    it('should match Cesium WebMercator unprojection for low zoom points away from equator', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
       const context = createTileProjectionContext(tileProjection);
+      const point = { x: 2048, y: 1024 };
 
-      const outOfBoundsPoint = { x: -100, y: 5000 };
-      const extent = 4096;
-      const projected = projectTilePoint(outOfBoundsPoint, extent, context);
+      const projected = projectTilePoint(point, 4096, context);
+      const expected = projectWithCesium(point, 4096, tileProjection);
 
-      const u = outOfBoundsPoint.x / extent;
-      const v = outOfBoundsPoint.y / extent;
-      const expectedLon = CesiumMath.lerp(rect.west, rect.east, u);
-      const expectedLat = CesiumMath.lerp(rect.south, rect.north, 1 - v);
-      const expectedCartographic = new Cartographic(expectedLon, expectedLat, 0);
-      const expected = Ellipsoid.WGS84.cartographicToCartesian(expectedCartographic, new Cartesian3());
+      expect(projected.x).toBeCloseTo(expected.x, 5);
+      expect(projected.y).toBeCloseTo(expected.y, 5);
+      expect(projected.z).toBeCloseTo(expected.z, 5);
+      expect(extractLatitudeDegrees(projected)).toBeGreaterThan(60);
+    });
+
+    it('should project out-of-bounds coordinates correctly without clamping', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
+      const context = createTileProjectionContext(tileProjection);
+      const point = { x: -100, y: 5000 };
+
+      const projected = projectTilePoint(point, 4096, context);
+      const expected = projectWithCesium(point, 4096, tileProjection);
 
       expect(projected.x).toBeCloseTo(expected.x, 5);
       expect(projected.y).toBeCloseTo(expected.y, 5);
       expect(projected.z).toBeCloseTo(expected.z, 5);
     });
 
-    it('should project tile corners correctly', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { WebMercatorTilingScheme } = await import('cesium');
-
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
+    it('should project tile corners correctly', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
       const context = createTileProjectionContext(tileProjection);
       const extent = 4096;
 
@@ -120,125 +79,49 @@ describe('tile-projection', () => {
 
       corners.forEach((point) => {
         const projected = projectTilePoint(point, extent, context);
-        expect(projected.x).toBeDefined();
-        expect(projected.y).toBeDefined();
-        expect(projected.z).toBeDefined();
+        const expected = projectWithCesium(point, extent, tileProjection);
+
+        expect(projected.x).toBeCloseTo(expected.x, 5);
+        expect(projected.y).toBeCloseTo(expected.y, 5);
+        expect(projected.z).toBeCloseTo(expected.z, 5);
       });
     });
 
-    it('should handle tile near polar region', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Math: CesiumMath, WebMercatorTilingScheme } = await import('cesium');
+    it('should handle tile near polar region', () => {
+      const context = createTileProjectionContext(createNativeTileProjection(2, 0, 0));
+      const projected = projectTilePoint({ x: 2048, y: 2048 }, 4096, context);
 
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 2);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
-      const context = createTileProjectionContext(tileProjection);
-
-      const point = { x: 2048, y: 2048 };
-      const extent = 4096;
-      const projected = projectTilePoint(point, extent, context);
-
-      const lat = CesiumMath.toDegrees(Math.asin(projected.z / Math.sqrt(projected.x ** 2 + projected.y ** 2 + projected.z ** 2)));
-      expect(Math.abs(lat)).toBeGreaterThan(60);
+      expect(Math.abs(extractLatitudeDegrees(projected))).toBeGreaterThan(60);
     });
 
-    it('should handle point at tile center', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Cartesian3 } = await import('cesium');
-
-      const tileProjection = {
-        west: -Math.PI / 2,
-        south: -Math.PI / 4,
-        east: Math.PI / 2,
-        north: Math.PI / 4,
-      };
+    it('should handle negative coordinates', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
       const context = createTileProjectionContext(tileProjection);
-
-      const point = { x: 2048, y: 2048 };
-      const extent = 4096;
-      const projected = projectTilePoint(point, extent, context);
-
-      expect(Cartesian3.magnitude(projected)).toBeGreaterThan(0);
-    });
-
-    it('should handle negative coordinates', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Math: CesiumMath, WebMercatorTilingScheme, Cartographic, Ellipsoid, Cartesian3 } = await import('cesium');
-
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
-      const context = createTileProjectionContext(tileProjection);
-
       const point = { x: -100, y: -100 };
-      const extent = 4096;
-      const projected = projectTilePoint(point, extent, context);
 
-      const u = point.x / extent;
-      const v = point.y / extent;
-      const expectedLon = CesiumMath.lerp(rect.west, rect.east, u);
-      const expectedLat = CesiumMath.lerp(rect.south, rect.north, 1 - v);
-      const expectedCartographic = new Cartographic(expectedLon, expectedLat, 0);
-      const expected = Ellipsoid.WGS84.cartographicToCartesian(expectedCartographic, new Cartesian3());
+      const projected = projectTilePoint(point, 4096, context);
+      const expected = projectWithCesium(point, 4096, tileProjection);
 
       expect(projected.x).toBeCloseTo(expected.x, 5);
       expect(projected.y).toBeCloseTo(expected.y, 5);
       expect(projected.z).toBeCloseTo(expected.z, 5);
     });
 
-    it('should handle coordinates far outside tile bounds', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Math: CesiumMath, WebMercatorTilingScheme, Cartographic, Ellipsoid, Cartesian3 } = await import('cesium');
-
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
+    it('should handle coordinates far outside tile bounds', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
       const context = createTileProjectionContext(tileProjection);
+      const point = { x: -10000, y: 15000 };
 
-      const farOutPoint = { x: -10000, y: 15000 };
-      const extent = 4096;
-      const projected = projectTilePoint(farOutPoint, extent, context);
-
-      const u = farOutPoint.x / extent;
-      const v = farOutPoint.y / extent;
-      const expectedLon = CesiumMath.lerp(rect.west, rect.east, u);
-      const expectedLat = CesiumMath.lerp(rect.south, rect.north, 1 - v);
-      const expectedCartographic = new Cartographic(expectedLon, expectedLat, 0);
-      const expected = Ellipsoid.WGS84.cartographicToCartesian(expectedCartographic, new Cartesian3());
+      const projected = projectTilePoint(point, 4096, context);
+      const expected = projectWithCesium(point, 4096, tileProjection);
 
       expect(projected.x).toBeCloseTo(expected.x, 5);
       expect(projected.y).toBeCloseTo(expected.y, 5);
       expect(projected.z).toBeCloseTo(expected.z, 5);
     });
 
-    it('should handle coordinates exactly at tile boundaries', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Math: CesiumMath, WebMercatorTilingScheme, Cartographic, Ellipsoid, Cartesian3 } = await import('cesium');
-
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
+    it('should handle coordinates exactly at tile boundaries', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
       const context = createTileProjectionContext(tileProjection);
       const extent = 4096;
 
@@ -251,13 +134,7 @@ describe('tile-projection', () => {
 
       boundaryPoints.forEach((point) => {
         const projected = projectTilePoint(point, extent, context);
-
-        const u = point.x / extent;
-        const v = point.y / extent;
-        const expectedLon = CesiumMath.lerp(rect.west, rect.east, u);
-        const expectedLat = CesiumMath.lerp(rect.south, rect.north, 1 - v);
-        const expectedCartographic = new Cartographic(expectedLon, expectedLat, 0);
-        const expected = Ellipsoid.WGS84.cartographicToCartesian(expectedCartographic, new Cartesian3());
+        const expected = projectWithCesium(point, extent, tileProjection);
 
         expect(projected.x).toBeCloseTo(expected.x, 5);
         expect(projected.y).toBeCloseTo(expected.y, 5);
@@ -265,18 +142,8 @@ describe('tile-projection', () => {
       });
     });
 
-    it('should handle coordinates near tile boundaries', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { Math: CesiumMath, WebMercatorTilingScheme, Cartographic, Ellipsoid, Cartesian3 } = await import('cesium');
-
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
+    it('should handle coordinates near tile boundaries', () => {
+      const tileProjection = createNativeTileProjection(0, 0, 0);
       const context = createTileProjectionContext(tileProjection);
       const extent = 4096;
 
@@ -289,13 +156,7 @@ describe('tile-projection', () => {
 
       nearBoundaryPoints.forEach((point) => {
         const projected = projectTilePoint(point, extent, context);
-
-        const u = point.x / extent;
-        const v = point.y / extent;
-        const expectedLon = CesiumMath.lerp(rect.west, rect.east, u);
-        const expectedLat = CesiumMath.lerp(rect.south, rect.north, 1 - v);
-        const expectedCartographic = new Cartographic(expectedLon, expectedLat, 0);
-        const expected = Ellipsoid.WGS84.cartographicToCartesian(expectedCartographic, new Cartesian3());
+        const expected = projectWithCesium(point, extent, tileProjection);
 
         expect(projected.x).toBeCloseTo(expected.x, 5);
         expect(projected.y).toBeCloseTo(expected.y, 5);
@@ -303,19 +164,8 @@ describe('tile-projection', () => {
       });
     });
 
-    it('should handle invalid coordinates gracefully', async () => {
-      const { createTileProjectionContext, projectTilePoint } = await import('../../../../src/mvt/worker/geometry/tile-projection');
-      const { WebMercatorTilingScheme } = await import('cesium');
-
-      const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
-      const tileProjection = {
-        west: rect.west,
-        south: rect.south,
-        east: rect.east,
-        north: rect.north,
-      };
-      const context = createTileProjectionContext(tileProjection);
+    it('should handle invalid coordinates gracefully', () => {
+      const context = createTileProjectionContext(createNativeTileProjection(0, 0, 0));
       const extent = 4096;
 
       const invalidPoints = [
@@ -334,3 +184,38 @@ describe('tile-projection', () => {
     });
   });
 });
+
+function createNativeTileProjection(level: number, x: number, y: number) {
+  const tilingScheme = new WebMercatorTilingScheme();
+  const rect = tilingScheme.tileXYToNativeRectangle(x, y, level);
+  return {
+    east: rect.east,
+    north: rect.north,
+    south: rect.south,
+    west: rect.west,
+  };
+}
+
+function extractLatitudeDegrees(position: Cartesian3) {
+  const magnitude = Cartesian3.magnitude(position);
+  return CesiumMath.toDegrees(Math.asin(position.z / magnitude));
+}
+
+function projectWithCesium(
+  point: { x: number; y: number },
+  extent: number,
+  tileProjection: ReturnType<typeof createNativeTileProjection>,
+) {
+  const projection = new WebMercatorProjection();
+  const nativeWidth = tileProjection.east - tileProjection.west;
+  const nativeHeight = tileProjection.north - tileProjection.south;
+  const nativeX = tileProjection.west + (point.x / extent) * nativeWidth;
+  const nativeY = tileProjection.north - (point.y / extent) * nativeHeight;
+  const cartographic = projection.unproject(new Cartesian3(nativeX, nativeY, 0));
+
+  return Cartesian3.fromRadians(
+    cartographic.longitude,
+    cartographic.latitude,
+    0,
+  );
+}

@@ -7,7 +7,7 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -33,7 +33,7 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -72,7 +72,7 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -99,7 +99,7 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(0, 0, 0);
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -147,7 +147,7 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(1, 0, 1);
+      const rect = tilingScheme.tileXYToNativeRectangle(1, 0, 1);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
@@ -189,7 +189,7 @@ describe('fill-bucket-builder', () => {
         expect(index).toBeGreaterThanOrEqual(0);
       }
 
-      expect(triangleCount).toBeGreaterThan(vertexCount * 0.9);
+      expect(triangleCount).toBe(vertexCount - 2);
     });
 
     it('should handle polygon with hole correctly', async () => {
@@ -197,7 +197,7 @@ describe('fill-bucket-builder', () => {
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
-      const rect = tilingScheme.tileXYToRectangle(1, 0, 1);
+      const rect = tilingScheme.tileXYToNativeRectangle(1, 0, 1);
       const tileProjection = {
         west: rect.west,
         south: rect.south,
