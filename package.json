@@ -36,7 +36,7 @@
     "vue": "^3.5.32"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^8.1.0",
+    "@antfu/eslint-config": "^8.1.1",
     "@types/earcut": "^3.0.0",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^25.5.2",
@@ -47,8 +47,8 @@
     "taze": "^19.11.0",
     "typescript": "^6.0.2",
     "unplugin-cesium": "^3.1.0",
-    "vite": "^8.0.7",
-    "vitest": "^4.1.3",
+    "vite": "^8.0.8",
+    "vitest": "^4.1.4",
     "vue-tsc": "^3.2.6"
   }
 }
