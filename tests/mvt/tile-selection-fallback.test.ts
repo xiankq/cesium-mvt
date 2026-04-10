@@ -52,6 +52,7 @@ describe('tile-selection fallback issue', () => {
     });
 
     expect(selection.requestCoordinates).toHaveLength(1);
-    expect(selection.fallbackCoordinates).toHaveLength(0);
+    expect(selection.fallbackCoordinates).toHaveLength(1);
+    expect(selection.fallbackCoordinates[0]).toEqual({ level: 11, x: 1250, y: 1250 });
   });
 });

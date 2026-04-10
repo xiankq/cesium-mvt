@@ -6,6 +6,7 @@ export interface ResolveTileSelectionOptions {
   coordinates: readonly TileCoordinate[];
   getAvailability: (coordinate: TileCoordinate) => TileAvailability;
   minimumLevel: number;
+  maximumLevel?: number;
 }
 
 export interface TileSelection {
@@ -19,6 +20,7 @@ export function resolveTileSelection({
   coordinates,
   getAvailability,
   minimumLevel,
+  maximumLevel,
 }: ResolveTileSelectionOptions): TileSelection {
   const readyCoordinates: TileCoordinate[] = [];
   const emptyCoordinates: TileCoordinate[] = [];
@@ -26,20 +28,40 @@ export function resolveTileSelection({
   const availabilityByKey = new Map<string, TileAvailability>();
 
   for (const coordinate of coordinates) {
-    const availability = getAvailability(coordinate);
-    availabilityByKey.set(createCoordinateKey(coordinate), availability);
+    let adjustedCoordinate = coordinate;
+
+    if (maximumLevel !== undefined && coordinate.level > maximumLevel) {
+      const levelDiff = coordinate.level - maximumLevel;
+      adjustedCoordinate = {
+        level: maximumLevel,
+        x: Math.floor(coordinate.x / 2 ** levelDiff),
+        y: Math.floor(coordinate.y / 2 ** levelDiff),
+      };
+    }
+
+    if (adjustedCoordinate.level < minimumLevel) {
+      const levelDiff = minimumLevel - adjustedCoordinate.level;
+      adjustedCoordinate = {
+        level: minimumLevel,
+        x: adjustedCoordinate.x * 2 ** levelDiff,
+        y: adjustedCoordinate.y * 2 ** levelDiff,
+      };
+    }
+
+    const availability = getAvailability(adjustedCoordinate);
+    availabilityByKey.set(createCoordinateKey(adjustedCoordinate), availability);
 
     if (availability === 'ready') {
-      readyCoordinates.push(coordinate);
+      readyCoordinates.push(adjustedCoordinate);
       continue;
     }
 
     if (availability === 'empty') {
-      emptyCoordinates.push(coordinate);
+      emptyCoordinates.push(adjustedCoordinate);
       continue;
     }
 
-    requestCoordinates.push(coordinate);
+    requestCoordinates.push(adjustedCoordinate);
   }
 
   const fallbackCoordinatesByKey = new Map<string, TileCoordinate>();
@@ -87,16 +109,22 @@ function findFallbackCoordinate({
   minimumLevel: number;
 }): TileCoordinate | undefined {
   let ancestor = getParentCoordinate(coordinate);
+  let highestEmptyAncestor: TileCoordinate | undefined;
+
   while (ancestor && ancestor.level >= minimumLevel) {
     const availability = getAvailability(ancestor);
     if (availability === 'ready') {
       return ancestor;
     }
 
+    if (availability === 'empty') {
+      highestEmptyAncestor = ancestor;
+    }
+
     ancestor = getParentCoordinate(ancestor);
   }
 
-  return undefined;
+  return highestEmptyAncestor;
 }
 
 function hasResolvedVisibleDescendant(

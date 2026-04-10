@@ -39,9 +39,11 @@ import { createBucketTileDispatcher } from './worker/bucket-tile-dispatcher';
 // 渲染计划以及已挂载的 primitive 句柄。ImageryProvider 只把入口请求委托到这里。
 interface TileSourceCache {
   abortTile?: (key: string) => void;
-  readonly sourceType: SourceSpecification['type'];
   destroy: () => void;
+  getMaxZoom?: () => number | undefined;
+  getMinZoom?: () => number | undefined;
   isDestroyed: () => boolean;
+  readonly sourceType: SourceSpecification['type'];
   requestTile: (coordinate: TileCoordinate) => Promise<ArrayBuffer>;
   updateSource: (source: SourceSpecification) => void;
 }
@@ -452,6 +454,10 @@ export class SceneLayer {
     sourceId: string,
     coordinates: readonly TileCoordinate[],
   ): Promise<void> {
+    const sourceCache = this.sourceCaches.get(sourceId);
+    const maxZoom = sourceCache?.getMaxZoom?.();
+    const minZoom = sourceCache?.getMinZoom?.();
+
     const tileSelection = resolveTileSelection({
       coordinates,
       getAvailability: coordinate => this.getTileAvailability(
@@ -460,7 +466,8 @@ export class SceneLayer {
         coordinate.x,
         coordinate.y,
       ),
-      minimumLevel: this.minimumLevel,
+      maximumLevel: maxZoom,
+      minimumLevel: minZoom ?? this.minimumLevel,
     });
 
     for (const coordinate of tileSelection.readyCoordinates) {

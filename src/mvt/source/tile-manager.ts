@@ -102,9 +102,13 @@ export class TileManager {
         hiddenKeys.push(tile.key);
         continue;
       }
-
-      tile.eligibleForUnloading
-        = !tile.touchedThisFrame && !hasBlockers(tile.blockers);
+      else if (tile.selectedThisFrame) {
+        tile.eligibleForUnloading = false;
+      }
+      else {
+        tile.eligibleForUnloading
+          = !tile.touchedThisFrame && !hasBlockers(tile.blockers);
+      }
 
       if (tile.eligibleForUnloading) {
         unloadableKeys.push(tile.key);

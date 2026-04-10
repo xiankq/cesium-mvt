@@ -11,6 +11,8 @@ import {
 
 // SourceCache 负责单个 sourceId 的请求去重与 source 级失效管理。
 export interface TileJson {
+  maxzoom?: number;
+  minzoom?: number;
   scheme?: 'tms' | 'xyz';
   tiles?: string[];
 }
@@ -58,6 +60,7 @@ export class SourceCache<TValue = ArrayBuffer> {
   private readonly sourceId: string;
   private tileJsonAbortController?: AbortController;
   private tileJsonPromise?: Promise<TileJson>;
+  private cachedTileJson?: TileJson;
 
   constructor(options: SourceCacheOptions<TValue>) {
     this.loadTile
@@ -196,10 +199,12 @@ export class SourceCache<TValue = ArrayBuffer> {
 
   private async getTileJson(): Promise<TileJson> {
     if (hasInlineTiles(this.source)) {
-      return {
+      const inlineTileJson: TileJson = {
         scheme: getSourceScheme(this.source),
         tiles: this.source.tiles,
       };
+      this.cachedTileJson = inlineTileJson;
+      return inlineTileJson;
     }
 
     const tileJsonUrl = getTileJsonUrl(this.source);
@@ -222,11 +227,13 @@ export class SourceCache<TValue = ArrayBuffer> {
         throw createAbortError();
       }
 
-      return normalizeTileJson(
+      const normalized = normalizeTileJson(
         tileJson,
         tileJsonUrl,
         getSourceScheme(this.source),
       );
+      this.cachedTileJson = normalized;
+      return normalized;
     }).catch((error) => {
       this.tileJsonAbortController = undefined;
       this.tileJsonPromise = undefined;
@@ -234,6 +241,14 @@ export class SourceCache<TValue = ArrayBuffer> {
     });
 
     return this.tileJsonPromise;
+  }
+
+  getMaxZoom(): number | undefined {
+    return this.cachedTileJson?.maxzoom;
+  }
+
+  getMinZoom(): number | undefined {
+    return this.cachedTileJson?.minzoom;
   }
 }
 
@@ -261,6 +276,8 @@ function normalizeTileJson(
   fallbackScheme: 'tms' | 'xyz',
 ): TileJson {
   return {
+    maxzoom: tileJson.maxzoom,
+    minzoom: tileJson.minzoom,
     scheme: tileJson.scheme ?? fallbackScheme,
     tiles: tileJson.tiles?.map(tileUrl => resolveUrl(tileUrl, tileJsonUrl)),
   };
