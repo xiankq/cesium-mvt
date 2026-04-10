@@ -7,7 +7,7 @@ import {
   Color,
 } from 'cesium';
 import { describe, expect, it } from 'vitest';
-import { createCircleTileHandle } from '../../src/mvt/render/backend/circle-backend';
+import { createCircleTileHandle } from '@/mvt/render/backend/circle-backend';
 
 describe('circle-backend', () => {
   it('creates one buffer collection per circle layer and projects points onto the globe', () => {

@@ -2,8 +2,8 @@ import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Scene } from 'cesium';
 import { Event, PrimitiveCollection, WebMercatorTilingScheme } from 'cesium';
 import { describe, expect, it, vi } from 'vitest';
-import { SceneLayer } from '../../src/mvt/scene-layer';
-import { createStyleSet } from '../../src/mvt/style/style-set';
+import { SceneLayer } from '@/mvt/scene-layer';
+import { createStyleSet } from '@/mvt/style/style-set';
 
 function createSceneStub(overrides: Partial<Scene> = {}) {
   return {

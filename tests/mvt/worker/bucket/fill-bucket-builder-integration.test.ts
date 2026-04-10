@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('fill-bucket-builder-integration', () => {
   describe('projection and subdivision', () => {
     it('should project and subdivide polygon geometry', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -44,7 +44,7 @@ describe('fill-bucket-builder-integration', () => {
     });
 
     it('should handle multiple rings', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();

@@ -1,11 +1,11 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
-import { createRenderOrder } from '../../src/mvt/render/render-order';
+import { createRenderOrder } from '@/mvt/render/render-order';
 import {
   compileRenderTile,
   createRenderTileKey,
-} from '../../src/mvt/render/render-tile';
-import { createLayerFamilies } from '../../src/mvt/style/layer-family';
+} from '@/mvt/render/render-tile';
+import { createLayerFamilies } from '@/mvt/style/layer-family';
 
 describe('render-tile', () => {
   it('compiles background and geometry batches from style order', () => {

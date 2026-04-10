@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 describe('bucket-tile-dispatcher', () => {
   describe('createBucketTileDispatcher', () => {
     it('should create dispatcher with inline mode when worker factory returns undefined', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -15,7 +15,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should create dispatcher with worker mode when worker factory returns worker', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -30,7 +30,7 @@ describe('bucket-tile-dispatcher', () => {
 
   describe('compile', () => {
     it('should compile bucket tile in inline mode', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -45,7 +45,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should compile bucket tile in worker mode', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -75,7 +75,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should pass native mercator tile bounds to worker', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -122,7 +122,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should reject when signal is already aborted', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -137,7 +137,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should reject when dispatcher is destroyed', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const dispatcher = createBucketTileDispatcher({
         workerFactory: () => undefined,
@@ -150,7 +150,7 @@ describe('bucket-tile-dispatcher', () => {
     });
 
     it('should handle worker error', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({
@@ -170,7 +170,7 @@ describe('bucket-tile-dispatcher', () => {
 
   describe('destroy', () => {
     it('should terminate worker and reject pending requests', async () => {
-      const { createBucketTileDispatcher } = await import('../../../src/mvt/worker/bucket-tile-dispatcher');
+      const { createBucketTileDispatcher } = await import('@/mvt/worker/bucket-tile-dispatcher');
 
       const mockWorker = createMockWorker();
       const dispatcher = createBucketTileDispatcher({

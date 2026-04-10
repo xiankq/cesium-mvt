@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('line-bucket-builder', () => {
   describe('lineBucketBuilder', () => {
     it('should create line bucket builder with options', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -29,7 +29,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should add line feature and update stats', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -65,7 +65,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should ignore non-line features', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -92,7 +92,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should build bucket with typed arrays', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -137,7 +137,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should subdivide all segments of a polyline', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme, Cartesian3, Math: CesiumMath } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -188,7 +188,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle empty geometry', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -215,7 +215,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle single point line', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -242,7 +242,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle line with all same points', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -275,7 +275,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle multiple polylines in one feature', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -315,7 +315,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle very dense line', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -348,7 +348,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle coordinates at extent boundaries', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -385,7 +385,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle negative coordinates', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -418,7 +418,7 @@ describe('line-bucket-builder', () => {
     });
 
     it('should handle coordinates beyond extent', async () => {
-      const { LineBucketBuilder } = await import('../../../../src/mvt/worker/bucket/line-bucket-builder');
+      const { LineBucketBuilder } = await import('@/mvt/worker/bucket/line-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();

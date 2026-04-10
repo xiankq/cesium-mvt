@@ -1,7 +1,7 @@
 import type { GeoJSONSourceSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { GeoJsonObject } from 'geojson';
 import { describe, expect, it, vi } from 'vitest';
-import { GeojsonSourceCache } from '../../src/mvt/source/geojson-source-cache';
+import { GeojsonSourceCache } from '@/mvt/source/geojson-source-cache';
 
 function createGeojsonSource(
   overrides: Partial<GeoJSONSourceSpecification> = {},

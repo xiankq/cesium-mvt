@@ -1,7 +1,7 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
-import { createRenderOrder } from '../../src/mvt/render/render-order';
-import { createLayerFamilies } from '../../src/mvt/style/layer-family';
+import { createRenderOrder } from '@/mvt/render/render-order';
+import { createLayerFamilies } from '@/mvt/style/layer-family';
 
 describe('render-order', () => {
   it('keeps supported layers in style order and attaches family ids', () => {

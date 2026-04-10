@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('circle-bucket-builder', () => {
   describe('circleBucketBuilder', () => {
     it('should create circle bucket builder with options', async () => {
-      const { CircleBucketBuilder } = await import('../../../../src/mvt/worker/bucket/circle-bucket-builder');
+      const { CircleBucketBuilder } = await import('@/mvt/worker/bucket/circle-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -29,7 +29,7 @@ describe('circle-bucket-builder', () => {
     });
 
     it('should add point feature and update stats', async () => {
-      const { CircleBucketBuilder } = await import('../../../../src/mvt/worker/bucket/circle-bucket-builder');
+      const { CircleBucketBuilder } = await import('@/mvt/worker/bucket/circle-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -57,7 +57,7 @@ describe('circle-bucket-builder', () => {
     });
 
     it('should ignore non-point features', async () => {
-      const { CircleBucketBuilder } = await import('../../../../src/mvt/worker/bucket/circle-bucket-builder');
+      const { CircleBucketBuilder } = await import('@/mvt/worker/bucket/circle-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -89,7 +89,7 @@ describe('circle-bucket-builder', () => {
     });
 
     it('should build bucket with typed arrays', async () => {
-      const { CircleBucketBuilder } = await import('../../../../src/mvt/worker/bucket/circle-bucket-builder');
+      const { CircleBucketBuilder } = await import('@/mvt/worker/bucket/circle-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();

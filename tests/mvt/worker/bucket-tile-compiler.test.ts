@@ -1,10 +1,10 @@
-import type { ParsedTile } from '../../../src/mvt/source/vector-tile';
+import type { ParsedTile } from '@/mvt/source/vector-tile';
 import { describe, expect, it } from 'vitest';
 
 describe('bucket-tile-compiler', () => {
   describe('compileBucketTile', () => {
     it('should compile render tile to bucket tile', async () => {
-      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('@/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -31,7 +31,7 @@ describe('bucket-tile-compiler', () => {
     });
 
     it('should create fill bucket for fill batch', async () => {
-      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('@/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -56,7 +56,7 @@ describe('bucket-tile-compiler', () => {
     });
 
     it('should create line bucket for line batch', async () => {
-      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('@/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -81,7 +81,7 @@ describe('bucket-tile-compiler', () => {
     });
 
     it('should create circle bucket for circle batch', async () => {
-      const { compileBucketTile } = await import('../../../src/mvt/worker/bucket-tile-compiler');
+      const { compileBucketTile } = await import('@/mvt/worker/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();

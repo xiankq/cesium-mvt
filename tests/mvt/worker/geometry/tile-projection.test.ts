@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createTileProjectionContext,
   projectTilePoint,
-} from '../../../../src/mvt/worker/geometry/tile-projection';
+} from '@/mvt/worker/geometry/tile-projection';
 
 describe('tile-projection', () => {
   describe('createTileProjectionContext', () => {

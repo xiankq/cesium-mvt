@@ -8,11 +8,11 @@ import type {
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { describe, expect, it } from 'vitest';
-import { compileFeatureTile } from '../../src/mvt/render/feature-tile';
-import { createRenderOrder } from '../../src/mvt/render/render-order';
-import { compileRenderTile, createRenderTileKey } from '../../src/mvt/render/render-tile';
-import { parseVectorTile } from '../../src/mvt/source/vector-tile';
-import { createLayerFamilies } from '../../src/mvt/style/layer-family';
+import { compileFeatureTile } from '@/mvt/render/feature-tile';
+import { createRenderOrder } from '@/mvt/render/render-order';
+import { compileRenderTile, createRenderTileKey } from '@/mvt/render/render-tile';
+import { parseVectorTile } from '@/mvt/source/vector-tile';
+import { createLayerFamilies } from '@/mvt/style/layer-family';
 
 function createComplexTileBuffer() {
   const land: FeatureCollection<Polygon, { kind: string }> = {

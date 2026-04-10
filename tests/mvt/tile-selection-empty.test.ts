@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTileSelection } from '../../src/mvt/tile-selection';
+import { resolveTileSelection } from '@/mvt/tile-selection';
 
 describe('tile-selection empty tile handling', () => {
   it('should not use empty tiles as fallback', () => {

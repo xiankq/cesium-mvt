@@ -2,7 +2,7 @@ import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Scene } from 'cesium';
 import { Event, PrimitiveCollection } from 'cesium';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { StyleImageryProvider } from '../../src/mvt/imagery-provider';
+import { StyleImageryProvider } from '@/mvt/imagery-provider';
 
 function createSceneStub() {
   return {

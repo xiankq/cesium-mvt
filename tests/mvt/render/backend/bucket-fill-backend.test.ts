@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('bucket-fill-backend', () => {
   describe('createBucketFillTileHandle', () => {
     it('should create fill tile handle from bucket tile', async () => {
-      const { createBucketFillTileHandle } = await import('../../../../src/mvt/render/backend/bucket-fill-backend');
+      const { createBucketFillTileHandle } = await import('@/mvt/render/backend/bucket-fill-backend');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -26,7 +26,7 @@ describe('bucket-fill-backend', () => {
     });
 
     it('should return undefined for empty bucket tile', async () => {
-      const { createBucketFillTileHandle } = await import('../../../../src/mvt/render/backend/bucket-fill-backend');
+      const { createBucketFillTileHandle } = await import('@/mvt/render/backend/bucket-fill-backend');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -46,7 +46,7 @@ describe('bucket-fill-backend', () => {
     });
 
     it('should handle multiple features in a bucket', async () => {
-      const { createBucketFillTileHandle } = await import('../../../../src/mvt/render/backend/bucket-fill-backend');
+      const { createBucketFillTileHandle } = await import('@/mvt/render/backend/bucket-fill-backend');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();

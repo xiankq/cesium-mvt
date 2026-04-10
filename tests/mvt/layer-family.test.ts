@@ -1,6 +1,6 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
-import { createLayerFamilies } from '../../src/mvt/style/layer-family';
+import { createLayerFamilies } from '@/mvt/style/layer-family';
 
 describe('layer-family', () => {
   it('groups consecutive compatible geometry layers into the same family', () => {

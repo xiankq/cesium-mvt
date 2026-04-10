@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createTileKey,
   createTileRequest,
-} from '../../src/mvt/source/tile-request';
+} from '@/mvt/source/tile-request';
 
 describe('tile-request', () => {
   it('builds xyz tile urls from a tile template', () => {

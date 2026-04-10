@@ -6,7 +6,7 @@ import {
   Cartesian3,
 } from 'cesium';
 import { describe, expect, it } from 'vitest';
-import { createFillTileHandle } from '../../src/mvt/render/backend/fill-backend';
+import { createFillTileHandle } from '@/mvt/render/backend/fill-backend';
 
 describe('fill-backend', () => {
   it('creates one buffer collection per fill layer and triangulates polygon geometry', () => {

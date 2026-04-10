@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TileManager } from '../../src/mvt/source/tile-manager';
+import { TileManager } from '@/mvt/source/tile-manager';
 
 describe('tile-manager fallback lifecycle', () => {
   it('should keep fallback tiles shown while new tiles are loading', () => {

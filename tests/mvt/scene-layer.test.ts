@@ -5,9 +5,9 @@ import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { Event, PrimitiveCollection } from 'cesium';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SceneLayer } from '../../src/mvt/scene-layer';
-import { listSourceLayers, parseVectorTile } from '../../src/mvt/source/vector-tile';
-import { createStyleSet } from '../../src/mvt/style/style-set';
+import { SceneLayer } from '@/mvt/scene-layer';
+import { listSourceLayers, parseVectorTile } from '@/mvt/source/vector-tile';
+import { createStyleSet } from '@/mvt/style/style-set';
 
 function createSceneStub() {
   return {

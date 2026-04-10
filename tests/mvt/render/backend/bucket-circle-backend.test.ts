@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('bucket-circle-backend', () => {
   describe('createBucketCircleTileHandle', () => {
     it('should return undefined for empty bucket tile', async () => {
-      const { createBucketCircleTileHandle } = await import('../../../../src/mvt/render/backend/bucket-circle-backend');
+      const { createBucketCircleTileHandle } = await import('@/mvt/render/backend/bucket-circle-backend');
 
       const bucketTile = createMockEmptyBucketTile();
       const style = createMockStyle('circle');
@@ -20,7 +20,7 @@ describe('bucket-circle-backend', () => {
     });
 
     it('should create circle tile handle from bucket tile', async () => {
-      const { createBucketCircleTileHandle } = await import('../../../../src/mvt/render/backend/bucket-circle-backend');
+      const { createBucketCircleTileHandle } = await import('@/mvt/render/backend/bucket-circle-backend');
 
       const bucketTile = createMockBucketTile('circle');
       const style = createMockStyle('circle');
@@ -40,7 +40,7 @@ describe('bucket-circle-backend', () => {
     });
 
     it('should handle multiple features in a bucket', async () => {
-      const { createBucketCircleTileHandle } = await import('../../../../src/mvt/render/backend/bucket-circle-backend');
+      const { createBucketCircleTileHandle } = await import('@/mvt/render/backend/bucket-circle-backend');
 
       const bucketTile = createMockBucketTileWithMultipleFeatures();
       const style = createMockStyle('circle');

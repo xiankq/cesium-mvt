@@ -5,18 +5,18 @@ import type {
   Point,
   Polygon,
 } from 'geojson';
-import type { FeatureTile } from '../../src/mvt/render/feature-tile';
+import type { FeatureTile } from '@/mvt/render/feature-tile';
 import type {
   FeatureTileWorkerMessage,
   FeatureTileWorkerResponse,
-} from '../../src/mvt/worker/feature-tile-dispatcher';
+} from '@/mvt/worker/feature-tile-dispatcher';
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRenderOrder } from '../../src/mvt/render/render-order';
-import { compileRenderTile, createRenderTileKey } from '../../src/mvt/render/render-tile';
-import { createLayerFamilies } from '../../src/mvt/style/layer-family';
-import { createFeatureTileDispatcher } from '../../src/mvt/worker/feature-tile-dispatcher';
+import { createRenderOrder } from '@/mvt/render/render-order';
+import { compileRenderTile, createRenderTileKey } from '@/mvt/render/render-tile';
+import { createLayerFamilies } from '@/mvt/style/layer-family';
+import { createFeatureTileDispatcher } from '@/mvt/worker/feature-tile-dispatcher';
 
 function createComplexTileBuffer() {
   const land: FeatureCollection<Polygon, { kind: string }> = {

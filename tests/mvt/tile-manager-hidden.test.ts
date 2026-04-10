@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TileManager } from '../../src/mvt/source/tile-manager';
+import { TileManager } from '@/mvt/source/tile-manager';
 
 describe('tile-manager hidden state', () => {
   it('should not unload hidden tiles immediately', () => {

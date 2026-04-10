@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('line-subdivision', () => {
   describe('subdivideLine', () => {
     it('should subdivide line based on chord error', async () => {
-      const { subdivideLine } = await import('../../../../src/mvt/worker/geometry/line-subdivision');
+      const { subdivideLine } = await import('@/mvt/worker/geometry/line-subdivision');
       const { Cartesian3 } = await import('cesium');
 
       const start = new Cartesian3(6378137, 0, 0);
@@ -18,7 +18,7 @@ describe('line-subdivision', () => {
     });
 
     it('should not subdivide short lines', async () => {
-      const { subdivideLine } = await import('../../../../src/mvt/worker/geometry/line-subdivision');
+      const { subdivideLine } = await import('@/mvt/worker/geometry/line-subdivision');
       const { Cartesian3 } = await import('cesium');
 
       const start = new Cartesian3(6378137, 0, 0);
@@ -33,7 +33,7 @@ describe('line-subdivision', () => {
     });
 
     it('should handle zero-length lines', async () => {
-      const { subdivideLine } = await import('../../../../src/mvt/worker/geometry/line-subdivision');
+      const { subdivideLine } = await import('@/mvt/worker/geometry/line-subdivision');
       const { Cartesian3 } = await import('cesium');
 
       const start = new Cartesian3(6378137, 0, 0);
@@ -46,7 +46,7 @@ describe('line-subdivision', () => {
     });
 
     it('should produce points on ellipsoid surface', async () => {
-      const { subdivideLine } = await import('../../../../src/mvt/worker/geometry/line-subdivision');
+      const { subdivideLine } = await import('@/mvt/worker/geometry/line-subdivision');
       const { Cartesian3, Ellipsoid } = await import('cesium');
 
       const start = new Cartesian3(6378137, 0, 0);
@@ -66,7 +66,7 @@ describe('line-subdivision', () => {
 
   describe('subdivideRing', () => {
     it('should subdivide closed ring', async () => {
-      const { subdivideRing } = await import('../../../../src/mvt/worker/geometry/line-subdivision');
+      const { subdivideRing } = await import('@/mvt/worker/geometry/line-subdivision');
       const { Cartesian3 } = await import('cesium');
 
       const ring = [

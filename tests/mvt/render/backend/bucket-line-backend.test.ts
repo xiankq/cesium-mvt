@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('bucket-line-backend', () => {
   describe('createBucketLineTileHandle', () => {
     it('should return undefined for empty bucket tile', async () => {
-      const { createBucketLineTileHandle } = await import('../../../../src/mvt/render/backend/bucket-line-backend');
+      const { createBucketLineTileHandle } = await import('@/mvt/render/backend/bucket-line-backend');
 
       const bucketTile = createMockEmptyBucketTile();
       const style = createMockStyle('line');
@@ -20,7 +20,7 @@ describe('bucket-line-backend', () => {
     });
 
     it('should create line tile handle from bucket tile', async () => {
-      const { createBucketLineTileHandle } = await import('../../../../src/mvt/render/backend/bucket-line-backend');
+      const { createBucketLineTileHandle } = await import('@/mvt/render/backend/bucket-line-backend');
 
       const bucketTile = createMockBucketTile('line');
       const style = createMockStyle('line');
@@ -40,7 +40,7 @@ describe('bucket-line-backend', () => {
     });
 
     it('should handle multiple features in a bucket', async () => {
-      const { createBucketLineTileHandle } = await import('../../../../src/mvt/render/backend/bucket-line-backend');
+      const { createBucketLineTileHandle } = await import('@/mvt/render/backend/bucket-line-backend');
 
       const bucketTile = createMockBucketTileWithMultipleFeatures();
       const style = createMockStyle('line');

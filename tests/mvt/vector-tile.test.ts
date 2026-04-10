@@ -7,7 +7,7 @@ import {
   listSourceLayers,
   loadVectorTile,
   parseVectorTile,
-} from '../../src/mvt/source/vector-tile';
+} from '@/mvt/source/vector-tile';
 
 function createTileBuffer() {
   const data: FeatureCollection<Point, { name: string }> = {

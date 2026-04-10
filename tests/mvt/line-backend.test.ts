@@ -5,7 +5,7 @@ import {
   BufferPolylineMaterial,
 } from 'cesium';
 import { describe, expect, it } from 'vitest';
-import { createLineTileHandle } from '../../src/mvt/render/backend/line-backend';
+import { createLineTileHandle } from '@/mvt/render/backend/line-backend';
 
 describe('line-backend', () => {
   it('creates one buffer collection per line layer and projects line vertices onto the globe', () => {

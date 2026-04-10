@@ -7,7 +7,7 @@ import {
   destroyRenderedTileHandle,
   mountRenderedTileHandle,
   setRenderedTileVisibility,
-} from '../../src/mvt/render/rendered-tile';
+} from '@/mvt/render/rendered-tile';
 
 describe('rendered-tile', () => {
   it('creates a combined render handle and manages collection visibility and mounting', () => {

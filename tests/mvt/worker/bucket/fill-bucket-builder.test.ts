@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 describe('fill-bucket-builder', () => {
   describe('fillBucketBuilder', () => {
     it('should create fill bucket builder with options', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -29,7 +29,7 @@ describe('fill-bucket-builder', () => {
     });
 
     it('should add polygon feature and update stats', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -68,7 +68,7 @@ describe('fill-bucket-builder', () => {
     });
 
     it('should ignore non-polygon features', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -95,7 +95,7 @@ describe('fill-bucket-builder', () => {
     });
 
     it('should build bucket with typed arrays', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -143,7 +143,7 @@ describe('fill-bucket-builder', () => {
     });
 
     it('should triangulate polygon correctly', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();
@@ -193,7 +193,7 @@ describe('fill-bucket-builder', () => {
     });
 
     it('should handle polygon with hole correctly', async () => {
-      const { FillBucketBuilder } = await import('../../../../src/mvt/worker/bucket/fill-bucket-builder');
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
       const { WebMercatorTilingScheme } = await import('cesium');
 
       const tilingScheme = new WebMercatorTilingScheme();

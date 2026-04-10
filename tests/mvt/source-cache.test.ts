@@ -3,7 +3,7 @@ import type {
   VectorSourceSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it, vi } from 'vitest';
-import { SourceCache } from '../../src/mvt/source/source-cache';
+import { SourceCache } from '@/mvt/source/source-cache';
 
 function createVectorSource(
   overrides: Partial<VectorSourceSpecification> = {},

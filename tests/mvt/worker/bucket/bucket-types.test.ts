@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   calculateBucketByteLength,
   calculateFeatureIndexByteLength,
-} from '../../../../src/mvt/worker/bucket/bucket-types';
+} from '@/mvt/worker/bucket/bucket-types';
 
 describe('bucket-types', () => {
   describe('calculateBucketByteLength', () => {

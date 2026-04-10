@@ -1,6 +1,6 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadStyleSet, normalizeStyle } from '../../src/mvt/style/style-loader';
+import { loadStyleSet, normalizeStyle } from '@/mvt/style/style-loader';
 
 describe('style-loader', () => {
   afterEach(() => {
