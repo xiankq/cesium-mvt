@@ -1,6 +1,5 @@
 import type {
   BackgroundLayerSpecification,
-  FilterSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
@@ -17,7 +16,6 @@ export interface BackgroundBatch {
 
 export interface GeometryBatch {
   backend: SupportedGeometryLayerType;
-  filter?: FilterSpecification;
   familyId: string;
   layerIds: string[];
   order: number;
@@ -108,9 +106,6 @@ export function compileRenderTile({
         sourceLayer: family.sourceLayer,
         type: family.type,
       };
-      if (family.filter !== undefined) {
-        geometryBatch.filter = family.filter;
-      }
       geometryBatchesByFamilyId.set(entry.familyId, geometryBatch);
     }
 
@@ -125,7 +120,7 @@ export function compileRenderTile({
   };
 }
 
-export function parseRenderTileCoordinateFromKey(key: string) {
+function parseRenderTileCoordinateFromKey(key: string) {
   const parts = key.split('/');
   if (parts.length < 4) {
     throw new Error(`Invalid render tile key: ${key}`);

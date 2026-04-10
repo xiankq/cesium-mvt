@@ -45,12 +45,14 @@ export function createBucketLineTileHandle({
   const collections: BucketLineCollectionHandle[] = [];
 
   for (const bucket of lineBuckets) {
-    const collectionHandles = createLineCollections(
+    const collectionHandle = createLineCollection(
       bucket,
       layersById,
       style,
     );
-    collections.push(...collectionHandles);
+    if (collectionHandle) {
+      collections.push(collectionHandle);
+    }
   }
 
   if (collections.length === 0) {
@@ -69,83 +71,79 @@ export function createBucketLineTileHandle({
   };
 }
 
-function createLineCollections(
+function createLineCollection(
   bucket: Bucket,
   layersById: Map<string, LineLayerSpecification>,
   style: StyleSpecification,
-): BucketLineCollectionHandle[] {
+): BucketLineCollectionHandle | undefined {
   const data = bucket.data as LineBucketData;
   const stats = bucket.stats as LineBucketStats;
 
   if (stats.polylineCount === 0 || data.positions.length === 0) {
-    return [];
+    return undefined;
   }
 
   if (!validateLineBucketData(data)) {
-    return [];
+    return undefined;
   }
 
-  const vertexCounts = Array.from(data.vertexCounts);
-  const collections: BucketLineCollectionHandle[] = [];
+  const layerId = bucket.layerIds[0];
+  const layer = layersById.get(layerId);
+  if (!layer) {
+    return undefined;
+  }
 
-  for (const layerId of bucket.layerIds) {
-    const layer = layersById.get(layerId);
-    if (!layer) {
+  const collection = new BufferPolylineCollection({
+    primitiveCountMax: stats.polylineCount,
+    vertexCountMax: stats.totalVertexCount,
+  });
+
+  const material = getLineMaterial(style, layer);
+  const flyweight = new BufferPolyline();
+
+  const vertexCounts = Array.from(data.vertexCounts);
+  let vertexOffset = 0;
+
+  for (let i = 0; i < vertexCounts.length; i++) {
+    const vertexCount = vertexCounts[i];
+    if (vertexCount < 2) {
+      vertexOffset += vertexCount;
       continue;
     }
 
-    const collection = new BufferPolylineCollection({
-      primitiveCountMax: stats.polylineCount,
-      vertexCountMax: stats.totalVertexCount,
-    });
-
-    const material = getLineMaterial(style, layer);
-    const flyweight = new BufferPolyline();
-    let vertexOffset = 0;
-
-    for (let i = 0; i < vertexCounts.length; i++) {
-      const vertexCount = vertexCounts[i];
-      if (vertexCount < 2) {
-        vertexOffset += vertexCount;
-        continue;
-      }
-
-      const positions = extractPositions(
-        data.positions,
-        vertexOffset,
-        vertexCount,
-      );
-      if (!validatePositions(positions)) {
-        vertexOffset += vertexCount;
-        continue;
-      }
-
-      const featureId = data.featureIds[vertexOffset] ?? 0;
-
-      collection.add(
-        {
-          material,
-          positions,
-        },
-        flyweight,
-      );
-      flyweight.featureId = featureId;
-
+    const positions = extractPositions(
+      data.positions,
+      vertexOffset,
+      vertexCount,
+    );
+    if (!validatePositions(positions)) {
       vertexOffset += vertexCount;
+      continue;
     }
 
-    collections.push({
-      byteLength:
+    const featureId = data.featureIds[vertexOffset] ?? 0;
+
+    collection.add(
+      {
+        material,
+        positions,
+      },
+      flyweight,
+    );
+    flyweight.featureId = featureId;
+
+    vertexOffset += vertexCount;
+  }
+
+  return {
+    byteLength:
             data.positions.byteLength
             + data.vertexCounts.byteLength
             + data.featureIds.byteLength,
-      collection,
-      layerId,
-      polylineCount: stats.polylineCount,
-    });
-  }
-
-  return collections;
+    collection,
+    layerId,
+    polylineCount: stats.polylineCount,
+  };
 }
 
 function validateLineBucketData(data: LineBucketData): boolean {

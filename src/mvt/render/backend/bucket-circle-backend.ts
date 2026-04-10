@@ -45,12 +45,14 @@ export function createBucketCircleTileHandle({
   const collections: BucketCircleCollectionHandle[] = [];
 
   for (const bucket of circleBuckets) {
-    const collectionHandles = createCircleCollections(
+    const collectionHandle = createCircleCollection(
       bucket,
       layersById,
       style,
     );
-    collections.push(...collectionHandles);
+    if (collectionHandle) {
+      collections.push(collectionHandle);
+    }
   }
 
   if (collections.length === 0) {
@@ -69,66 +71,62 @@ export function createBucketCircleTileHandle({
   };
 }
 
-function createCircleCollections(
+function createCircleCollection(
   bucket: Bucket,
   layersById: Map<string, CircleLayerSpecification>,
   style: StyleSpecification,
-): BucketCircleCollectionHandle[] {
+): BucketCircleCollectionHandle | undefined {
   const data = bucket.data as CircleBucketData;
   const stats = bucket.stats as CircleBucketStats;
 
   if (stats.pointCount === 0 || data.positions.length === 0) {
-    return [];
+    return undefined;
   }
 
   if (!validateCircleBucketData(data)) {
-    return [];
+    return undefined;
   }
 
-  const collections: BucketCircleCollectionHandle[] = [];
-  for (const layerId of bucket.layerIds) {
-    const layer = layersById.get(layerId);
-    if (!layer) {
+  const layerId = bucket.layerIds[0];
+  const layer = layersById.get(layerId);
+  if (!layer) {
+    return undefined;
+  }
+
+  const collection = new BufferPointCollection({
+    primitiveCountMax: stats.pointCount,
+  });
+
+  const flyweight = new BufferPoint();
+  const material = getCircleMaterial(style, layer);
+
+  for (let i = 0; i < stats.pointCount; i++) {
+    const x = data.positions[i * 3];
+    const y = data.positions[i * 3 + 1];
+    const z = data.positions[i * 3 + 2];
+
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
       continue;
     }
 
-    const collection = new BufferPointCollection({
-      primitiveCountMax: stats.pointCount,
-    });
+    const featureId = data.featureIds[i] ?? 0;
 
-    const flyweight = new BufferPoint();
-    const material = getCircleMaterial(style, layer);
-
-    for (let i = 0; i < stats.pointCount; i++) {
-      const x = data.positions[i * 3];
-      const y = data.positions[i * 3 + 1];
-      const z = data.positions[i * 3 + 2];
-
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-        continue;
-      }
-
-      const featureId = data.featureIds[i] ?? 0;
-
-      collection.add(
-        {
-          material,
-          position: new Cartesian3(x, y, z),
-        },
-        flyweight,
-      );
-      flyweight.featureId = featureId;
-    }
-
-    collections.push({
-      byteLength: data.positions.byteLength + data.featureIds.byteLength,
-      collection,
-      layerId,
-      pointCount: stats.pointCount,
-    });
+    collection.add(
+      {
+        material,
+        position: new Cartesian3(x, y, z),
+      },
+      flyweight,
+    );
+    flyweight.featureId = featureId;
   }
 
-  return collections;
+  return {
+    byteLength: data.positions.byteLength + data.featureIds.byteLength,
+    collection,
+    layerId,
+    pointCount: stats.pointCount,
+  };
 }
 
 function validateCircleBucketData(data: CircleBucketData): boolean {

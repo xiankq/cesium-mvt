@@ -1,19 +1,15 @@
 import type { VectorTileFeature } from '@mapbox/vector-tile';
-import type { FilterSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Cartesian3 } from 'cesium';
 import type { TileProjectionData } from '../geometry/tile-projection';
 import type { Bucket, FillBucketData, FillBucketStats } from './bucket-types';
 import { classifyRings } from '@mapbox/vector-tile';
 import earcut from 'earcut';
-import { parseRenderTileCoordinateFromKey } from '../../render/render-tile';
-import { createFeatureMatchesPredicate } from '../../style/feature-filter';
 import { subdivideRing } from '../geometry/line-subdivision';
 import { createTileProjectionContext, projectTilePoint } from '../geometry/tile-projection';
 import { calculateBucketByteLength, calculateFeatureIndexByteLength } from './bucket-types';
 
 export interface BucketBuilderOptions {
   extent: number;
-  filter?: FilterSpecification;
   familyId: string;
   layerIds: string[];
   sourceLayer?: string;
@@ -27,7 +23,6 @@ export class FillBucketBuilder {
   readonly type = 'fill' as const;
 
   private readonly extent: number;
-  private readonly featureMatches: (feature: VectorTileFeature) => boolean;
   private readonly familyId: string;
   private readonly layerIds: string[];
   private readonly sourceLayer?: string;
@@ -60,10 +55,6 @@ export class FillBucketBuilder {
 
   constructor(options: BucketBuilderOptions) {
     this.extent = options.extent;
-    this.featureMatches = createFeatureMatchesPredicate(
-      options.filter,
-      parseRenderTileCoordinateFromKey(options.tileKey).level,
-    );
     this.familyId = options.familyId;
     this.layerIds = options.layerIds;
     this.sourceLayer = options.sourceLayer;
@@ -72,10 +63,6 @@ export class FillBucketBuilder {
 
   addFeature(feature: VectorTileFeature, localId: number): void {
     if (feature.type !== 3) {
-      return;
-    }
-
-    if (!this.featureMatches(feature)) {
       return;
     }
 

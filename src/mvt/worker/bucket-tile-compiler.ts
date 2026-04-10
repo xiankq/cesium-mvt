@@ -90,7 +90,6 @@ function createBucketBuilder(
   const options = {
     extent,
     familyId: batch.familyId,
-    filter: batch.filter,
     layerIds: batch.layerIds,
     sourceLayer: batch.sourceLayer,
     tileProjection,

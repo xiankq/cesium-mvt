@@ -504,12 +504,6 @@ export class SceneLayer {
       viewportWidth: resolveSceneViewportWidth(this.scene),
     });
 
-    // 当 Cesium 暂时无法给出有效 view rectangle 时，如果之前已经有过有效视图，
-    // 保持上一帧可见状态，不要把这类瞬态抖动错误当成一次完整的 frame 切换。
-    if (!tileSelection && this.lastViewSelectionKey !== undefined) {
-      return;
-    }
-
     if (!this.shouldUpdateFrame(tileSelection)) {
       return;
     }

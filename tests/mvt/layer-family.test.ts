@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createLayerFamilies } from '@/mvt/style/layer-family';
 
 describe('layer-family', () => {
-  it('groups compatible geometry layers into the same family', () => {
+  it('groups consecutive compatible geometry layers into the same family', () => {
     const style: StyleSpecification = {
       version: 8,
       sources: {
@@ -81,13 +81,20 @@ describe('layer-family', () => {
       },
       {
         id: 'base/road/line/1',
-        layerIds: ['road-base', 'road-casing', 'road-dash'],
+        layerIds: ['road-base', 'road-casing'],
         sourceId: 'base',
         sourceLayer: 'road',
         type: 'line',
       },
       {
-        id: 'base/poi/circle/2',
+        id: 'base/road/line/2',
+        layerIds: ['road-dash'],
+        sourceId: 'base',
+        sourceLayer: 'road',
+        type: 'line',
+      },
+      {
+        id: 'base/poi/circle/3',
         layerIds: ['poi'],
         sourceId: 'base',
         sourceLayer: 'poi',

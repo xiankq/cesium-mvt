@@ -35,30 +35,6 @@ describe('bucket-circle-backend', () => {
       expect(handle?.collections.length).toBeGreaterThan(0);
     });
 
-    it('should create one collection per style layer in the bucket', async () => {
-      const { createBucketCircleTileHandle }
-        = await import('@/mvt/render/backend/bucket-circle-backend');
-
-      const bucketTile = createMockBucketTileWithLayerIds(['layer1', 'layer2']);
-      const style = createMockStyle('circle', ['layer1', 'layer2']);
-
-      const handle = createBucketCircleTileHandle({
-        bucketTile,
-        style,
-      });
-
-      expect(handle).toBeDefined();
-      expect(handle?.collections).toHaveLength(2);
-      expect(handle?.collections.map(collection => collection.layerId)).toEqual([
-        'layer1',
-        'layer2',
-      ]);
-      expect(handle?.collections.map(collection => collection.pointCount)).toEqual([
-        1,
-        1,
-      ]);
-    });
-
     it('should handle multiple features in a bucket', async () => {
       const { createBucketCircleTileHandle }
         = await import('@/mvt/render/backend/bucket-circle-backend');
@@ -127,42 +103,6 @@ function createMockBucketTile(type: 'fill' | 'line' | 'circle') {
   } as any;
 }
 
-function createMockBucketTileWithLayerIds(layerIds: string[]) {
-  return {
-    buckets: [
-      {
-        type: 'circle' as const,
-        familyId: 'source/layer/circle/0',
-        layerIds,
-        sourceLayer: 'layer',
-        stats: {
-          type: 'circle' as const,
-          featureCount: 1,
-          byteLength: 100,
-          pointCount: 1,
-        },
-        data: {
-          positions: new Float64Array([0, 0, 0]),
-          featureIds: new Float32Array([0]),
-        },
-        featureIndex: {
-          entries: [
-            {
-              id: 1,
-              properties: { name: 'test' },
-              type: 'point' as const,
-            },
-          ],
-          byteLength: 50,
-        },
-      },
-    ],
-    epoch: 1,
-    key: 'source/0/0/0',
-    byteLength: 100,
-  } as any;
-}
-
 function createMockBucketTileWithMultipleFeatures() {
   return {
     buckets: [
@@ -204,24 +144,23 @@ function createMockBucketTileWithMultipleFeatures() {
   } as any;
 }
 
-function createMockStyle(
-  type: 'fill' | 'line' | 'circle',
-  layerIds: string[] = ['layer1'],
-) {
+function createMockStyle(type: 'fill' | 'line' | 'circle') {
   return {
     version: 8 as const,
     sources: {},
-    layers: layerIds.map(id => ({
-      id,
-      type,
-      'source': 'source',
-      'source-layer': 'layer',
-      'paint':
-                type === 'fill'
-                  ? { 'fill-color': '#ff0000' }
-                  : type === 'line'
-                    ? { 'line-color': '#00ff00' }
-                    : { 'circle-color': '#0000ff' },
-    })),
+    layers: [
+      {
+        'id': 'layer1',
+        type,
+        'source': 'source',
+        'source-layer': 'layer',
+        'paint':
+                    type === 'fill'
+                      ? { 'fill-color': '#ff0000' }
+                      : type === 'line'
+                        ? { 'line-color': '#00ff00' }
+                        : { 'circle-color': '#0000ff' },
+      },
+    ],
   } as any;
 }

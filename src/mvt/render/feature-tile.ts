@@ -2,8 +2,6 @@ import type Point from '@mapbox/point-geometry';
 import type { ParsedTile } from '../source/vector-tile';
 import type { BackgroundBatch, GeometryBatch, RenderTile } from './render-tile';
 import { getSourceLayer } from '../source/vector-tile';
-import { createFeatureMatchesPredicate } from '../style/feature-filter';
-import { parseRenderTileCoordinateFromKey } from './render-tile';
 
 // FeatureTile 是各类渲染后端共享消费的几何提取结果。
 export interface ExtractedFeature {
@@ -34,22 +32,17 @@ export interface CompileFeatureTileOptions {
 export function compileFeatureTile(
   options: CompileFeatureTileOptions,
 ): FeatureTile {
-  const { level } = parseRenderTileCoordinateFromKey(options.renderTile.key);
   return {
     background: options.renderTile.background,
     epoch: options.renderTile.epoch,
     geometryBatches: options.renderTile.geometryBatches.flatMap(
-      batch => compileFeatureBatch(batch, options.tile, level),
+      batch => compileFeatureBatch(batch, options.tile),
     ),
     key: options.renderTile.key,
   };
 }
 
-function compileFeatureBatch(
-  batch: GeometryBatch,
-  tile: ParsedTile,
-  zoom: number,
-) {
+function compileFeatureBatch(batch: GeometryBatch, tile: ParsedTile) {
   if (!batch.sourceLayer) {
     return [];
   }
@@ -59,17 +52,12 @@ function compileFeatureBatch(
     return [];
   }
 
-  const featureMatches = createFeatureMatchesPredicate(batch.filter, zoom);
   const features: ExtractedFeature[] = [];
   for (let index = 0; index < sourceLayer.length; index += 1) {
     const feature = sourceLayer.feature(index);
     const featureType = getFeatureType(feature.type);
     // 这里只保留目标后端能够处理的几何类型。
     if (!featureType || !matchesBatchType(batch.type, featureType)) {
-      continue;
-    }
-
-    if (!featureMatches(feature)) {
       continue;
     }
 
