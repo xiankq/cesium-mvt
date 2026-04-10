@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
-import type { BucketTileWorkerMessage, BucketTileWorkerResponse } from './bucket-tile-dispatcher';
-import { compileBucketTileFromData } from './bucket-tile-compiler';
+import type { BucketTileWorkerMessage, BucketTileWorkerResponse } from '../bucket/bucket-tile-dispatcher';
+import { compileBucketTileFromData } from '../bucket/bucket-tile-compiler';
 
 declare const self: DedicatedWorkerGlobalScope;
 

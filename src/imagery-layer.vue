@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Viewer } from 'cesium';
 import { watchEffect } from 'vue';
-import { StyleImageryProvider } from './mvt/imagery-provider';
+import { CesiumVectorTile } from './mvt/cesium-vector-tile';
 
 const props = defineProps<{
   viewer: Viewer;
@@ -10,13 +10,10 @@ const props = defineProps<{
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
 watchEffect(async (onCleanup) => {
-  const provider = await StyleImageryProvider.fromUrl(STYLE_URL, {
-    scene: props.viewer.scene,
-  });
-  const layer = props.viewer.imageryLayers.addImageryProvider(provider);
+  const vectorTile = await CesiumVectorTile.fromUrl(STYLE_URL);
+  props.viewer.scene.primitives.add(vectorTile);
   onCleanup(() => {
-    layer && props.viewer.imageryLayers.remove(layer, true);
-    provider?.destroy();
+    props.viewer.scene.primitives.remove(vectorTile);
   });
 });
 </script>

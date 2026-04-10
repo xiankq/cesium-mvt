@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTileSelection } from '@/mvt/tile-selection';
+import { resolveTileSelection } from '@/mvt/source/tile-selection';
 
 describe('tile-selection minzoom/maxzoom', () => {
   it('should use maxzoom tiles when zoom exceeds maxzoom', () => {

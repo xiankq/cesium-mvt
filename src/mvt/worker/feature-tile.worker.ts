@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import type { FeatureTileWorkerMessage, FeatureTileWorkerResponse } from './feature-tile-dispatcher';
+import type { FeatureTileWorkerMessage, FeatureTileWorkerResponse } from '../render/feature-tile-dispatcher';
 import { compileFeatureTile } from '../render/feature-tile';
 import { parseVectorTile } from '../source/vector-tile';
 

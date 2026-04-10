@@ -5,7 +5,7 @@ import type {
   BufferPolylineCollection,
   PrimitiveCollection,
 } from 'cesium';
-import type { ParsedTileResult } from '../worker/bucket/bucket-types';
+import type { ParsedTileResult } from '../bucket';
 import type { BucketCircleTileHandle } from './backend/bucket-circle-backend';
 import type { BucketFillTileHandle } from './backend/bucket-fill-backend';
 import type { BucketLineTileHandle } from './backend/bucket-line-backend';

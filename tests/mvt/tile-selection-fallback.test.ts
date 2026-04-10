@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTileSelection } from '@/mvt/tile-selection';
+import { resolveTileSelection } from '@/mvt/source/tile-selection';
 
 describe('tile-selection fallback issue', () => {
   it('should find fallback ancestor when intermediate tiles are empty', () => {

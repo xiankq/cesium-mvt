@@ -7,7 +7,7 @@ import type {
   LineBucketData,
   LineBucketStats,
   ParsedTileResult,
-} from '@/mvt/worker/bucket/bucket-types';
+} from '@/mvt/bucket/bucket-types';
 
 export interface MockBucketOptions {
   featureCount?: number;

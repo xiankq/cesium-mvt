@@ -1,0 +1,197 @@
+import type { WebMercatorTilingScheme } from 'cesium';
+import type { TileProjectionData } from '../geometry/tile-projection';
+import type { RenderTile } from '../render/render-tile';
+import type { WorkerLike } from '../utils/worker-dispatcher';
+import type { ParsedTileResult } from './bucket-types';
+import {
+  extractWorkerResponse,
+  InlineDispatcher,
+  WorkerDispatcher,
+
+} from '../utils/worker-dispatcher';
+import { compileBucketTileFromData } from './bucket-tile-compiler';
+
+/**
+ * Bucket 瓦片 Dispatcher 模块
+ *
+ * 该模块负责管理 Bucket 瓦片的编译任务分发，支持 Worker 和内联两种执行模式。
+ *
+ * 核心概念：
+ * - Worker 模式：在 Web Worker 中异步编译，不阻塞主线程
+ * - Inline 模式：在主线程中同步编译，适用于不支持 Worker 的环境
+ */
+
+export interface CompileBucketTileJob {
+  renderTile: RenderTile;
+  signal?: AbortSignal;
+  tileData: ArrayBuffer;
+  tilingScheme: WebMercatorTilingScheme;
+}
+
+export interface BucketTileResultResponse {
+  bucketTile: ParsedTileResult;
+  id: number;
+  type: 'bucket-tile-result';
+}
+
+export interface BucketTileErrorResponse {
+  error: string;
+  id: number;
+  type: 'bucket-tile-error';
+}
+
+export interface BucketTileCompileMessage {
+  id: number;
+  renderTile: RenderTile;
+  tileData: ArrayBuffer;
+  tileProjection: TileProjectionData;
+  type: 'compile-bucket-tile';
+}
+
+export interface BucketTileCancelMessage {
+  id: number;
+  type: 'cancel-bucket-tile';
+}
+
+export type BucketTileWorkerMessage
+  = | BucketTileCancelMessage
+    | BucketTileCompileMessage;
+export type BucketTileWorkerResponse
+  = | BucketTileErrorResponse
+    | BucketTileResultResponse;
+
+export interface BucketTileDispatcherOptions {
+  workerFactory?: () => WorkerLike<BucketTileWorkerMessage, Transferable> | undefined;
+}
+
+export interface BucketTileDispatcher {
+  compile: (job: CompileBucketTileJob) => Promise<ParsedTileResult>;
+  destroy: () => void;
+}
+
+/**
+ * 创建 Bucket 瓦片 Dispatcher
+ *
+ * @param options - 配置选项
+ * @returns Bucket 瓦片 Dispatcher 实例
+ */
+export function createBucketTileDispatcher(
+  options: BucketTileDispatcherOptions = {},
+): BucketTileDispatcher {
+  const workerFactory = options.workerFactory ?? createDefaultWorker;
+  const worker = workerFactory();
+
+  if (!worker) {
+    return new InlineDispatcher({
+      execute: (job: CompileBucketTileJob) => {
+        const tileProjection = extractTileProjection(job.renderTile.key, job.tilingScheme);
+        return compileBucketTileFromData({
+          renderTile: job.renderTile,
+          tileData: job.tileData,
+          tileProjection,
+        });
+      },
+    });
+  }
+
+  const dispatcher = new WorkerDispatcher<
+    CompileBucketTileJob,
+    ParsedTileResult,
+    BucketTileWorkerMessage,
+    Transferable
+  >({
+    createCancelMessage: id => ({ id, type: 'cancel-bucket-tile' }),
+    createJobMessage: (id, job) => {
+      const tileProjection = extractTileProjection(job.renderTile.key, job.tilingScheme);
+      return {
+        message: {
+          id,
+          renderTile: job.renderTile,
+          tileData: job.tileData,
+          tileProjection,
+          type: 'compile-bucket-tile',
+        },
+        transfer: [job.tileData],
+      };
+    },
+    dispatcherName: 'Bucket tile dispatcher',
+    extractResult: (event) => {
+      const data = extractWorkerResponse<BucketTileWorkerResponse>(event);
+      if (data.type === 'bucket-tile-result') {
+        return { id: data.id, result: data.bucketTile };
+      }
+      if (data.type === 'bucket-tile-error') {
+        throw new Error(data.error);
+      }
+      return null;
+    },
+    worker,
+  });
+
+  return {
+    compile: (job: CompileBucketTileJob) => dispatcher.dispatch(job, job.signal),
+    destroy: () => dispatcher.destroy(),
+  };
+}
+
+/**
+ * 创建默认 Worker
+ *
+ * @returns Worker 实例，如果不支持则返回 undefined
+ */
+function createDefaultWorker(): WorkerLike<BucketTileWorkerMessage, Transferable> | undefined {
+  if (typeof Worker === 'undefined') {
+    return undefined;
+  }
+
+  return new Worker(
+    new URL('../worker/bucket-tile.worker.ts', import.meta.url),
+    { type: 'module' },
+  ) as unknown as WorkerLike<BucketTileWorkerMessage, Transferable>;
+}
+
+/**
+ * 提取瓦片投影数据
+ *
+ * @param tileKey - 瓦片键
+ * @param tilingScheme - 瓦片方案
+ * @returns 瓦片投影数据
+ */
+function extractTileProjection(
+  tileKey: string,
+  tilingScheme: WebMercatorTilingScheme,
+): TileProjectionData {
+  const { level, x, y } = parseTileCoordinateFromKey(tileKey);
+  const rect = tilingScheme.tileXYToNativeRectangle(x, y, level);
+  return {
+    east: rect.east,
+    north: rect.north,
+    south: rect.south,
+    west: rect.west,
+  };
+}
+
+/**
+ * 从瓦片键解析瓦片坐标
+ *
+ * @param key - 瓦片键（格式：sourceId/level/x/y 或 sourceId/level/x/y@epoch）
+ * @returns 瓦片坐标
+ */
+function parseTileCoordinateFromKey(key: string) {
+  const scopedKey = key.split('@')[0];
+  const parts = scopedKey.split('/');
+
+  if (parts.length < 4) {
+    return { level: 0, x: 0, y: 0 };
+  }
+
+  const level = Number(parts[parts.length - 3]);
+  const x = Number(parts[parts.length - 2]);
+  const y = Number(parts[parts.length - 1]);
+
+  if (!Number.isInteger(level) || !Number.isInteger(x) || !Number.isInteger(y)) {
+    return { level: 0, x: 0, y: 0 };
+  }
+
+  return { level, x, y };
+}

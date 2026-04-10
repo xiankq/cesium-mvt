@@ -7,8 +7,9 @@ import type {
   LineBucketData,
   LineBucketStats,
   ParsedTileResult,
-} from '../../worker/bucket/bucket-types';
+} from '../../bucket/bucket-types';
 import { BufferPolyline, BufferPolylineCollection } from 'cesium';
+import { validatePositions } from '../../utils/validation';
 import { getLineMaterial } from './material-cache';
 
 export interface BucketLineCollectionHandle {
@@ -155,15 +156,6 @@ function validateLineBucketData(data: LineBucketData): boolean {
   }
   if (!data.featureIds || !(data.featureIds instanceof Float32Array)) {
     return false;
-  }
-  return true;
-}
-
-function validatePositions(positions: Float64Array): boolean {
-  for (let i = 0; i < positions.length; i++) {
-    if (!Number.isFinite(positions[i])) {
-      return false;
-    }
   }
   return true;
 }

@@ -7,8 +7,9 @@ import type {
   CircleBucketData,
   CircleBucketStats,
   ParsedTileResult,
-} from '../../worker/bucket/bucket-types';
+} from '../../bucket/bucket-types';
 import { BufferPoint, BufferPointCollection, Cartesian3 } from 'cesium';
+import { isValidTypedArray } from '../../utils/validation';
 import { getCircleMaterial } from './material-cache';
 
 export interface BucketCircleCollectionHandle {
@@ -130,10 +131,10 @@ function createCircleCollection(
 }
 
 function validateCircleBucketData(data: CircleBucketData): boolean {
-  if (!data.positions || !(data.positions instanceof Float64Array)) {
+  if (!isValidTypedArray(data.positions, Float64Array)) {
     return false;
   }
-  if (!data.featureIds || !(data.featureIds instanceof Float32Array)) {
+  if (!isValidTypedArray(data.featureIds, Float32Array)) {
     return false;
   }
   return true;

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   collectCoveringTileCoordinates,
   estimateViewTileLevel,
-} from '@/mvt/view-state';
+} from '@/mvt/source/view-state';
 
 describe('view-state', () => {
   it('estimates tile level from the current view width and clamps to configured limits', () => {

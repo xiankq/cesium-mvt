@@ -7,8 +7,9 @@ import type {
   FillBucketData,
   FillBucketStats,
   ParsedTileResult,
-} from '../../worker/bucket/bucket-types';
+} from '../../bucket/bucket-types';
 import { BufferPolygon, BufferPolygonCollection } from 'cesium';
+import { isValidTypedArray, validatePositions } from '../../utils/validation';
 import { getFillMaterial } from './material-cache';
 
 export interface BucketFillCollectionHandle {
@@ -108,26 +109,17 @@ export function createBucketFillTileHandle({
 }
 
 function validateFillBucketData(data: FillBucketData): boolean {
-  if (!data.positions || !(data.positions instanceof Float64Array)) {
+  if (!isValidTypedArray(data.positions, Float64Array)) {
     return false;
   }
-  if (!data.triangles || !(data.triangles instanceof Uint32Array)) {
+  if (!isValidTypedArray(data.triangles, Uint32Array)) {
     return false;
   }
-  if (!data.holes || !(data.holes instanceof Uint32Array)) {
+  if (!isValidTypedArray(data.holes, Uint32Array)) {
     return false;
   }
-  if (!data.featureIds || !(data.featureIds instanceof Float32Array)) {
+  if (!isValidTypedArray(data.featureIds, Float32Array)) {
     return false;
-  }
-  return true;
-}
-
-function validatePositions(positions: Float64Array): boolean {
-  for (let i = 0; i < positions.length; i++) {
-    if (!Number.isFinite(positions[i])) {
-      return false;
-    }
   }
   return true;
 }

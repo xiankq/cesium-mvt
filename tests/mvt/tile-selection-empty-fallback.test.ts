@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTileSelection } from '@/mvt/tile-selection';
+import { resolveTileSelection } from '@/mvt/source/tile-selection';
 
 describe('tile-selection fallback with all empty tiles', () => {
   it('should find ready ancestor when all intermediate tiles are empty', () => {
