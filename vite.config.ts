@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import vue from '@vitejs/plugin-vue';
 import UnpluginCesium from 'unplugin-cesium/vite';
 import { defineConfig } from 'vitest/config';
@@ -8,8 +9,9 @@ export default defineConfig({
   define: {
     global: 'globalThis',
   },
-  test: {
-    setupFiles: ['tests/setup.ts'],
-    testTimeout: 15000,
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('src', import.meta.url)),
+    },
   },
 });
