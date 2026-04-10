@@ -102,6 +102,9 @@ export class TileManager {
         hiddenKeys.push(tile.key);
         continue;
       }
+      // 当瓦片被选中但未显示时（通常是父瓦片在等待子瓦片加载），需要保留它作为 fallback
+      // 例如：level 12 的父瓦片被选中，但 level 14 的子瓦片正在加载中，
+      // 此时父瓦片应该保留，以便在子瓦片加载完成前提供显示
       else if (tile.selectedThisFrame) {
         tile.eligibleForUnloading = false;
       }

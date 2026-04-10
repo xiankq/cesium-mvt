@@ -30,6 +30,8 @@ export function resolveTileSelection({
   for (const coordinate of coordinates) {
     let adjustedCoordinate = coordinate;
 
+    // 当请求的瓦片层级超过数据源的最大层级时，需要将坐标映射到最大层级
+    // 例如：请求 level=18，但数据源最大只到 level=14，则映射到 level=14 的父瓦片
     if (maximumLevel !== undefined && coordinate.level > maximumLevel) {
       const levelDiff = coordinate.level - maximumLevel;
       adjustedCoordinate = {
@@ -39,6 +41,8 @@ export function resolveTileSelection({
       };
     }
 
+    // 当请求的瓦片层级低于数据源的最小层级时，需要将坐标映射到最小层级
+    // 例如：请求 level=8，但数据源最小从 level=10 开始，则映射到 level=10 的子瓦片
     if (adjustedCoordinate.level < minimumLevel) {
       const levelDiff = minimumLevel - adjustedCoordinate.level;
       adjustedCoordinate = {
