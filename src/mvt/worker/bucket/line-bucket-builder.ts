@@ -18,6 +18,7 @@ export interface BucketBuilderOptions {
 
 const DEFAULT_MAX_CHORD_ERROR = 10000;
 const MIN_SEGMENT_DISTANCE = 1e-10;
+const LINE_HEIGHT_OFFSET = 1;
 
 export class LineBucketBuilder {
   readonly type = 'line' as const;
@@ -120,7 +121,7 @@ export class LineBucketBuilder {
     const projectedPoints: Cartesian3[] = [];
 
     for (const point of line) {
-      const projected = projectTilePoint(point, this.extent, this.projectionContext);
+      const projected = projectTilePoint(point, this.extent, this.projectionContext, LINE_HEIGHT_OFFSET);
       projectedPoints.push(projected);
     }
 

@@ -19,8 +19,6 @@ export interface BucketBuilderOptions {
   zoom?: number;
 }
 
-const DEFAULT_HEIGHT_OFFSET = 50;
-
 const DEFAULT_GRANULARITY = 128;
 
 export class FillBucketBuilder {
@@ -126,7 +124,7 @@ export class FillBucketBuilder {
     }
 
     const projectPoint = (point: TilePoint): Cartesian3 => {
-      return projectTilePoint(point, this.extent, this.projectionContext, DEFAULT_HEIGHT_OFFSET);
+      return projectTilePoint(point, this.extent, this.projectionContext);
     };
 
     const { positions: subdividedPositions, triangles: subdividedTriangles } = subdivideTriangleEdges(

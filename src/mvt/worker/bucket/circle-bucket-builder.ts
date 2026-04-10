@@ -14,6 +14,8 @@ export interface BucketBuilderOptions {
   zoom?: number;
 }
 
+const CIRCLE_HEIGHT_OFFSET = 2;
+
 export class CircleBucketBuilder {
   readonly type = 'circle' as const;
 
@@ -66,7 +68,7 @@ export class CircleBucketBuilder {
 
     for (const points of geometry) {
       for (const point of points) {
-        const projected = projectTilePoint(point, this.extent, this.projectionContext);
+        const projected = projectTilePoint(point, this.extent, this.projectionContext, CIRCLE_HEIGHT_OFFSET);
         this.positions.push(projected.x, projected.y, projected.z);
         this.featureIds.push(localId);
         this._stats.pointCount += 1;
