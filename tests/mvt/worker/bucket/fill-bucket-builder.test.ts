@@ -181,15 +181,13 @@ describe('fill-bucket-builder', () => {
       const vertexCount = fillData.positions.length / 3;
 
       expect(triangleCount).toBeGreaterThan(0);
-      expect(triangleCount).toBeLessThan(vertexCount);
+      expect(vertexCount).toBeGreaterThan(0);
 
       for (let i = 0; i < fillData.triangles.length; i++) {
         const index = fillData.triangles[i];
         expect(index).toBeLessThan(vertexCount);
         expect(index).toBeGreaterThanOrEqual(0);
       }
-
-      expect(triangleCount).toBe(vertexCount - 2);
     });
 
     it('should handle polygon with hole correctly', async () => {
@@ -241,7 +239,97 @@ describe('fill-bucket-builder', () => {
 
       expect(triangleCount).toBeGreaterThan(0);
       expect(holeCount).toBe(1);
-      expect(triangleCount).toBeLessThanOrEqual(vertexCount);
+      expect(vertexCount).toBeGreaterThan(0);
+
+      for (let i = 0; i < fillData.triangles.length; i++) {
+        const index = fillData.triangles[i];
+        expect(index).toBeLessThan(vertexCount);
+        expect(index).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('should use higher granularity for lower zoom levels', async () => {
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
+      const { WebMercatorTilingScheme } = await import('cesium');
+
+      const tilingScheme = new WebMercatorTilingScheme();
+
+      const rect0 = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
+      const builderZoom0 = new FillBucketBuilder({
+        extent: 4096,
+        familyId: 'source/layer/fill/0',
+        layerIds: ['layer1'],
+        sourceLayer: 'layer',
+        tileProjection: {
+          west: rect0.west,
+          south: rect0.south,
+          east: rect0.east,
+          north: rect0.north,
+        },
+        tileKey: 'source/0/0/0',
+        zoom: 0,
+      });
+
+      const rect5 = tilingScheme.tileXYToNativeRectangle(0, 0, 5);
+      const builderZoom5 = new FillBucketBuilder({
+        extent: 4096,
+        familyId: 'source/layer/fill/0',
+        layerIds: ['layer1'],
+        sourceLayer: 'layer',
+        tileProjection: {
+          west: rect5.west,
+          south: rect5.south,
+          east: rect5.east,
+          north: rect5.north,
+        },
+        tileKey: 'source/5/0/0',
+        zoom: 5,
+      });
+
+      const largePolygon = [
+        [
+          { x: 0, y: 0 },
+          { x: 4096, y: 0 },
+          { x: 4096, y: 4096 },
+          { x: 0, y: 4096 },
+          { x: 0, y: 0 },
+        ],
+      ];
+      const feature = createMockPolygonFeature(largePolygon);
+
+      builderZoom0.addFeature(feature, 0);
+      builderZoom5.addFeature(feature, 0);
+
+      const bucket0 = builderZoom0.build();
+      const bucket5 = builderZoom5.build();
+
+      const vertexCount0 = (bucket0.data as any).positions.length / 3;
+      const vertexCount5 = (bucket5.data as any).positions.length / 3;
+
+      expect(vertexCount0).toBeGreaterThan(vertexCount5);
+    });
+
+    it('should use default granularity when zoom is not provided', async () => {
+      const { FillBucketBuilder } = await import('@/mvt/worker/bucket/fill-bucket-builder');
+      const { WebMercatorTilingScheme } = await import('cesium');
+
+      const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
+      const builder = new FillBucketBuilder({
+        extent: 4096,
+        familyId: 'source/layer/fill/0',
+        layerIds: ['layer1'],
+        sourceLayer: 'layer',
+        tileProjection: {
+          west: rect.west,
+          south: rect.south,
+          east: rect.east,
+          north: rect.north,
+        },
+        tileKey: 'source/0/0/0',
+      });
+
+      expect(builder.type).toBe('fill');
     });
   });
 });

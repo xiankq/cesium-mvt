@@ -29,6 +29,7 @@ export function projectTilePoint(
   point: { x: number; y: number },
   extent: number,
   context: TileProjectionContext,
+  heightOffset: number = 0,
 ): Cartesian3 {
   const { projection, tileRectangle } = context;
 
@@ -60,6 +61,6 @@ export function projectTilePoint(
   return Cartesian3.fromRadians(
     cartographic.longitude,
     cartographic.latitude,
-    0,
+    heightOffset,
   );
 }

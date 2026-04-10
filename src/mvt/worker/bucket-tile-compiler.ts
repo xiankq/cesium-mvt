@@ -34,11 +34,13 @@ export function compileBucketTile(
 ): ParsedTileResult {
   const { renderTile, tile, tileProjection } = options;
 
+  const zoom = parseZoomFromTileKey(renderTile.key);
+
   const buckets: ParsedTileResult['buckets'] = [];
   let totalByteLength = 0;
 
   for (const batch of renderTile.geometryBatches) {
-    const bucket = compileGeometryBatch(batch, tile, tileProjection, renderTile.key);
+    const bucket = compileGeometryBatch(batch, tile, tileProjection, renderTile.key, zoom);
     if (bucket) {
       buckets.push(bucket);
       totalByteLength += bucket.stats.byteLength;
@@ -58,6 +60,7 @@ function compileGeometryBatch(
   tile: ParsedTile,
   tileProjection: TileProjectionData,
   tileKey: string,
+  zoom: number,
 ) {
   if (!batch.sourceLayer) {
     return undefined;
@@ -68,7 +71,7 @@ function compileGeometryBatch(
     return undefined;
   }
 
-  const builder = createBucketBuilder(batch, sourceLayer.extent, tileProjection, tileKey);
+  const builder = createBucketBuilder(batch, sourceLayer.extent, tileProjection, tileKey, zoom);
   if (!builder) {
     return undefined;
   }
@@ -86,6 +89,7 @@ function createBucketBuilder(
   extent: number,
   tileProjection: TileProjectionData,
   tileKey: string,
+  zoom: number,
 ) {
   const options = {
     extent,
@@ -94,6 +98,7 @@ function createBucketBuilder(
     sourceLayer: batch.sourceLayer,
     tileProjection,
     tileKey,
+    zoom,
   };
 
   switch (batch.type) {
@@ -106,4 +111,21 @@ function createBucketBuilder(
     default:
       return undefined;
   }
+}
+
+function parseZoomFromTileKey(key: string): number {
+  const scopedKey = key.split('@')[0];
+  const parts = scopedKey.split('/');
+
+  if (parts.length < 4) {
+    return 0;
+  }
+
+  const level = Number(parts[parts.length - 3]);
+
+  if (!Number.isInteger(level)) {
+    return 0;
+  }
+
+  return level;
 }

@@ -32,6 +32,9 @@ export function subdivideLine(
     return [start, end];
   }
 
+  const startMagnitude = Cartesian3.magnitude(start);
+  const endMagnitude = Cartesian3.magnitude(end);
+
   const points: Cartesian3[] = [start];
   for (let i = 1; i < actualSubdivisions; i++) {
     const t = i / actualSubdivisions;
@@ -40,9 +43,12 @@ export function subdivideLine(
     const magnitude = Cartesian3.magnitude(point);
     if (magnitude > 0) {
       const normalized = Cartesian3.normalize(point, new Cartesian3());
+
+      const interpolatedMagnitude = startMagnitude + (endMagnitude - startMagnitude) * t;
+
       const scaled = Cartesian3.multiplyByScalar(
         normalized,
-        Ellipsoid.WGS84.maximumRadius,
+        interpolatedMagnitude,
         new Cartesian3(),
       );
       points.push(scaled);

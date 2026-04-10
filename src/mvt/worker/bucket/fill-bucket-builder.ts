@@ -1,10 +1,11 @@
 import type { VectorTileFeature } from '@mapbox/vector-tile';
 import type { Cartesian3 } from 'cesium';
+import type { TilePoint } from '../geometry/grid-subdivision';
 import type { TileProjectionData } from '../geometry/tile-projection';
 import type { Bucket, FillBucketData, FillBucketStats } from './bucket-types';
 import { classifyRings } from '@mapbox/vector-tile';
 import earcut from 'earcut';
-import { subdivideRing } from '../geometry/line-subdivision';
+import { getGranularityForZoomLevel, subdivideTriangleEdges } from '../geometry/grid-subdivision';
 import { createTileProjectionContext, projectTilePoint } from '../geometry/tile-projection';
 import { calculateBucketByteLength, calculateFeatureIndexByteLength } from './bucket-types';
 
@@ -15,9 +16,12 @@ export interface BucketBuilderOptions {
   sourceLayer?: string;
   tileProjection: TileProjectionData;
   tileKey: string;
+  zoom?: number;
 }
 
-const DEFAULT_MAX_CHORD_ERROR = 10000;
+const DEFAULT_HEIGHT_OFFSET = 50;
+
+const DEFAULT_GRANULARITY = 128;
 
 export class FillBucketBuilder {
   readonly type = 'fill' as const;
@@ -27,6 +31,7 @@ export class FillBucketBuilder {
   private readonly layerIds: string[];
   private readonly sourceLayer?: string;
   private readonly projectionContext: ReturnType<typeof createTileProjectionContext>;
+  private readonly granularity: number;
 
   private featureIndexEntries: Array<{
     id: number | undefined;
@@ -59,6 +64,9 @@ export class FillBucketBuilder {
     this.layerIds = options.layerIds;
     this.sourceLayer = options.sourceLayer;
     this.projectionContext = createTileProjectionContext(options.tileProjection);
+    this.granularity = options.zoom !== undefined
+      ? getGranularityForZoomLevel(options.zoom)
+      : DEFAULT_GRANULARITY;
   }
 
   addFeature(feature: VectorTileFeature, localId: number): void {
@@ -92,34 +100,21 @@ export class FillBucketBuilder {
       return;
     }
 
-    const projectedRings: Array<Array<Cartesian3>> = [];
-
-    for (const ring of normalizedRings) {
-      const projectedRing: Cartesian3[] = [];
-      for (const point of ring) {
-        const projected = projectTilePoint(point, this.extent, this.projectionContext);
-        projectedRing.push(projected);
-      }
-      const subdividedRing = subdivideRing(projectedRing, DEFAULT_MAX_CHORD_ERROR);
-      projectedRings.push(subdividedRing);
-    }
-
-    const flatPositions: number[] = [];
+    const tilePoints: TilePoint[] = [];
     const flatHoles: number[] = [];
     const triangulationPositions: number[] = [];
     let vertexOffset = 0;
 
-    for (let ringIndex = 0; ringIndex < projectedRings.length; ringIndex++) {
-      const ring = projectedRings[ringIndex];
+    for (let ringIndex = 0; ringIndex < normalizedRings.length; ringIndex++) {
+      const ring = normalizedRings[ringIndex];
 
       if (ringIndex > 0) {
         flatHoles.push(vertexOffset);
       }
 
-      for (const vertex of ring) {
-        flatPositions.push(vertex.x, vertex.y, vertex.z);
-        triangulationPositions.push(vertex.x, vertex.y);
-        this.featureIds.push(localId);
+      for (const point of ring) {
+        tilePoints.push({ x: point.x, y: point.y });
+        triangulationPositions.push(point.x, point.y);
         vertexOffset++;
       }
     }
@@ -130,18 +125,37 @@ export class FillBucketBuilder {
       return;
     }
 
+    const projectPoint = (point: TilePoint): Cartesian3 => {
+      return projectTilePoint(point, this.extent, this.projectionContext, DEFAULT_HEIGHT_OFFSET);
+    };
+
+    const { positions: subdividedPositions, triangles: subdividedTriangles } = subdivideTriangleEdges(
+      tilePoints,
+      Array.from(indices),
+      this.granularity,
+      projectPoint,
+    );
+
+    if (subdividedPositions.length === 0 || subdividedTriangles.length === 0) {
+      return;
+    }
+
     const baseIndex = this.positions.length / 3;
-    for (const index of indices) {
+    for (const vertex of subdividedPositions) {
+      this.positions.push(vertex.x, vertex.y, vertex.z);
+      this.featureIds.push(localId);
+    }
+
+    for (const index of subdividedTriangles) {
       this.triangles.push(baseIndex + index);
     }
 
-    this.positions.push(...flatPositions);
     this.holes.push(...flatHoles);
 
     this._stats.featureCount += 1;
     this._stats.polygonCount += 1;
-    this._stats.vertexCount += vertexOffset;
-    this._stats.triangleCount += indices.length / 3;
+    this._stats.vertexCount += subdividedPositions.length;
+    this._stats.triangleCount += subdividedTriangles.length / 3;
     this._stats.holeCount += flatHoles.length;
   }
 

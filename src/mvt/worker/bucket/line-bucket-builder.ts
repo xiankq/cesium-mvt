@@ -13,6 +13,7 @@ export interface BucketBuilderOptions {
   sourceLayer?: string;
   tileProjection: TileProjectionData;
   tileKey: string;
+  zoom?: number;
 }
 
 const DEFAULT_MAX_CHORD_ERROR = 10000;

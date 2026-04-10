@@ -11,6 +11,7 @@ export interface BucketBuilderOptions {
   sourceLayer?: string;
   tileProjection: TileProjectionData;
   tileKey: string;
+  zoom?: number;
 }
 
 export class CircleBucketBuilder {

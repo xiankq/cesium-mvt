@@ -182,6 +182,45 @@ describe('tile-projection', () => {
         expect(projected.z).toBe(0);
       });
     });
+
+    it('should apply height offset to projected points when provided', () => {
+      const context = createTileProjectionContext(createNativeTileProjection(0, 0, 0));
+      const extent = 4096;
+      const heightOffset = 10;
+
+      const projectedWithOffset = projectTilePoint({ x: 2048, y: 2048 }, extent, context, heightOffset);
+      const projectedWithoutOffset = projectTilePoint({ x: 2048, y: 2048 }, extent, context, 0);
+
+      const magnitudeWithOffset = Cartesian3.magnitude(projectedWithOffset);
+      const magnitudeWithoutOffset = Cartesian3.magnitude(projectedWithoutOffset);
+
+      expect(magnitudeWithOffset).toBeGreaterThan(magnitudeWithoutOffset);
+      expect(magnitudeWithOffset - magnitudeWithoutOffset).toBeCloseTo(heightOffset, 1);
+    });
+
+    it('should apply height offset to points at different latitudes', () => {
+      const context = createTileProjectionContext(createNativeTileProjection(0, 0, 0));
+      const extent = 4096;
+      const heightOffset = 100;
+
+      const points = [
+        { x: 2048, y: 1024 },
+        { x: 2048, y: 3072 },
+        { x: 1024, y: 2048 },
+        { x: 3072, y: 2048 },
+      ];
+
+      points.forEach((point) => {
+        const projectedWithOffset = projectTilePoint(point, extent, context, heightOffset);
+        const projectedWithoutOffset = projectTilePoint(point, extent, context, 0);
+
+        const magnitudeWithOffset = Cartesian3.magnitude(projectedWithOffset);
+        const magnitudeWithoutOffset = Cartesian3.magnitude(projectedWithoutOffset);
+
+        expect(magnitudeWithOffset).toBeGreaterThan(magnitudeWithoutOffset);
+        expect(magnitudeWithOffset - magnitudeWithoutOffset).toBeCloseTo(heightOffset, 0);
+      });
+    });
   });
 });
 

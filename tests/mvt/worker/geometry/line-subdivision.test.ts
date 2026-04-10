@@ -62,6 +62,57 @@ describe('line-subdivision', () => {
         expect(Math.abs(magnitude - ellipsoidRadius)).toBeLessThan(1);
       }
     });
+
+    it('should preserve height offset in subdivided points', async () => {
+      const { subdivideLine } = await import('@/mvt/worker/geometry/line-subdivision');
+      const { Cartesian3, Ellipsoid } = await import('cesium');
+
+      const heightOffset = 100;
+      const ellipsoidRadius = Ellipsoid.WGS84.maximumRadius;
+      const expectedRadius = ellipsoidRadius + heightOffset;
+
+      const start = new Cartesian3(expectedRadius, 0, 0);
+      const end = new Cartesian3(0, expectedRadius, 0);
+      const maxChordError = 10;
+
+      const subdivided = subdivideLine(start, end, maxChordError);
+
+      expect(subdivided.length).toBeGreaterThan(2);
+
+      for (const point of subdivided) {
+        const magnitude = Cartesian3.magnitude(point);
+        expect(Math.abs(magnitude - expectedRadius)).toBeLessThan(1);
+      }
+    });
+
+    it('should interpolate height offset between start and end', async () => {
+      const { subdivideLine } = await import('@/mvt/worker/geometry/line-subdivision');
+      const { Cartesian3, Ellipsoid } = await import('cesium');
+
+      const startHeight = 100;
+      const endHeight = 200;
+      const ellipsoidRadius = Ellipsoid.WGS84.maximumRadius;
+
+      const start = new Cartesian3(ellipsoidRadius + startHeight, 0, 0);
+      const end = new Cartesian3(0, ellipsoidRadius + endHeight, 0);
+      const maxChordError = 10;
+
+      const subdivided = subdivideLine(start, end, maxChordError);
+
+      expect(subdivided.length).toBeGreaterThan(2);
+
+      const startMagnitude = Cartesian3.magnitude(start);
+      const endMagnitude = Cartesian3.magnitude(end);
+
+      expect(Cartesian3.magnitude(subdivided[0])).toBeCloseTo(startMagnitude, 0);
+      expect(Cartesian3.magnitude(subdivided[subdivided.length - 1])).toBeCloseTo(endMagnitude, 0);
+
+      for (let i = 1; i < subdivided.length - 1; i++) {
+        const magnitude = Cartesian3.magnitude(subdivided[i]);
+        expect(magnitude).toBeGreaterThanOrEqual(Math.min(startMagnitude, endMagnitude) - 1);
+        expect(magnitude).toBeLessThanOrEqual(Math.max(startMagnitude, endMagnitude) + 1);
+      }
+    });
   });
 
   describe('subdivideRing', () => {
