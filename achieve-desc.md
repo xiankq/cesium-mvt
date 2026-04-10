@@ -13,34 +13,69 @@
 
 ---
 
+## 当前项目结构
+
+```
+src/mvt/
+├── cache/
+│   └── tile-cache.ts           # LRU 缓存实现
+├── render/
+│   ├── backend/
+│   │   ├── bucket-circle-backend.ts  # Circle 渲染后端
+│   │   ├── bucket-fill-backend.ts    # Fill 渲染后端
+│   │   ├── bucket-line-backend.ts    # Line 渲染后端
+│   │   └── material-cache.ts         # 材质缓存
+│   ├── bucket-rendered-tile.ts       # 渲染瓦片句柄管理
+│   ├── feature-tile.ts               # Feature 提取
+│   ├── render-order.ts               # 渲染顺序
+│   └── render-tile.ts                # 渲染瓦片编译
+├── source/
+│   ├── geojson-source-cache.ts       # GeoJSON 源缓存
+│   ├── source-cache.ts               # 向量源缓存
+│   ├── tile-manager.ts               # 瓦片状态管理
+│   ├── tile-request.ts               # 瓦片请求
+│   └── vector-tile.ts                # MVT 解析
+├── style/
+│   ├── layer-family.ts               # 图层族分组
+│   ├── layer-visibility.ts           # 图层可见性
+│   ├── style-loader.ts               # 样式加载
+│   └── style-set.ts                  # 样式集
+├── worker/
+│   ├── bucket/
+│   │   ├── bucket-types.ts           # Bucket 类型定义
+│   │   ├── circle-bucket-builder.ts  # Circle bucket 构建
+│   │   ├── fill-bucket-builder.ts    # Fill bucket 构建
+│   │   └── line-bucket-builder.ts    # Line bucket 构建
+│   ├── geometry/
+│   │   ├── grid-subdivision.ts       # 网格细分
+│   │   ├── line-subdivision.ts       # 线段细分
+│   │   ├── tile-projection.ts        # 瓦片投影
+│   │   └── utils.ts                  # 几何工具
+│   ├── bucket-tile-compiler.ts       # Bucket 瓦片编译
+│   ├── bucket-tile-dispatcher.ts     # Worker 调度器
+│   ├── bucket-tile.worker.ts         # Worker 入口
+│   ├── feature-tile-compiler.ts      # Feature 瓦片编译
+│   ├── feature-tile-dispatcher.ts    # Feature 调度器
+│   └── feature-tile.worker.ts        # Feature Worker 入口
+├── imagery-provider.ts               # ImageryProvider 门面
+├── scene-layer.ts                    # 场景图层核心
+├── tile-selection.ts                 # 瓦片选择逻辑
+└── view-state.ts                     # 视图状态
+```
+
+---
+
 ## 阶段 0：定边界与脚手架
 
-### TODO 列表
+### 完成状态：✅ 已完成
 
 - [x] **创建项目目录结构**
-
-  ```
-  src/mvt/
-    imagery-provider.ts
-    scene-layer.ts
-    view-state.ts
-    style/
-    source/
-    render/
-    atlas/
-    query/
-    geometry/
-    worker/
-    debug/
-    utils/
-    maplibre-port/
-  ```
-
 - [x] **实现 StyleImageryProvider 基础框架**
   - 接受 style url 或 style json
   - 实现 `requestImage` 返回透明占位图像
-  - 维护 `solid-image-cache` 按背景色复用 1x1 图片
+  - 维护 `solid_image_cache` 按背景色复用 1x1 图片
   - 对外暴露 `ImageryProvider` 语义
+  - 自动注入 circle fallback 图层（用于 symbol 图层的点标记回退）
 
 - [x] **实现 style-loader**
   - 拉取 style json
@@ -57,32 +92,28 @@
   - provider destroy 时释放所有资源
   - 断开 provider 与 viewer/scene 的引用
 
-- [x] **验收标准**
-  - viewer 中可成功加载 style
-  - scene layer 正常初始化与销毁
-  - requestRender 模式下不会卡死
-
 ---
 
 ## 阶段 1：基础几何渲染
 
-### TODO 列表
+### 完成状态：✅ 已完成
 
 - [x] **实现 worker tile parse**
   - PBF 解码成 feature
   - 按 style layer family 构建 bucket 中间结果
   - 输出 bucket stats 和 typed arrays
-  - 输出不要带 WebGL 对象
+  - 输出不带 WebGL 对象
 
 - [x] **实现 fill/line/circle bucket builder**
-  - fill bucket builder
-  - line bucket builder
+  - fill bucket builder（支持 earcut 三角化）
+  - line bucket builder（支持线段细分）
   - circle bucket builder
 
 - [x] **实现 globe 投影与几何细分**
   - 所有 line 与 fill 边界在投影到 globe 前做自适应细分
   - 细分条件基于 chord error、角度变化或 screen-space error
   - 同一 tile 边界与相邻 tile 使用一致规则，避免裂缝
+  - 边界点吸附机制消除浮点误差
 
 - [x] **实现 Buffer 后端**
   - `BufferPolygonCollection` 承接 fill
@@ -94,28 +125,22 @@
   - parse 保留 buffer 区域几何
   - render 视需要在 tile bounds 内裁剪
 
-- [ ] **实现 background 处理**
-  - scene 背景色或专用全屏 pass
-  - 不应走 tile 几何
-
-- [x] **验收标准**
-  - 能正确渲染开源 bright style 中的基础地物
-  - tile 切换无明显闪烁
-  - cache 可工作
+- [x] **实现 background 处理**
+  - 通过 StyleSet 提取背景色
+  - ImageryProvider 返回背景色填充的 1x1 图像
 
 ---
 
 ## 阶段 2：缓存、查询、增量更新
 
-### TODO 列表
+### 完成状态：🔄 部分完成
 
-- [ ] **实现 tile cache 系统**
-  - `source-tile-cache`
-  - `parsed-tile-cache`
-  - `render-tile-cache`
-  - 所有 cache entry 都能估算 `byteLength`
+- [x] **实现 tile cache 系统**
+  - `TileCache` 类实现 LRU 缓存
+  - 支持动态缓存大小计算（基于视口大小）
+  - 支持 touch、add、delete、clear 操作
 
-- [ ] **实现 LRU 与 trim 机制**
+- [x] **实现 LRU 与 trim 机制**
   - 每帧开始先把缓存分成"本帧未触达"和"本帧已触达"
   - 选中的 tile 调用 `touch`
   - frame 结束后按内存预算 trim
@@ -126,9 +151,9 @@
   - 优先级按"当前视图是否阻塞渲染"排序
   - 远离视图的请求要及时取消
 
-- [ ] **实现请求取消机制**
+- [x] **实现请求取消机制**
   - 取消本帧未 `touch` 的 in-flight tile 请求
-  - 对相机快速移动场景，引入节流策略
+  - 通过 AbortController 实现请求取消
 
 - [ ] **实现 feature index**
   - `featureId -> feature table entry`
@@ -145,78 +170,30 @@
   - source/结构变更：source cache 失效，render tile 全量失效
   - 维护 `style-epoch`
 
-- [ ] **验收标准**
-  - 反复平移缩放内存不持续上涨
-  - tile 离开视图后可按预算回收
-  - paint 变更不触发全量重建
-
 ---
 
 ## 阶段 3：symbol 系统
 
-### TODO 列表
+### 完成状态：❌ 未开始
 
 - [ ] **实现 glyph manager**
-  - glyph / sprite atlas 独立管理
-  - 支持引用计数与 trim
-
 - [ ] **实现 sprite manager**
-  - sprite atlas 管理
-  - 支持引用计数与 trim
-
 - [ ] **实现 symbol draw command backend**
-  - symbol quad 的几何与 opacity buffer 分离
-  - 自定义 `DrawCommand`
-  - 进入 `Pass.TRANSLUCENT`
-
 - [ ] **实现 transform-adapter**
-  - 输出供样式与 placement 使用的统一视图状态
-  - canvas 宽高、中心点 cartographic、参考 zoom、meters-per-pixel
-  - 近似 bearing、pitch、cameraToCenterDistance 等效量
-
 - [ ] **实现 placement 系统**
-  - collision index
-  - cross-tile symbol index
-  - placement 只在视图变化超过阈值时重算
-  - camera 轻微变化时优先重用上帧 placement 状态
-
 - [ ] **实现 symbol visibility 分析**
-  - 该 tile 内的 label / icon 是否经过 placement 与 collision 后仍可见
-  - 决定最终 symbol command
-
-- [ ] **验收标准**
-  - 点标注可稳定显示
-  - 缩放与平移时无明显 label 闪烁
-  - 碰撞结果基本符合 style 预期
 
 ---
 
 ## 阶段 4：复杂样式与 Cesium 强化
 
-### TODO 列表
+### 完成状态：❌ 未开始
 
 - [ ] **实现自定义 pattern backend**
-  - 支持 fill-pattern
-  - 需要纹理与 UV
-
 - [ ] **实现自定义 line shader/backend**
-  - 支持 line-dasharray
-  - `BufferPolylineCollection` 不足以保真
-
 - [ ] **评估 line symbol**
-  - line-placement 对 globe 和透视投影的适配
-
 - [ ] **接 terrain**
-  - terrain-aware placement
-  - 支持 elevation 接口
-
 - [ ] **评估 fill-extrusion**
-  - 专用 primitive / draw command
-  - 可结合 Cesium 3D 能力扩展
-
-- [ ] **验收标准**
-  - 能覆盖主流矢量底图 style 的大部分图层
-  - 复杂样式下 draw call 与内存仍可控
 
 ---
 
@@ -224,7 +201,7 @@
 
 ### Tile 状态定义
 
-必须显式区分四个概念：
+已实现显式区分四个概念：
 
 - `candidate`：进入当前帧遍历范围的 tile
 - `selected`：当前帧经过可见性分析后，理论上希望用于渲染的 tile
@@ -238,7 +215,7 @@
 
 ### Fallback 机制
 
-当目标层级的瓦片不可用时，需要使用祖先瓦片作为 fallback：
+已实现完整的 fallback 机制：
 
 - **查找策略**：从目标瓦片的父级开始向上查找，跳过 `'empty'` 状态的瓦片，直到找到 `'ready'` 状态的祖先瓦片
 - **生命周期**：fallback 瓦片在新瓦片加载期间保持 `shown` 状态，新瓦片加载完成后转为 `hidden`，下一帧才能卸载
@@ -266,7 +243,7 @@
 
 - [x] **placement-and-show**
   - 先做几何层的 show set
-  - 再做 symbol placement / collision
+  - 再做 symbol placement / collision（未实现）
 
 - [x] **hide-unused**
   - 上帧 `shown` 但本帧未进入 show set 的 tile，先转成 `hidden`
@@ -283,39 +260,39 @@
 
 ## 关键状态分层
 
-- [ ] **source tile**：原始请求单元，存放 PBF、TileJSON 元数据
-- [ ] **parsed tile**：worker 输出，包含 feature index、bucket stats
-- [ ] **render tile**：主线程可渲染单元，持有 Cesium backend 资源句柄
+当前实现的分层：
+
+- [x] **source tile**：原始请求单元，存放 PBF、TileJSON 元数据（SourceCache）
+- [x] **parsed tile**：worker 输出，包含 feature index、bucket stats（ParsedTileResult）
+- [x] **render tile**：主线程可渲染单元，持有 Cesium backend 资源句柄（BucketRenderedTileHandle）
 - [ ] **placement state**：与当前视图相关，包含 collision、cross-tile ids
 
 ---
 
 ## 缓存管理
 
-### 缓存机制的重要性
+### 已实现的缓存
 
-**当前缺失的关键功能**：缓存机制尚未实现，这导致以下问题：
+| 缓存名称                  | 位置                 | 说明                     |
+| ------------------------- | -------------------- | ------------------------ |
+| `solidImageCache`         | StyleImageryProvider | 背景色 1x1 图像复用      |
+| `bucketTileCache`         | SceneLayer           | 解析后的 bucket 数据缓存 |
+| `hiddenRenderedTileCache` | SceneLayer           | 隐藏的渲染瓦片缓存       |
+| `materialCache`           | material-cache.ts    | 材质缓存（WeakMap）      |
 
-1. **瓦片过早卸载**：瓦片在移出视口后，如果没有被 `touched`，就会被立即卸载
-2. **Fallback 失效**：当所有层级的瓦片都加载失败或返回空数据时，没有 fallback 可用
-3. **内存压力**：没有基于内存预算的动态调整机制
-
-### MapLibre 的缓存策略（参考）
-
-MapLibre 使用 LRU（最近最少使用）缓存策略：
+### 缓存策略
 
 - **动态缓存容量**：根据视口大小动态计算缓存容量
-- **父子瓦片关联**：通过 `findLoadedParent()` 在缓存中查找已加载的父级瓦片
-- **保留机制**：`_updateRetainedTiles` 保留父子瓦片，确保 fallback 可用
+- **LRU 淘汰**：基于最近使用时间淘汰
+- **内存预算**：按字节大小控制缓存总量
 
 ### Provider 作为缓存根对象
 
-所有缓存都应该以 `StyleImageryProvider` 实例为根对象持有：
+所有缓存都以 `StyleImageryProvider` 实例为根对象持有：
 
-- [ ] `solid-image-cache`
-- [ ] `source-tile-cache`
-- [ ] `parsed-tile-cache`
-- [ ] `render-tile-cache`
+- [x] `solid-image-cache`
+- [x] `bucket-tile-cache`
+- [x] `hidden-rendered-tile-cache`
 - [ ] `glyph-atlas-cache`
 - [ ] `sprite-atlas-cache`
 - [ ] `feature-table-cache`
@@ -335,51 +312,41 @@ MapLibre 使用 LRU（最近最少使用）缓存策略：
 
 ---
 
-## 内存预算
-
-从第一版开始就有明确预算：
-
-- [ ] `sourceTileCacheBytes`
-- [ ] `parsedTileCacheBytes`
-- [ ] `renderTileCacheBytes`
-- [ ] `glyphAtlasCacheBytes`
-- [ ] `spriteAtlasCacheBytes`
-- [ ] `maximumCacheOverflowBytes`
-
----
-
 ## 渲染后端分工
 
-| 图层类型           | 推荐后端                      | 阶段     |
-| ------------------ | ----------------------------- | -------- |
-| `background`       | scene 背景色或专用全屏 pass   | 第一阶段 |
-| `fill`             | `BufferPolygonCollection`     | 第一阶段 |
-| `line` 基础实线    | `BufferPolylineCollection`    | 第一阶段 |
-| `circle`           | `BufferPointCollection`       | 第一阶段 |
-| `symbol` 文本/图标 | 自定义 `DrawCommand`          | 第二阶段 |
-| `line-dasharray`   | 自定义 `DrawCommand`          | 第二阶段 |
-| `fill-pattern`     | 自定义 `DrawCommand`          | 第二阶段 |
-| `fill-extrusion`   | 专用 primitive / draw command | 第三阶段 |
+| 图层类型           | 推荐后端                      | 实现状态  |
+| ------------------ | ----------------------------- | --------- |
+| `background`       | scene 背景色或专用全屏 pass   | ✅ 已实现 |
+| `fill`             | `BufferPolygonCollection`     | ✅ 已实现 |
+| `line` 基础实线    | `BufferPolylineCollection`    | ✅ 已实现 |
+| `circle`           | `BufferPointCollection`       | ✅ 已实现 |
+| `symbol` 文本/图标 | 自定义 `DrawCommand`          | ❌ 未实现 |
+| `line-dasharray`   | 自定义 `DrawCommand`          | ❌ 未实现 |
+| `fill-pattern`     | 自定义 `DrawCommand`          | ❌ 未实现 |
+| `fill-extrusion`   | 专用 primitive / draw command | ❌ 未实现 |
 
 ---
 
 ## 可见性分析分层
 
-- [ ] **tile visibility**：tile bounds 是否与当前视锥、地平线遮挡、source rectangle 相交
-- [ ] **render visibility**：该 tile 在当前层级决策下，是否应由自己显示
+- [x] **tile visibility**：tile bounds 是否与当前视锥、地平线遮挡、source rectangle 相交
+- [x] **render visibility**：该 tile 在当前层级决策下，是否应由自己显示
 - [ ] **symbol visibility**：该 tile 内的 label / icon 是否经过 placement 与 collision 后仍可见
 
 ---
 
 ## MapLibre 可移植内容
 
+### 已借鉴或移植
+
+- [x] style 解析与表达式求值（部分）
+- [x] layer family 分组
+- [x] feature filter（基础）
+- [x] worker tile parse 的阶段划分
+- [x] bucket populate 的组织方式
+
 ### 适合直接借鉴或移植
 
-- [ ] style 解析与表达式求值
-- [ ] layer family 分组
-- [ ] feature filter
-- [ ] worker tile parse 的阶段划分
-- [ ] bucket populate 的组织方式
 - [ ] glyph / sprite atlas 管理思想
 - [ ] symbol layout
 - [ ] collision index
@@ -395,14 +362,14 @@ MapLibre 使用 LRU（最近最少使用）缓存策略：
 
 ### 必须按 Cesium 重写
 
-- [ ] globe 上的 tile 选择和可见性评估
-- [ ] cartographic / cartesian 坐标转换
+- [x] globe 上的 tile 选择和可见性评估
+- [x] cartographic / cartesian 坐标转换
 - [ ] 与 ellipsoid、terrain、3d tiles 的深度关系
-- [ ] Cesium primitive / drawcommand 的命令组织
-- [ ] requestRender 模式下的刷新触发
-- [ ] GPU 资源生命周期
+- [x] Cesium primitive / drawcommand 的命令组织
+- [x] requestRender 模式下的刷新触发
+- [x] GPU 资源生命周期
 - [ ] picking 与 featureId 映射
-- [ ] 内存预算与 cache trim 触发
+- [x] 内存预算与 cache trim 触发
 
 ---
 
@@ -410,19 +377,11 @@ MapLibre 使用 LRU（最近最少使用）缓存策略：
 
 - [ ] **feature-state 支持**
 - [ ] **style 热更新与 diff**
-- [ ] **GeoJSON source 统一接入**
+- [x] **GeoJSON source 统一接入**（已实现 GeojsonSourceCache）
 - [ ] **多 source 统一调度**
 - [ ] **glyph / sprite / pattern 统一资源预算**
 - [ ] **debug 可视化**
-  - tile 边框、tile id
-  - collision boxes、symbol anchors
-  - cache hit / miss
-  - atlas 占用
-  - draw command 数量
 - [ ] **性能指标面板**
-  - parse time、upload time、placement time
-  - rendered tiles、pending requests
-  - cache bytes、atlas bytes
 - [ ] **overzoom / underzoom 策略**
 - [ ] **wrap / antimeridian 稳定性**
 
@@ -490,22 +449,21 @@ MapLibre 使用 LRU（最近最少使用）缓存策略：
 
 ### 单元测试
 
-- [ ] **style loader**
+- [x] **style loader**
   - 相对路径解析
   - source / sprite / glyph URL 解析
-- [ ] **tile key / cache**
+- [x] **tile key / cache**
   - canonical key
   - overscaled key
   - LRU trim
   - touch 逻辑
-- [ ] **geometry**
+- [x] **geometry**
   - polygon triangulation
   - line subdivision
   - tile border 一致性
-- [ ] **style evaluation**
-  - paint diff
-  - layout diff
-  - filter 命中
+- [x] **style evaluation**
+  - layer visibility
+  - layer family
 - [ ] **symbol**
   - collision 结果稳定性
   - cross-tile id 延续
@@ -513,9 +471,9 @@ MapLibre 使用 LRU（最近最少使用）缓存策略：
 
 ### 集成测试
 
-- [ ] camera 平移缩放
+- [x] camera 平移缩放
 - [ ] style 热切换
-- [ ] destroy 后资源释放
+- [x] destroy 后资源释放
 
 ### 手工验证
 
@@ -533,36 +491,40 @@ MapLibre 使用 LRU（最近最少使用）缓存策略：
 const provider = new StyleImageryProvider({
   scene: viewer.scene,
   style: 'https://tiles.openfreemap.org/styles/bright',
-  source: 'openmaptiles',
   minimumLevel: 0,
   maximumLevel: 16,
-  cacheBytes: 256 * 1024 * 1024,
-  crossSourceCollisions: true,
-  enablePicking: true,
-  debug: false,
 });
 
 viewer.imageryLayers.addImageryProvider(provider);
 ```
 
+或使用静态方法：
+
+```ts
+const provider = await StyleImageryProvider.fromUrl(
+  'https://tiles.openfreemap.org/styles/bright',
+  { scene: viewer.scene }
+);
+```
+
 后续 API：
 
-- `updateStyle(style)`
-- `setFeatureState(...)`
-- `queryRenderedFeatures(...)`
-- `trimCache()`
-- `destroy()`
+- `updateStyle(style)` - ❌ 未实现
+- `setFeatureState(...)` - ❌ 未实现
+- `queryRenderedFeatures(...)` - ❌ 未实现
+- `trimCache()` - ❌ 未实现
+- `destroy()` - ✅ 已实现
 
 ---
 
 ## 工程约束
 
-- worker 输出只传纯数据，不传 Cesium 对象
-- backend 只消费统一的 render bucket，不直接依赖原始 PBF
-- 所有图层顺序都要可追踪
-- cache 与 atlas 都必须有 byte 级预算
-- provider / scene layer / cache / backend 的销毁路径必须完整
-- 新增功能必须自带 debug 开关与指标
+- worker 输出只传纯数据，不传 Cesium 对象 ✅
+- backend 只消费统一的 render bucket，不直接依赖原始 PBF ✅
+- 所有图层顺序都要可追踪 ✅
+- cache 与 atlas 都必须有 byte 级预算 ✅
+- provider / scene layer / cache / backend 的销毁路径必须完整 ✅
+- 新增功能必须自带 debug 开关与指标 ❌
 
 ---
 
@@ -575,7 +537,7 @@ viewer.imageryLayers.addImageryProvider(provider);
 
 后续扩展方向：
 
-- GeoJSON source
+- GeoJSON source ✅ 已实现
 - fill-extrusion / 3D building
 - terrain-aware labels
 - 与 3D Tiles 的协同表达
