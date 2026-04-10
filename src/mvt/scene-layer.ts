@@ -30,6 +30,7 @@ import { SourceCache } from './source/source-cache';
 import { TileManager } from './source/tile-manager';
 import { createLayerFamilies } from './style/layer-family';
 import { resolveTileSelection } from './tile-selection';
+import { isAbortError } from './utils/abort';
 import { collectSceneViewTileSelection } from './view-state';
 import { createBucketTileDispatcher } from './worker/bucket-tile-dispatcher';
 
@@ -957,8 +958,4 @@ function resolveSceneViewportHeight(scene: Scene): number {
     }
     | undefined;
   return canvasHeight?.clientHeight ?? canvasHeight?.height ?? 256;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
 }

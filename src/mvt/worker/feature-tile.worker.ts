@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 
 import type { FeatureTileWorkerMessage, FeatureTileWorkerResponse } from './feature-tile-dispatcher';
-import { compileFeatureTileFromData } from './feature-tile-compiler';
+import { compileFeatureTile } from '../render/feature-tile';
+import { parseVectorTile } from '../source/vector-tile';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -28,9 +29,9 @@ self.addEventListener('message', (event: MessageEvent<FeatureTileWorkerMessage>)
     }
 
     try {
-      const featureTile = compileFeatureTileFromData({
+      const featureTile = compileFeatureTile({
         renderTile: compileMessage.renderTile,
-        tileData: compileMessage.tileData,
+        tile: parseVectorTile(compileMessage.tileData),
       });
       if (cancelledRequestIds.has(compileMessage.id)) {
         cancelledRequestIds.delete(compileMessage.id);

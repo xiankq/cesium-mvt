@@ -18,6 +18,7 @@ import {
 import { SceneLayer } from './scene-layer';
 import { loadStyleSet } from './style/style-loader';
 import { createStyleSet } from './style/style-set';
+import { deepClone } from './utils/clone';
 
 // ImageryProvider 继续作为对外门面，真正的矢量渲染运行在 SceneLayer 中。
 export interface StyleImageryProviderOptions {
@@ -305,11 +306,7 @@ function createCircleFallbackLayer(
 }
 
 function cloneStyle(style: StyleSpecification): StyleSpecification {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(style);
-  }
-
-  return JSON.parse(JSON.stringify(style)) as StyleSpecification;
+  return deepClone(style);
 }
 
 function createSolidImage(color: string): SolidImage {

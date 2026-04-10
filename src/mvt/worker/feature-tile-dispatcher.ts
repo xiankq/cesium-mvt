@@ -1,6 +1,8 @@
 import type { FeatureTile } from '../render/feature-tile';
 import type { RenderTile } from '../render/render-tile';
-import { compileFeatureTileFromData } from './feature-tile-compiler';
+import { compileFeatureTile } from '../render/feature-tile';
+import { parseVectorTile } from '../source/vector-tile';
+import { createAbortError } from '../utils/abort';
 
 export interface CompileFeatureTileJob {
   renderTile: RenderTile;
@@ -180,7 +182,10 @@ class InlineFeatureTileDispatcher implements FeatureTileDispatcher {
       return Promise.reject(createAbortError());
     }
 
-    return Promise.resolve(compileFeatureTileFromData(job));
+    return Promise.resolve(compileFeatureTile({
+      renderTile: job.renderTile,
+      tile: parseVectorTile(job.tileData),
+    }));
   }
 
   destroy(): void {}
@@ -221,10 +226,4 @@ function extractWorkerResponse(event: unknown): FeatureTileWorkerResponse {
   }
 
   throw new TypeError('Invalid feature tile worker event.');
-}
-
-function createAbortError() {
-  return Object.assign(new Error('aborted'), {
-    name: 'AbortError',
-  });
 }

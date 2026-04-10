@@ -3,10 +3,10 @@ import type {
   VectorSourceSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import type { TileCoordinate, TileRequest } from './tile-request';
+import { createAbortError, isAbortError } from '../utils/abort';
 import {
   createTileKey,
   createTileRequest,
-
 } from './tile-request';
 
 // SourceCache 负责单个 sourceId 的请求去重与 source 级失效管理。
@@ -302,16 +302,6 @@ async function loadTileBuffer(
   }
 
   return await response.arrayBuffer();
-}
-
-function createAbortError() {
-  return Object.assign(new Error('aborted'), {
-    name: 'AbortError',
-  });
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError';
 }
 
 function resolveUrl(resourceUrl: string, baseUrl: string) {

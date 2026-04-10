@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createMockStyle } from '../../../helpers/style-helpers';
 
 describe('bucket-fill-backend', () => {
   describe('createBucketFillTileHandle', () => {
@@ -181,25 +182,4 @@ function createMockBucketTileWithMultipleFeatures() {
     key: 'source/0/0/0',
     byteLength: 200,
   };
-}
-
-function createMockStyle(type: 'fill' | 'line' | 'circle') {
-  return {
-    version: 8 as const,
-    sources: {},
-    layers: [
-      {
-        'id': 'layer1',
-        type,
-        'source': 'source',
-        'source-layer': 'layer',
-        'paint':
-                    type === 'fill'
-                      ? { 'fill-color': '#ff0000' }
-                      : type === 'line'
-                        ? { 'line-color': '#00ff00' }
-                        : { 'circle-color': '#0000ff' },
-      },
-    ],
-  } as any;
 }

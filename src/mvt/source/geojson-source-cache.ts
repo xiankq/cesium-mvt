@@ -6,6 +6,8 @@ import type { GeoJsonObject } from 'geojson';
 import type { TileCoordinate } from './tile-request';
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
+import { createAbortError, isAbortError } from '../utils/abort';
+import { deepClone } from '../utils/clone';
 import { createTileKey } from './tile-request';
 
 // GeoJSON source 会先转成内存中的“向量瓦片形态”，这样下游渲染链路可以保持单轨实现。
@@ -278,19 +280,5 @@ async function loadGeojsonData(
 }
 
 function cloneGeojson(data: GeoJsonObject): GeoJsonObject {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(data);
-  }
-
-  return JSON.parse(JSON.stringify(data)) as GeoJsonObject;
-}
-
-function createAbortError() {
-  return Object.assign(new Error('aborted'), {
-    name: 'AbortError',
-  });
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError';
+  return deepClone(data);
 }

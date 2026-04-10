@@ -4,6 +4,7 @@ import type {
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import type { StyleSet } from './style-set';
+import { deepClone } from '../utils/clone';
 import { createStyleSet } from './style-set';
 
 // 样式加载阶段会先把所有相对资源地址归一化，
@@ -43,11 +44,7 @@ export async function loadStyleSet(
 }
 
 function cloneStyle(style: StyleSpecification): StyleSpecification {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(style);
-  }
-
-  return JSON.parse(JSON.stringify(style)) as StyleSpecification;
+  return deepClone(style);
 }
 
 function normalizeAssetUrls(style: StyleSpecification, styleUrl: string) {

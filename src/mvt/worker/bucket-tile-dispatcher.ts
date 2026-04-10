@@ -2,6 +2,7 @@ import type { WebMercatorTilingScheme } from 'cesium';
 import type { RenderTile } from '../render/render-tile';
 import type { ParsedTileResult } from './bucket/bucket-types';
 import type { TileProjectionData } from './geometry/tile-projection';
+import { createAbortError } from '../utils/abort';
 import { compileBucketTileFromData } from './bucket-tile-compiler';
 
 export interface CompileBucketTileJob {
@@ -243,12 +244,6 @@ function extractWorkerResponse(event: unknown): BucketTileWorkerResponse {
   }
 
   throw new TypeError('Invalid bucket tile worker event.');
-}
-
-function createAbortError() {
-  return Object.assign(new Error('aborted'), {
-    name: 'AbortError',
-  });
 }
 
 function extractTileProjection(
