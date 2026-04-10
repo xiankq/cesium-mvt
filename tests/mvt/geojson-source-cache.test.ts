@@ -1,5 +1,5 @@
 import type { GeoJSONSourceSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { GeoJsonObject } from 'geojson';
+import type { FeatureCollection, GeoJsonObject } from 'geojson';
 import { describe, expect, it, vi } from 'vitest';
 import { GeojsonSourceCache } from '@/mvt/source/geojson-source-cache';
 
@@ -21,7 +21,7 @@ describe('geojson-source-cache', () => {
     const abortedError = Object.assign(new Error('aborted'), {
       name: 'AbortError',
     });
-    const data: GeoJsonObject = {
+    const data: FeatureCollection = {
       features: [],
       type: 'FeatureCollection',
     };
@@ -49,17 +49,12 @@ describe('geojson-source-cache', () => {
       x: 1,
       y: 3,
     });
-    const abortTile = Reflect.get(sourceCache, 'abortTile');
-
-    expect(abortTile).toBeTypeOf('function');
-    (abortTile as (this: GeojsonSourceCache, key: string) => void).call(
-      sourceCache,
-      'places/2/1/3',
-    );
+    sourceCache.abortTile('places/2/1/3');
 
     await expect(firstPromise).rejects.toMatchObject({
       name: 'AbortError',
     });
+
     await expect(sourceCache.requestTile({
       level: 2,
       x: 1,

@@ -84,7 +84,7 @@ describe('line-backend', () => {
     const firstLine = new BufferPolyline();
     handle?.collections[0]?.collection.get(0, firstLine);
     const firstMaterial = firstLine.getMaterial(new BufferPolylineMaterial()) as BufferPolylineMaterial;
-    const firstPositions = firstLine.getPositions(new Float64Array(6)) as Float64Array;
+    const firstPositions = firstLine.getPositions(new Float64Array(6)) as unknown as number[];
 
     expect(handle?.collections[0]?.collection.primitiveCount).toBe(1);
     expect(firstLine.featureId).toBe(7);

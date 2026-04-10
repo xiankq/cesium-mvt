@@ -74,12 +74,12 @@ function createComplexTileBuffer() {
     land: getTileForFixture(land),
     poi: getTileForFixture(poi),
     road: getTileForFixture(road),
-  });
+  } as Parameters<typeof fromGeojsonVt>[0]);
 
   return encoded.buffer.slice(
     encoded.byteOffset,
     encoded.byteOffset + encoded.byteLength,
-  );
+  ) as ArrayBuffer;
 }
 
 function getTileForFixture(data: FeatureCollection) {

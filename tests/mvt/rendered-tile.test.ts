@@ -112,7 +112,6 @@ describe('rendered-tile', () => {
         ],
         key: 'shapes/0/0/0@1',
       },
-      key: 'shapes/0/0/0@1',
       level: 0,
       style,
       x: 0,

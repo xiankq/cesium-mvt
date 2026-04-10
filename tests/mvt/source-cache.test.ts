@@ -2,6 +2,7 @@ import type {
   SourceSpecification,
   VectorSourceSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
+import type { TileRequest } from '@/mvt/source/tile-request';
 import { describe, expect, it, vi } from 'vitest';
 import { SourceCache } from '@/mvt/source/source-cache';
 
@@ -91,7 +92,7 @@ describe('source-cache', () => {
 
   it('loads tilejson only once and resolves relative tile templates', async () => {
     const tileValue = new Uint8Array([7, 8, 9]).buffer;
-    const loadTile = vi.fn(async () => tileValue);
+    const loadTile = vi.fn<(request: TileRequest, signal: AbortSignal) => Promise<ArrayBuffer>>(async () => tileValue as ArrayBuffer);
     const loadTileJson = vi.fn(async () => ({
       tiles: ['./{z}/{x}/{y}.pbf'],
     }));
@@ -117,10 +118,10 @@ describe('source-cache', () => {
     })).resolves.toBe(tileValue);
 
     expect(loadTileJson).toHaveBeenCalledTimes(1);
-    expect(loadTile.mock.calls[0]?.[0].url).toBe(
+    expect(loadTile.mock.calls[0]![0]!.url).toBe(
       'https://tiles.example.com/catalog/3/4/5.pbf',
     );
-    expect(loadTile.mock.calls[1]?.[0].url).toBe(
+    expect(loadTile.mock.calls[1]![0]!.url).toBe(
       'https://tiles.example.com/catalog/4/5/6.pbf',
     );
   });

@@ -39,7 +39,7 @@ function createVectorTileBuffer() {
     throw new Error('Expected fixture tile to exist.');
   }
 
-  const encoded = fromGeojsonVt({ poi: tile });
+  const encoded = fromGeojsonVt({ poi: tile } as Parameters<typeof fromGeojsonVt>[0]);
   return encoded.buffer.slice(
     encoded.byteOffset,
     encoded.byteOffset + encoded.byteLength,

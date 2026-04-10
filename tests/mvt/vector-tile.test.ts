@@ -31,11 +31,11 @@ function createTileBuffer() {
     throw new Error('Expected fixture tile to exist.');
   }
 
-  const encoded = fromGeojsonVt({ poi: tile });
+  const encoded = fromGeojsonVt({ poi: tile } as Parameters<typeof fromGeojsonVt>[0]);
   return encoded.buffer.slice(
     encoded.byteOffset,
     encoded.byteOffset + encoded.byteLength,
-  );
+  ) as ArrayBuffer;
 }
 
 describe('vector-tile', () => {
@@ -67,6 +67,7 @@ describe('vector-tile', () => {
         x: 4,
         y: 5,
       },
+      key: 'base/3/4/5',
       sourceId: 'base',
       url: 'https://tiles.example.com/3/4/5.pbf',
     }, new AbortController().signal);

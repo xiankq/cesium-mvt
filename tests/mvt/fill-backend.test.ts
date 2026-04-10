@@ -91,7 +91,7 @@ describe('fill-backend', () => {
     const firstPolygon = new BufferPolygon();
     handle?.collections[0]?.collection.get(0, firstPolygon);
     const firstMaterial = firstPolygon.getMaterial(new BufferPolygonMaterial()) as BufferPolygonMaterial;
-    const firstPositions = firstPolygon.getPositions(new Float64Array(12)) as Float64Array;
+    const firstPositions = firstPolygon.getPositions(new Float64Array(12)) as unknown as number[];
     const firstTriangles = firstPolygon.getTriangles(new Uint32Array(6)) as Uint32Array;
     const firstVertex = Cartesian3.fromArray(firstPositions, 0, new Cartesian3());
 

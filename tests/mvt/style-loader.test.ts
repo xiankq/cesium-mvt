@@ -1,4 +1,8 @@
-import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
+import type {
+  GeoJSONSourceSpecification,
+  StyleSpecification,
+  VectorSourceSpecification,
+} from '@maplibre/maplibre-gl-style-spec';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadStyleSet, normalizeStyle } from '@/mvt/style/style-loader';
 
@@ -33,11 +37,11 @@ describe('style-loader', () => {
 
     expect(normalized.style.sprite).toBe('https://example.com/styles/basic/sprite');
     expect(normalized.style.glyphs).toBe('https://example.com/styles/glyphs/{fontstack}/{range}.pbf');
-    expect(normalized.style.sources.base.url).toBe('https://example.com/styles/tiles/tilejson.json');
-    expect(normalized.style.sources.base.tiles).toEqual([
+    expect((normalized.style.sources.base as VectorSourceSpecification).url).toBe('https://example.com/styles/tiles/tilejson.json');
+    expect((normalized.style.sources.base as VectorSourceSpecification).tiles).toEqual([
       'https://example.com/styles/basic/{z}/{x}/{y}.pbf',
     ]);
-    expect(normalized.style.sources.data.data).toBe('https://example.com/styles/data/world.geojson');
+    expect((normalized.style.sources.data as GeoJSONSourceSpecification).data).toBe('https://example.com/styles/data/world.geojson');
   });
 
   it('loads a style url and extracts the background color', async () => {
