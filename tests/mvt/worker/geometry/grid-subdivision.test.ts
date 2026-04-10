@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
+function calculateSignedArea2D(points: Array<{ x: number; y: number }>): number {
+  let area = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += points[i].x * points[j].y;
+    area -= points[j].x * points[i].y;
+  }
+  return area / 2;
+}
+
+function isCounterClockwise(points: Array<{ x: number; y: number }>): boolean {
+  return calculateSignedArea2D(points) > 0;
+}
+
 describe('grid-subdivision', () => {
   describe('subdivideTriangleEdges', () => {
     it('should return empty result for empty input', async () => {
@@ -152,6 +167,102 @@ describe('grid-subdivision', () => {
       }
 
       expect(uniquePositions.size).toBe(result.positions.length);
+    });
+
+    it('should preserve counter-clockwise winding order after subdivision', async () => {
+      const { subdivideTriangleEdges } = await import('@/mvt/worker/geometry/grid-subdivision');
+      const { Cartesian3 } = await import('cesium');
+
+      const tilePoints = [
+        { x: 0, y: 0 },
+        { x: 4096, y: 0 },
+        { x: 0, y: 4096 },
+      ];
+      const triangles = [0, 1, 2];
+      const granularity = 16;
+
+      const projectPoint = (point: { x: number; y: number }) => new Cartesian3(point.x, point.y, 0);
+
+      const result = subdivideTriangleEdges(tilePoints, triangles, granularity, projectPoint);
+
+      const originalTriangle = [
+        tilePoints[triangles[0]],
+        tilePoints[triangles[1]],
+        tilePoints[triangles[2]],
+      ];
+      expect(isCounterClockwise(originalTriangle)).toBe(true);
+
+      for (let i = 0; i < result.triangles.length; i += 3) {
+        const i0 = result.triangles[i];
+        const i1 = result.triangles[i + 1];
+        const i2 = result.triangles[i + 2];
+
+        const p0 = result.positions[i0];
+        const p1 = result.positions[i1];
+        const p2 = result.positions[i2];
+
+        const subdividedTriangle = [
+          { x: p0.x, y: p0.y },
+          { x: p1.x, y: p1.y },
+          { x: p2.x, y: p2.y },
+        ];
+
+        expect(
+          isCounterClockwise(subdividedTriangle),
+          `Triangle ${i / 3} with vertices (${p0.x.toFixed(2)}, ${p0.y.toFixed(2)}), (${p1.x.toFixed(2)}, ${p1.y.toFixed(2)}), (${p2.x.toFixed(2)}, ${p2.y.toFixed(2)}) is not counter-clockwise`,
+        ).toBe(true);
+      }
+    });
+
+    it('should handle boundary coordinates without key collision', async () => {
+      const { subdivideTriangleEdges } = await import('@/mvt/worker/geometry/grid-subdivision');
+      const { Cartesian3 } = await import('cesium');
+
+      const tilePoints = [
+        { x: 0, y: 0 },
+        { x: 4096, y: 0 },
+        { x: 4096, y: 4096 },
+        { x: 0, y: 4096 },
+      ];
+      const triangles = [0, 1, 2, 0, 2, 3];
+      const granularity = 64;
+
+      const projectPoint = (point: { x: number; y: number }) => new Cartesian3(point.x, point.y, 0);
+
+      const result = subdivideTriangleEdges(tilePoints, triangles, granularity, projectPoint);
+
+      const positionKeys = new Set<string>();
+      for (const pos of result.positions) {
+        const key = `${pos.x.toFixed(2)},${pos.y.toFixed(2)}`;
+        expect(positionKeys.has(key), `Duplicate position detected: ${key}`).toBe(false);
+        positionKeys.add(key);
+      }
+
+      expect(result.positions.length).toBeGreaterThan(4);
+      expect(result.triangles.length % 3).toBe(0);
+    });
+
+    it('should handle high precision coordinates correctly', async () => {
+      const { subdivideTriangleEdges } = await import('@/mvt/worker/geometry/grid-subdivision');
+      const { Cartesian3 } = await import('cesium');
+
+      const tilePoints = [
+        { x: 0, y: 0 },
+        { x: 4096, y: 0 },
+        { x: 2048.123, y: 4095.456 },
+      ];
+      const triangles = [0, 1, 2];
+      const granularity = 32;
+
+      const projectPoint = (point: { x: number; y: number }) => new Cartesian3(point.x, point.y, 0);
+
+      const result = subdivideTriangleEdges(tilePoints, triangles, granularity, projectPoint);
+
+      expect(result.positions.length).toBeGreaterThan(3);
+      expect(result.triangles.length % 3).toBe(0);
+
+      const maxIndex = Math.max(...result.triangles);
+      expect(maxIndex).toBeLessThan(result.positions.length);
     });
   });
 

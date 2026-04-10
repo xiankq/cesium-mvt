@@ -146,19 +146,29 @@ export function subdivideTriangleEdges(
     x: snapBoundaryPoint(p.x),
     y: snapBoundaryPoint(p.y),
   }));
-  const edgeCache = new Map<number, TilePoint[]>();
+  const edgeCache = new Map<string, TilePoint[]>();
+
+  const KEY_MULTIPLIER = 409601;
 
   function createPointKey(x: number, y: number): number {
-    return Math.round(x * KEY_PRECISION) * 1000000 + Math.round(y * KEY_PRECISION);
+    const ix = Math.round(x * KEY_PRECISION);
+    const iy = Math.round(y * KEY_PRECISION);
+    return ix * KEY_MULTIPLIER + iy;
+  }
+
+  function createEdgeKey(p0: TilePoint, p1: TilePoint): string {
+    const k0 = createPointKey(p0.x, p0.y);
+    const k1 = createPointKey(p1.x, p1.y);
+    return `${k0}->${k1}`;
   }
 
   function getSubdividedEdgeByPoints(p0: TilePoint, p1: TilePoint): TilePoint[] {
-    const key = createPointKey(p0.x, p0.y) * 1000000 + createPointKey(p1.x, p1.y);
+    const key = createEdgeKey(p0, p1);
     let edge = edgeCache.get(key);
     if (!edge) {
       edge = subdivideEdgeOnGrid(p0, p1, gridCellSize);
       edgeCache.set(key, edge);
-      const reverseKey = createPointKey(p1.x, p1.y) * 1000000 + createPointKey(p0.x, p0.y);
+      const reverseKey = createEdgeKey(p1, p0);
       edgeCache.set(reverseKey, [...edge].reverse());
     }
     return edge;
@@ -215,7 +225,7 @@ export function subdivideTriangleEdges(
       a2 = midPoint;
       b2 = p1;
       subdivideTriangleRecursive(a1, b1, p2, depth + 1);
-      subdivideTriangleRecursive(a2, p2, b2, depth + 1);
+      subdivideTriangleRecursive(a2, b2, p2, depth + 1);
     }
     else if (d12 >= d01 && d12 >= d20) {
       longestEdge = edge12;
@@ -226,7 +236,7 @@ export function subdivideTriangleEdges(
       a2 = midPoint;
       b2 = p2;
       subdivideTriangleRecursive(a1, b1, p0, depth + 1);
-      subdivideTriangleRecursive(a2, p0, b2, depth + 1);
+      subdivideTriangleRecursive(a2, b2, p0, depth + 1);
     }
     else {
       longestEdge = edge20;
@@ -237,7 +247,7 @@ export function subdivideTriangleEdges(
       a2 = midPoint;
       b2 = p0;
       subdivideTriangleRecursive(a1, b1, p1, depth + 1);
-      subdivideTriangleRecursive(a2, p1, b2, depth + 1);
+      subdivideTriangleRecursive(a2, b2, p1, depth + 1);
     }
   }
 
