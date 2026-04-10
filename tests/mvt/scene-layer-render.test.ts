@@ -1,5 +1,5 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { Scene } from 'cesium';
+import type { Rectangle, Scene } from 'cesium';
 import { Event, PrimitiveCollection, WebMercatorTilingScheme } from 'cesium';
 import { describe, expect, it, vi } from 'vitest';
 import { SceneLayer } from '@/mvt/scene-layer';
@@ -776,6 +776,82 @@ describe('scene-layer-render', () => {
     expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
       eligibleForUnloading: true,
       state: 'hidden',
+    });
+
+    sceneLayer.destroy();
+  });
+
+  it('keeps already shown tiles visible when the view rectangle is temporarily unavailable', async () => {
+    const tilingScheme = new WebMercatorTilingScheme();
+    let viewRectangle: Rectangle | undefined = tilingScheme.rectangle;
+    const scene = createSceneStub({
+      camera: {
+        computeViewRectangle: () => viewRectangle,
+      } as Scene['camera'],
+    });
+    const sceneLayer = new SceneLayer(scene, {
+      maximumLevel: 0,
+      minimumLevel: 0,
+      tilingScheme,
+    });
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [0, 0],
+                },
+                properties: {
+                  name: 'poi-a',
+                },
+              },
+            ],
+          },
+        },
+      },
+      layers: [
+        {
+          id: 'poi',
+          type: 'circle',
+          source: 'places',
+        },
+      ],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    scene.preRender.raiseEvent();
+    await flushAsyncWork();
+    scene.postRender.raiseEvent();
+
+    const renderTile = sceneLayer.getRenderTile('places', 0, 0, 0);
+    const handle = await sceneLayer.ensureRenderedTile('places', 0, 0, 0);
+    const collection = handle.circles?.collections[0]?.collection;
+    const frameNumber = sceneLayer.tileManager.getCurrentFrame();
+
+    expect(collection?.show).toBe(true);
+    expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
+      eligibleForUnloading: false,
+      key: renderTile.key,
+      state: 'shown',
+    });
+
+    viewRectangle = undefined;
+    scene.preRender.raiseEvent();
+    scene.postRender.raiseEvent();
+
+    expect(sceneLayer.tileManager.getCurrentFrame()).toBe(frameNumber);
+    expect(collection?.show).toBe(true);
+    expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
+      eligibleForUnloading: false,
+      key: renderTile.key,
+      state: 'shown',
     });
 
     sceneLayer.destroy();

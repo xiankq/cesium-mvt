@@ -91,6 +91,47 @@ function getTileForFixture(data: FeatureCollection) {
   return tile;
 }
 
+function createFilteredTileBuffer() {
+  const roads: FeatureCollection<LineString, { kind: string }> = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[0, 0], [1, 1]],
+        },
+        properties: {
+          kind: 'main',
+        },
+      },
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[0, 1], [1, 0]],
+        },
+        properties: {
+          kind: 'service',
+        },
+      },
+    ],
+  };
+  const tile = new GeoJSONVT(roads).getTile(0, 0, 0);
+  if (!tile) {
+    throw new Error('Expected filtered fixture tile to exist.');
+  }
+
+  const encoded = fromGeojsonVt({
+    roads: tile,
+  } as Parameters<typeof fromGeojsonVt>[0]);
+
+  return encoded.buffer.slice(
+    encoded.byteOffset,
+    encoded.byteOffset + encoded.byteLength,
+  ) as ArrayBuffer;
+}
+
 describe('feature-tile', () => {
   it('extracts render batches with backend-matching feature geometry', () => {
     const style: StyleSpecification = {
@@ -231,5 +272,57 @@ describe('feature-tile', () => {
 
     expect(featureTile.geometryBatches).toHaveLength(1);
     expect(featureTile.geometryBatches[0]?.familyId).toBe('base/land/fill/0');
+  });
+
+  it('splits families and filters features by MapLibre filter expressions', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/base/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'road-main',
+          'filter': ['==', ['get', 'kind'], 'main'],
+          'source': 'base',
+          'source-layer': 'roads',
+          'type': 'line',
+        },
+        {
+          'id': 'road-service',
+          'filter': ['==', ['get', 'kind'], 'service'],
+          'source': 'base',
+          'source-layer': 'roads',
+          'type': 'line',
+        },
+      ],
+    };
+    const layerFamilies = createLayerFamilies(style);
+    const renderTile = compileRenderTile({
+      key: createRenderTileKey('base', 0, 0, 0),
+      layerFamilies,
+      renderOrder: createRenderOrder(style, layerFamilies),
+      style,
+      styleEpoch: 1,
+    });
+    const featureTile = compileFeatureTile({
+      renderTile,
+      tile: parseVectorTile(createFilteredTileBuffer()),
+    });
+
+    expect(layerFamilies).toHaveLength(2);
+    expect(renderTile.geometryBatches).toHaveLength(2);
+    expect(featureTile.geometryBatches).toHaveLength(2);
+    expect(featureTile.geometryBatches[0]?.features).toHaveLength(1);
+    expect(featureTile.geometryBatches[0]?.features[0]?.properties).toEqual({
+      kind: 'main',
+    });
+    expect(featureTile.geometryBatches[1]?.features).toHaveLength(1);
+    expect(featureTile.geometryBatches[1]?.features[0]?.properties).toEqual({
+      kind: 'service',
+    });
   });
 });

@@ -1,6 +1,7 @@
 import type {
   CircleLayerSpecification,
   FillLayerSpecification,
+  FilterSpecification,
   LayerSpecification,
   LineLayerSpecification,
   SourceSpecification,
@@ -8,7 +9,7 @@ import type {
 } from '@maplibre/maplibre-gl-style-spec';
 import { GEOJSON_SOURCE_LAYER } from '../source/geojson-source-cache';
 
-// layer family 用来归并相邻且兼容的几何图层，复用同一份解析后的几何批次。
+// layer family 用来归并兼容的几何图层，复用同一份解析后的几何批次。
 export type SupportedGeometryLayer
   = | CircleLayerSpecification
     | FillLayerSpecification
@@ -18,47 +19,53 @@ export type SupportedGeometryLayerType = SupportedGeometryLayer['type'];
 
 export interface LayerFamily {
   id: string;
+  filter?: FilterSpecification;
   layerIds: string[];
   sourceId: string;
   sourceLayer?: string;
   type: SupportedGeometryLayerType;
 }
 
+// MapLibre 会按 source / source-layer / type / layout / filter 的兼容签名复用 bucket，
+// 这样同一份几何只需要解析一次，再由多个 style layer 复用。
 export function createLayerFamilies(style: StyleSpecification): LayerFamily[] {
   const families: LayerFamily[] = [];
-  let currentFamily: LayerFamily | undefined;
-  let currentLayoutKey: string | undefined;
+  const familiesBySignature = new Map<string, LayerFamily>();
 
   for (const layer of style.layers) {
     if (!isSupportedGeometryLayer(layer)) {
-      currentFamily = undefined;
-      currentLayoutKey = undefined;
       continue;
     }
 
-    const nextLayoutKey = createLayoutKey(layer.layout);
     const sourceId = layer.source;
     const sourceLayer = resolveSourceLayer(style.sources[layer.source], layer);
-    const compatibleWithCurrent = currentFamily
-      && currentFamily.sourceId === sourceId
-      && currentFamily.sourceLayer === sourceLayer
-      && currentFamily.type === layer.type
-      && currentLayoutKey === nextLayoutKey;
+    const signature = createFamilySignature({
+      filter: layer.filter,
+      layout: layer.layout,
+      sourceId,
+      sourceLayer,
+      type: layer.type,
+    });
 
-    if (compatibleWithCurrent && currentFamily) {
-      currentFamily.layerIds.push(layer.id);
+    const existingFamily = familiesBySignature.get(signature);
+    if (existingFamily) {
+      existingFamily.layerIds.push(layer.id);
       continue;
     }
 
-    currentFamily = {
+    const family: LayerFamily = {
       id: `${sourceId}/${sourceLayer ?? '_'}/${layer.type}/${families.length}`,
       layerIds: [layer.id],
       sourceId,
       sourceLayer,
       type: layer.type,
     };
-    currentLayoutKey = nextLayoutKey;
-    families.push(currentFamily);
+    if (layer.filter !== undefined) {
+      family.filter = layer.filter;
+    }
+
+    familiesBySignature.set(signature, family);
+    families.push(family);
   }
 
   return families;
@@ -72,8 +79,20 @@ export function isSupportedGeometryLayer(
     || layer.type === 'circle';
 }
 
-function createLayoutKey(layout: unknown) {
-  return stableSerialize(layout ?? {});
+function createFamilySignature(options: {
+  filter: FilterSpecification | undefined;
+  layout: unknown;
+  sourceId: string;
+  sourceLayer: string | undefined;
+  type: SupportedGeometryLayerType;
+}) {
+  return stableSerialize({
+    filter: options.filter ?? null,
+    layout: options.layout ?? {},
+    sourceId: options.sourceId,
+    sourceLayer: options.sourceLayer ?? null,
+    type: options.type,
+  });
 }
 
 function resolveSourceLayer(
@@ -99,7 +118,7 @@ function stableSerialize(value: unknown): string {
   }
 
   if (value && typeof value === 'object') {
-    // layout 兼容性必须忽略 key 顺序，
+    // 签名必须忽略 key 顺序，
     // 否则语义相同的对象会被错误拆成多个 family，造成重复工作。
     const entries = Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right));

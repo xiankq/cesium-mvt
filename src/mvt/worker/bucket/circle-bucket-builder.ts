@@ -1,11 +1,15 @@
 import type { VectorTileFeature } from '@mapbox/vector-tile';
+import type { FilterSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { TileProjectionData } from '../geometry/tile-projection';
 import type { Bucket, CircleBucketData, CircleBucketStats } from './bucket-types';
+import { parseRenderTileCoordinateFromKey } from '../../render/render-tile';
+import { createFeatureMatchesPredicate } from '../../style/feature-filter';
 import { createTileProjectionContext, projectTilePoint } from '../geometry/tile-projection';
 import { calculateBucketByteLength, calculateFeatureIndexByteLength } from './bucket-types';
 
 export interface BucketBuilderOptions {
   extent: number;
+  filter?: FilterSpecification;
   familyId: string;
   layerIds: string[];
   sourceLayer?: string;
@@ -17,6 +21,7 @@ export class CircleBucketBuilder {
   readonly type = 'circle' as const;
 
   private readonly extent: number;
+  private readonly featureMatches: (feature: VectorTileFeature) => boolean;
   private readonly familyId: string;
   private readonly layerIds: string[];
   private readonly sourceLayer?: string;
@@ -44,6 +49,10 @@ export class CircleBucketBuilder {
 
   constructor(options: BucketBuilderOptions) {
     this.extent = options.extent;
+    this.featureMatches = createFeatureMatchesPredicate(
+      options.filter,
+      parseRenderTileCoordinateFromKey(options.tileKey).level,
+    );
     this.familyId = options.familyId;
     this.layerIds = options.layerIds;
     this.sourceLayer = options.sourceLayer;
@@ -52,6 +61,10 @@ export class CircleBucketBuilder {
 
   addFeature(feature: VectorTileFeature, localId: number): void {
     if (feature.type !== 1) {
+      return;
+    }
+
+    if (!this.featureMatches(feature)) {
       return;
     }
 

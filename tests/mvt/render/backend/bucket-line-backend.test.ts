@@ -35,6 +35,30 @@ describe('bucket-line-backend', () => {
       expect(handle?.collections.length).toBeGreaterThan(0);
     });
 
+    it('should create one collection per style layer in the bucket', async () => {
+      const { createBucketLineTileHandle }
+        = await import('@/mvt/render/backend/bucket-line-backend');
+
+      const bucketTile = createMockBucketTileWithLayerIds(['layer1', 'layer2']);
+      const style = createMockStyle('line', ['layer1', 'layer2']);
+
+      const handle = createBucketLineTileHandle({
+        bucketTile,
+        style,
+      });
+
+      expect(handle).toBeDefined();
+      expect(handle?.collections).toHaveLength(2);
+      expect(handle?.collections.map(collection => collection.layerId)).toEqual([
+        'layer1',
+        'layer2',
+      ]);
+      expect(handle?.collections.map(collection => collection.polylineCount)).toEqual([
+        1,
+        1,
+      ]);
+    });
+
     it('should handle multiple features in a bucket', async () => {
       const { createBucketLineTileHandle }
         = await import('@/mvt/render/backend/bucket-line-backend');
@@ -115,6 +139,54 @@ function createMockBucketTile(type: 'fill' | 'line' | 'circle') {
   } as any;
 }
 
+function createMockBucketTileWithLayerIds(layerIds: string[]) {
+  return {
+    buckets: [
+      {
+        type: 'line' as const,
+        familyId: 'source/layer/line/0',
+        layerIds,
+        sourceLayer: 'layer',
+        stats: {
+          type: 'line' as const,
+          featureCount: 1,
+          byteLength: 100,
+          polylineCount: 1,
+          totalVertexCount: 3,
+        },
+        data: {
+          positions: new Float64Array([
+            0,
+            0,
+            0,
+            100,
+            0,
+            0,
+            100,
+            100,
+            0,
+          ]),
+          vertexCounts: new Uint32Array([3]),
+          featureIds: new Float32Array([0, 0, 0]),
+        },
+        featureIndex: {
+          entries: [
+            {
+              id: 1,
+              properties: { name: 'test' },
+              type: 'line' as const,
+            },
+          ],
+          byteLength: 50,
+        },
+      },
+    ],
+    epoch: 1,
+    key: 'source/0/0/0',
+    byteLength: 100,
+  } as any;
+}
+
 function createMockBucketTileWithMultipleFeatures() {
   return {
     buckets: [
@@ -177,23 +249,24 @@ function createMockBucketTileWithMultipleFeatures() {
   } as any;
 }
 
-function createMockStyle(type: 'fill' | 'line' | 'circle') {
+function createMockStyle(
+  type: 'fill' | 'line' | 'circle',
+  layerIds: string[] = ['layer1'],
+) {
   return {
     version: 8 as const,
     sources: {},
-    layers: [
-      {
-        'id': 'layer1',
-        type,
-        'source': 'source',
-        'source-layer': 'layer',
-        'paint':
-                    type === 'fill'
-                      ? { 'fill-color': '#ff0000' }
-                      : type === 'line'
-                        ? { 'line-color': '#00ff00' }
-                        : { 'circle-color': '#0000ff' },
-      },
-    ],
+    layers: layerIds.map(id => ({
+      id,
+      type,
+      'source': 'source',
+      'source-layer': 'layer',
+      'paint':
+                type === 'fill'
+                  ? { 'fill-color': '#ff0000' }
+                  : type === 'line'
+                    ? { 'line-color': '#00ff00' }
+                    : { 'circle-color': '#0000ff' },
+    })),
   } as any;
 }
