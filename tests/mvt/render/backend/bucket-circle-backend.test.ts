@@ -3,34 +3,30 @@ import { describe, expect, it } from 'vitest';
 describe('bucket-circle-backend', () => {
   describe('createBucketCircleTileHandle', () => {
     it('should return undefined for empty bucket tile', async () => {
-      const { createBucketCircleTileHandle } = await import('@/mvt/render/backend/bucket-circle-backend');
+      const { createBucketCircleTileHandle }
+        = await import('@/mvt/render/backend/bucket-circle-backend');
 
       const bucketTile = createMockEmptyBucketTile();
       const style = createMockStyle('circle');
 
       const handle = createBucketCircleTileHandle({
         bucketTile,
-        level: 0,
         style,
-        x: 0,
-        y: 0,
       });
 
       expect(handle).toBeUndefined();
     });
 
     it('should create circle tile handle from bucket tile', async () => {
-      const { createBucketCircleTileHandle } = await import('@/mvt/render/backend/bucket-circle-backend');
+      const { createBucketCircleTileHandle }
+        = await import('@/mvt/render/backend/bucket-circle-backend');
 
       const bucketTile = createMockBucketTile('circle');
       const style = createMockStyle('circle');
 
       const handle = createBucketCircleTileHandle({
         bucketTile,
-        level: 0,
         style,
-        x: 0,
-        y: 0,
       });
 
       expect(handle).toBeDefined();
@@ -40,17 +36,15 @@ describe('bucket-circle-backend', () => {
     });
 
     it('should handle multiple features in a bucket', async () => {
-      const { createBucketCircleTileHandle } = await import('@/mvt/render/backend/bucket-circle-backend');
+      const { createBucketCircleTileHandle }
+        = await import('@/mvt/render/backend/bucket-circle-backend');
 
       const bucketTile = createMockBucketTileWithMultipleFeatures();
       const style = createMockStyle('circle');
 
       const handle = createBucketCircleTileHandle({
         bucketTile,
-        level: 0,
         style,
-        x: 0,
-        y: 0,
       });
 
       expect(handle).toBeDefined();
@@ -124,14 +118,7 @@ function createMockBucketTileWithMultipleFeatures() {
           pointCount: 2,
         },
         data: {
-          positions: new Float64Array([
-            0,
-            0,
-            0,
-            100,
-            100,
-            0,
-          ]),
+          positions: new Float64Array([0, 0, 0, 100, 100, 0]),
           featureIds: new Float32Array([0, 1]),
         },
         featureIndex: {
@@ -167,11 +154,12 @@ function createMockStyle(type: 'fill' | 'line' | 'circle') {
         type,
         'source': 'source',
         'source-layer': 'layer',
-        'paint': type === 'fill'
-          ? { 'fill-color': '#ff0000' }
-          : type === 'line'
-            ? { 'line-color': '#00ff00' }
-            : { 'circle-color': '#0000ff' },
+        'paint':
+                    type === 'fill'
+                      ? { 'fill-color': '#ff0000' }
+                      : type === 'line'
+                        ? { 'line-color': '#00ff00' }
+                        : { 'circle-color': '#0000ff' },
       },
     ],
   } as any;

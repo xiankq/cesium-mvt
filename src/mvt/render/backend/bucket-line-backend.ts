@@ -2,12 +2,13 @@ import type {
   LineLayerSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
-import type { WebMercatorTilingScheme } from 'cesium';
-import type { Bucket, LineBucketData, LineBucketStats, ParsedTileResult } from '../../worker/bucket/bucket-types';
-import {
-  BufferPolyline,
-  BufferPolylineCollection,
-} from 'cesium';
+import type {
+  Bucket,
+  LineBucketData,
+  LineBucketStats,
+  ParsedTileResult,
+} from '../../worker/bucket/bucket-types';
+import { BufferPolyline, BufferPolylineCollection } from 'cesium';
 import { getLineMaterial } from './material-cache';
 
 export interface BucketLineCollectionHandle {
@@ -25,11 +26,7 @@ export interface BucketLineTileHandle {
 
 export interface CreateBucketLineTileHandleOptions {
   bucketTile: ParsedTileResult;
-  level: number;
   style: StyleSpecification;
-  tilingScheme?: WebMercatorTilingScheme;
-  x: number;
-  y: number;
 }
 
 export function createBucketLineTileHandle({
@@ -42,15 +39,17 @@ export function createBucketLineTileHandle({
   }
 
   const layersById = new Map(
-    style.layers
-      .filter(isLineLayer)
-      .map(layer => [layer.id, layer]),
+    style.layers.filter(isLineLayer).map(layer => [layer.id, layer]),
   );
 
   const collections: BucketLineCollectionHandle[] = [];
 
   for (const bucket of lineBuckets) {
-    const collectionHandle = createLineCollection(bucket, layersById, style);
+    const collectionHandle = createLineCollection(
+      bucket,
+      layersById,
+      style,
+    );
     if (collectionHandle) {
       collections.push(collectionHandle);
     }
@@ -60,7 +59,10 @@ export function createBucketLineTileHandle({
     return undefined;
   }
 
-  const byteLength = collections.reduce((total, c) => total + c.byteLength, 0);
+  const byteLength = collections.reduce(
+    (total, c) => total + c.byteLength,
+    0,
+  );
 
   return {
     byteLength,
@@ -109,7 +111,11 @@ function createLineCollection(
       continue;
     }
 
-    const positions = extractPositions(data.positions, vertexOffset, vertexCount);
+    const positions = extractPositions(
+      data.positions,
+      vertexOffset,
+      vertexCount,
+    );
     if (!validatePositions(positions)) {
       vertexOffset += vertexCount;
       continue;
@@ -117,17 +123,23 @@ function createLineCollection(
 
     const featureId = data.featureIds[vertexOffset] ?? 0;
 
-    collection.add({
-      material,
-      positions,
-    }, flyweight);
+    collection.add(
+      {
+        material,
+        positions,
+      },
+      flyweight,
+    );
     flyweight.featureId = featureId;
 
     vertexOffset += vertexCount;
   }
 
   return {
-    byteLength: data.positions.byteLength + data.vertexCounts.byteLength + data.featureIds.byteLength,
+    byteLength:
+            data.positions.byteLength
+            + data.vertexCounts.byteLength
+            + data.featureIds.byteLength,
     collection,
     layerId,
     polylineCount: stats.polylineCount,
@@ -169,10 +181,14 @@ function extractPositions(
   return positions.slice(start, end);
 }
 
-function isLineBucket(bucket: Bucket): bucket is Bucket & { data: LineBucketData; stats: LineBucketStats } {
+function isLineBucket(
+  bucket: Bucket,
+): bucket is Bucket & { data: LineBucketData; stats: LineBucketStats } {
   return bucket.type === 'line';
 }
 
-function isLineLayer(layer: any): layer is LineLayerSpecification {
+function isLineLayer(
+  layer: StyleSpecification['layers'][number],
+): layer is LineLayerSpecification {
   return layer.type === 'line';
 }

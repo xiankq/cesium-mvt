@@ -2,12 +2,13 @@ import type {
   FillLayerSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
-import type { WebMercatorTilingScheme } from 'cesium';
-import type { Bucket, FillBucketData, FillBucketStats, ParsedTileResult } from '../../worker/bucket/bucket-types';
-import {
-  BufferPolygon,
-  BufferPolygonCollection,
-} from 'cesium';
+import type {
+  Bucket,
+  FillBucketData,
+  FillBucketStats,
+  ParsedTileResult,
+} from '../../worker/bucket/bucket-types';
+import { BufferPolygon, BufferPolygonCollection } from 'cesium';
 import { getFillMaterial } from './material-cache';
 
 export interface BucketFillCollectionHandle {
@@ -25,11 +26,7 @@ export interface BucketFillTileHandle {
 
 export interface CreateBucketFillTileHandleOptions {
   bucketTile: ParsedTileResult;
-  level: number;
   style: StyleSpecification;
-  tilingScheme?: WebMercatorTilingScheme;
-  x: number;
-  y: number;
 }
 
 export function createBucketFillTileHandle({
@@ -42,9 +39,7 @@ export function createBucketFillTileHandle({
   }
 
   const layersById = new Map(
-    style.layers
-      .filter(isFillLayer)
-      .map(layer => [layer.id, layer]),
+    style.layers.filter(isFillLayer).map(layer => [layer.id, layer]),
   );
   const collections: BucketFillCollectionHandle[] = [];
 
@@ -79,12 +74,15 @@ export function createBucketFillTileHandle({
       const flyweight = new BufferPolygon();
       const material = getFillMaterial(style, layer);
 
-      collection.add({
-        holes: data.holes,
-        material,
-        positions: data.positions,
-        triangles: data.triangles,
-      }, flyweight);
+      collection.add(
+        {
+          holes: data.holes,
+          material,
+          positions: data.positions,
+          triangles: data.triangles,
+        },
+        flyweight,
+      );
 
       collections.push({
         byteLength: collection.byteLength,
@@ -134,7 +132,9 @@ function validatePositions(positions: Float64Array): boolean {
   return true;
 }
 
-function isFillBucket(bucket: Bucket): bucket is Bucket & { data: FillBucketData } {
+function isFillBucket(
+  bucket: Bucket,
+): bucket is Bucket & { data: FillBucketData } {
   return bucket.type === 'fill';
 }
 

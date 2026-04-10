@@ -3,20 +3,15 @@ import { describe, expect, it } from 'vitest';
 describe('bucket-fill-backend', () => {
   describe('createBucketFillTileHandle', () => {
     it('should create fill tile handle from bucket tile', async () => {
-      const { createBucketFillTileHandle } = await import('@/mvt/render/backend/bucket-fill-backend');
-      const { WebMercatorTilingScheme } = await import('cesium');
+      const { createBucketFillTileHandle }
+        = await import('@/mvt/render/backend/bucket-fill-backend');
 
-      const tilingScheme = new WebMercatorTilingScheme();
       const bucketTile = createMockBucketTile('fill');
       const style = createMockStyle('fill');
 
       const handle = createBucketFillTileHandle({
         bucketTile,
-        level: 0,
         style,
-        tilingScheme,
-        x: 0,
-        y: 0,
       });
 
       expect(handle).toBeDefined();
@@ -26,40 +21,30 @@ describe('bucket-fill-backend', () => {
     });
 
     it('should return undefined for empty bucket tile', async () => {
-      const { createBucketFillTileHandle } = await import('@/mvt/render/backend/bucket-fill-backend');
-      const { WebMercatorTilingScheme } = await import('cesium');
+      const { createBucketFillTileHandle }
+        = await import('@/mvt/render/backend/bucket-fill-backend');
 
-      const tilingScheme = new WebMercatorTilingScheme();
       const bucketTile = createMockEmptyBucketTile();
       const style = createMockStyle('fill');
 
       const handle = createBucketFillTileHandle({
         bucketTile,
-        level: 0,
         style,
-        tilingScheme,
-        x: 0,
-        y: 0,
       });
 
       expect(handle).toBeUndefined();
     });
 
     it('should handle multiple features in a bucket', async () => {
-      const { createBucketFillTileHandle } = await import('@/mvt/render/backend/bucket-fill-backend');
-      const { WebMercatorTilingScheme } = await import('cesium');
+      const { createBucketFillTileHandle }
+        = await import('@/mvt/render/backend/bucket-fill-backend');
 
-      const tilingScheme = new WebMercatorTilingScheme();
       const bucketTile = createMockBucketTileWithMultipleFeatures();
       const style = createMockStyle('fill');
 
       const handle = createBucketFillTileHandle({
         bucketTile,
-        level: 0,
         style,
-        tilingScheme,
-        x: 0,
-        y: 0,
       });
 
       expect(handle).toBeDefined();
@@ -91,7 +76,17 @@ function createMockBucketTile(type: 'fill' | 'line' | 'circle') {
           holeCount: type === 'fill' ? 0 : undefined,
         },
         data: {
-          positions: new Float64Array([0, 0, 0, 100, 0, 0, 100, 100, 0]),
+          positions: new Float64Array([
+            0,
+            0,
+            0,
+            100,
+            0,
+            0,
+            100,
+            100,
+            0,
+          ]),
           triangles: new Uint32Array([0, 1, 2]),
           featureIds: new Float32Array([0, 0, 0]),
           holes: new Uint32Array([]),
@@ -198,11 +193,12 @@ function createMockStyle(type: 'fill' | 'line' | 'circle') {
         type,
         'source': 'source',
         'source-layer': 'layer',
-        'paint': type === 'fill'
-          ? { 'fill-color': '#ff0000' }
-          : type === 'line'
-            ? { 'line-color': '#00ff00' }
-            : { 'circle-color': '#0000ff' },
+        'paint':
+                    type === 'fill'
+                      ? { 'fill-color': '#ff0000' }
+                      : type === 'line'
+                        ? { 'line-color': '#00ff00' }
+                        : { 'circle-color': '#0000ff' },
       },
     ],
   } as any;

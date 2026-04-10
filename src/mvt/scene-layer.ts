@@ -1,8 +1,5 @@
 import type { SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type {
-  Rectangle,
-  Scene,
-} from 'cesium';
+import type { Rectangle, Scene } from 'cesium';
 import type { BucketRenderedTileHandle } from './render/bucket-rendered-tile';
 import type { RenderEntry } from './render/render-order';
 import type { RenderTile } from './render/render-tile';
@@ -90,8 +87,16 @@ export class SceneLayer {
   private readonly bucketTileDispatcher = createBucketTileDispatcher();
   private frameUpdateActive = false;
   private frameUpdatePending = true;
-  private readonly bucketTileRequests = new Map<string, PendingBucketTileRequest>();
-  private readonly bucketTilePromises = new Map<string, Promise<ParsedTileResult>>();
+  private readonly bucketTileRequests = new Map<
+    string,
+    PendingBucketTileRequest
+  >();
+
+  private readonly bucketTilePromises = new Map<
+    string,
+    Promise<ParsedTileResult>
+  >();
+
   private readonly bucketTiles = new Map<string, ParsedTileResult>();
   private readonly bucketTileCache: TileCache;
   private readonly hiddenRenderedTileCache: TileCache;
@@ -99,8 +104,16 @@ export class SceneLayer {
   private lastViewSelectionKey?: string;
   private readonly pendingRenderedTileJobs: PendingRenderedTileJob[] = [];
   private renderedTileCreatesThisFrame = 0;
-  private readonly renderedTilePromises = new Map<string, Promise<BucketRenderedTileHandle>>();
-  private readonly renderedTileHandles = new Map<string, BucketRenderedTileHandle>();
+  private readonly renderedTilePromises = new Map<
+    string,
+    Promise<BucketRenderedTileHandle>
+  >();
+
+  private readonly renderedTileHandles = new Map<
+    string,
+    BucketRenderedTileHandle
+  >();
+
   private readonly renderTiles = new Map<string, RenderTile>();
   private renderOrder: RenderEntry[] = [];
   private styleSet?: StyleSet;
@@ -110,9 +123,13 @@ export class SceneLayer {
     this.scene = scene;
     this.minimumLevel = options.minimumLevel ?? 0;
     this.maximumLevel = options.maximumLevel;
-    this.maximumRenderedTilesPerFrame = Math.max(1, options.maximumRenderedTilesPerFrame ?? 4);
+    this.maximumRenderedTilesPerFrame = Math.max(
+      1,
+      options.maximumRenderedTilesPerFrame ?? 4,
+    );
     this.onError = options.onError;
-    this.tilingScheme = options.tilingScheme ?? new WebMercatorTilingScheme();
+    this.tilingScheme
+      = options.tilingScheme ?? new WebMercatorTilingScheme();
     this.rectangle = options.rectangle ?? this.tilingScheme.rectangle;
     this.tileWidth = options.tileWidth ?? 256;
     const cacheSize = calculateDynamicCacheSize({
@@ -124,18 +141,22 @@ export class SceneLayer {
     this.hiddenRenderedTileCache = new TileCache({ maxBytes: cacheSize });
     this.root = new PrimitiveCollection();
     this.scene.primitives.add(this.root);
-    this.removePreRenderListener = this.scene.preRender?.addEventListener(() => {
-      this.beginFrameUpdateIfNeeded();
-    });
-    this.removePostRenderListener = this.scene.postRender?.addEventListener(() => {
-      if (!this.frameUpdateActive) {
-        return;
-      }
+    this.removePreRenderListener = this.scene.preRender?.addEventListener(
+      () => {
+        this.beginFrameUpdateIfNeeded();
+      },
+    );
+    this.removePostRenderListener = this.scene.postRender?.addEventListener(
+      () => {
+        if (!this.frameUpdateActive) {
+          return;
+        }
 
-      this.frameUpdateActive = false;
-      const frameResult = this.tileManager.endFrame();
-      this.applyFrameResult(frameResult);
-    });
+        this.frameUpdateActive = false;
+        const frameResult = this.tileManager.endFrame();
+        this.applyFrameResult(frameResult);
+      },
+    );
   }
 
   updateStyle(styleSet: StyleSet) {
@@ -150,7 +171,10 @@ export class SceneLayer {
     this.renderedTilePromises.clear();
     this.bucketTilePromises.clear();
     this.bucketTiles.clear();
-    this.renderOrder = createRenderOrder(styleSet.style, this.layerFamilies);
+    this.renderOrder = createRenderOrder(
+      styleSet.style,
+      this.layerFamilies,
+    );
     this.renderTiles.clear();
     this.frameUpdatePending = true;
     this.lastViewSelectionKey = undefined;
@@ -179,7 +203,10 @@ export class SceneLayer {
     }
 
     const baseKey = createRenderTileKey(sourceId, level, x, y);
-    const renderTileKey = createScopedRenderTileKey(baseKey, this.styleEpoch);
+    const renderTileKey = createScopedRenderTileKey(
+      baseKey,
+      this.styleEpoch,
+    );
     const cachedRenderTile = this.renderTiles.get(renderTileKey);
     if (cachedRenderTile) {
       return cachedRenderTile;
@@ -207,7 +234,10 @@ export class SceneLayer {
     }
 
     const baseKey = createRenderTileKey(sourceId, level, x, y);
-    const renderTileKey = createScopedRenderTileKey(baseKey, this.styleEpoch);
+    const renderTileKey = createScopedRenderTileKey(
+      baseKey,
+      this.styleEpoch,
+    );
     const cachedBucketTile = this.bucketTiles.get(renderTileKey);
     if (cachedBucketTile) {
       this.bucketTileCache.touch(renderTileKey);
@@ -224,11 +254,16 @@ export class SceneLayer {
     const abortSourceRequest = () => {
       sourceCache.abortTile?.(sourceTileKey);
     };
-    abortController.signal.addEventListener('abort', abortSourceRequest, { once: true });
+    abortController.signal.addEventListener('abort', abortSourceRequest, {
+      once: true,
+    });
     this.bucketTileRequests.set(renderTileKey, {
       abortController,
       cleanup: () => {
-        abortController.signal.removeEventListener('abort', abortSourceRequest);
+        abortController.signal.removeEventListener(
+          'abort',
+          abortSourceRequest,
+        );
       },
     });
     const layerFamilies = this.layerFamilies;
@@ -236,46 +271,60 @@ export class SceneLayer {
     const style = this.styleSet.style;
     const styleEpoch = this.styleEpoch;
     const tilingScheme = this.tilingScheme;
-    const bucketTilePromise = sourceCache.requestTile({
-      level,
-      x,
-      y,
-    }).then((tile) => {
-      const renderTile = this.renderTiles.get(renderTileKey)
-        ?? compileRenderTile({
-          key: baseKey,
-          layerFamilies,
-          renderOrder,
-          style,
-          styleEpoch,
+    const bucketTilePromise = sourceCache
+      .requestTile({
+        level,
+        x,
+        y,
+      })
+      .then((tile) => {
+        const renderTile
+          = this.renderTiles.get(renderTileKey)
+            ?? compileRenderTile({
+              key: baseKey,
+              layerFamilies,
+              renderOrder,
+              style,
+              styleEpoch,
+            });
+        this.renderTiles.set(renderTile.key, renderTile);
+        return this.bucketTileDispatcher.compile({
+          renderTile,
+          signal: abortController.signal,
+          tileData: tile,
+          tilingScheme,
         });
-      this.renderTiles.set(renderTile.key, renderTile);
-      return this.bucketTileDispatcher.compile({
-        renderTile,
-        signal: abortController.signal,
-        tileData: tile,
-        tilingScheme,
+      })
+      .then((bucketTile) => {
+        this.cacheBucketTile(bucketTile);
+        return bucketTile;
+      })
+      .finally(() => {
+        this.bucketTileRequests.get(renderTileKey)?.cleanup();
+        this.bucketTileRequests.delete(renderTileKey);
+        this.bucketTilePromises.delete(renderTileKey);
       });
-    }).then((bucketTile) => {
-      this.cacheBucketTile(bucketTile);
-      return bucketTile;
-    }).finally(() => {
-      this.bucketTileRequests.get(renderTileKey)?.cleanup();
-      this.bucketTileRequests.delete(renderTileKey);
-      this.bucketTilePromises.delete(renderTileKey);
-    });
 
     this.bucketTilePromises.set(renderTileKey, bucketTilePromise);
     return bucketTilePromise;
   }
 
-  async ensureRenderedTile(sourceId: string, level: number, x: number, y: number) {
+  async ensureRenderedTile(
+    sourceId: string,
+    level: number,
+    x: number,
+    y: number,
+  ) {
     return this.resolveRenderedTile(sourceId, level, x, y, false);
   }
 
   async requestTileHint(level: number, x: number, y: number) {
     const sourceIds = getRenderableSourceIds(this.layerFamilies);
-    await Promise.all(sourceIds.map(sourceId => this.requestSourceTileHint(sourceId, level, x, y)));
+    await Promise.all(
+      sourceIds.map(sourceId =>
+        this.requestSourceTileHint(sourceId, level, x, y),
+      ),
+    );
   }
 
   isDestroyed() {
@@ -332,7 +381,11 @@ export class SceneLayer {
 
     const renderedTilePromise = this.getBucketTile(sourceId, level, x, y)
       .then((bucketTile) => {
-        if (this.destroyed || styleEpoch !== this.styleEpoch || !this.styleSet) {
+        if (
+          this.destroyed
+          || styleEpoch !== this.styleEpoch
+          || !this.styleSet
+        ) {
           return createEmptyBucketRenderedTileHandle(renderTileKey);
         }
 
@@ -340,20 +393,14 @@ export class SceneLayer {
           return this.enqueueRenderedTileCreationJob({
             bucketTile,
             key: renderTileKey,
-            level,
             styleEpoch,
-            x,
-            y,
           });
         }
 
         return this.createAndMountRenderedTileHandle({
           bucketTile,
           key: renderTileKey,
-          level,
           styleEpoch,
-          x,
-          y,
         });
       })
       .catch((error) => {
@@ -361,7 +408,8 @@ export class SceneLayer {
           return createEmptyBucketRenderedTileHandle(renderTileKey);
         }
 
-        const emptyHandle = createEmptyBucketRenderedTileHandle(renderTileKey);
+        const emptyHandle
+          = createEmptyBucketRenderedTileHandle(renderTileKey);
         this.renderedTileHandles.set(renderTileKey, emptyHandle);
         this.onError?.(error);
         return emptyHandle;
@@ -374,7 +422,9 @@ export class SceneLayer {
     return renderedTilePromise;
   }
 
-  private reconcileSourceCaches(sources: Record<string, SourceSpecification>) {
+  private reconcileSourceCaches(
+    sources: Record<string, SourceSpecification>,
+  ) {
     const nextSourceIds = new Set(Object.keys(sources));
 
     for (const [sourceId, source] of Object.entries(sources)) {
@@ -420,7 +470,8 @@ export class SceneLayer {
         continue;
       }
 
-      sceneChanged = setBucketRenderedTileVisibility(handle, false) || sceneChanged;
+      sceneChanged
+        = setBucketRenderedTileVisibility(handle, false) || sceneChanged;
       this.cacheHiddenRenderedTileHandle(key, handle);
     }
 
@@ -470,16 +521,20 @@ export class SceneLayer {
 
     const sourceIds = getRenderableSourceIds(this.layerFamilies);
     void Promise.all(
-      sourceIds.map(sourceId => this.requestVisibleTilesForSource(
-        sourceId,
-        tileSelection.coordinates,
-      )),
+      sourceIds.map(sourceId =>
+        this.requestVisibleTilesForSource(
+          sourceId,
+          tileSelection.coordinates,
+        ),
+      ),
     ).catch((error) => {
       this.onError?.(error);
     });
   }
 
-  private shouldUpdateFrame(tileSelection: SceneViewTileSelection | undefined): boolean {
+  private shouldUpdateFrame(
+    tileSelection: SceneViewTileSelection | undefined,
+  ): boolean {
     if (this.pendingRenderedTileJobs.length > 0) {
       return true;
     }
@@ -509,36 +564,54 @@ export class SceneLayer {
 
     const tileSelection = resolveTileSelection({
       coordinates,
-      getAvailability: coordinate => this.getTileAvailability(
-        sourceId,
-        coordinate.level,
-        coordinate.x,
-        coordinate.y,
-      ),
+      getAvailability: coordinate =>
+        this.getTileAvailability(
+          sourceId,
+          coordinate.level,
+          coordinate.x,
+          coordinate.y,
+        ),
       maximumLevel: maxZoom,
       minimumLevel: minZoom ?? this.minimumLevel,
     });
 
     for (const coordinate of tileSelection.readyCoordinates) {
-      this.showResolvedTile(sourceId, coordinate.level, coordinate.x, coordinate.y);
-    }
-
-    for (const coordinate of tileSelection.emptyCoordinates) {
-      this.retainResolvedTile(sourceId, coordinate.level, coordinate.x, coordinate.y);
-    }
-
-    for (const coordinate of tileSelection.fallbackCoordinates) {
-      this.showResolvedTile(sourceId, coordinate.level, coordinate.x, coordinate.y);
-    }
-
-    await Promise.all(
-      tileSelection.requestCoordinates.map(coordinate => this.requestSourceTileHint(
+      this.showResolvedTile(
         sourceId,
         coordinate.level,
         coordinate.x,
         coordinate.y,
-        true,
-      )),
+      );
+    }
+
+    for (const coordinate of tileSelection.emptyCoordinates) {
+      this.retainResolvedTile(
+        sourceId,
+        coordinate.level,
+        coordinate.x,
+        coordinate.y,
+      );
+    }
+
+    for (const coordinate of tileSelection.fallbackCoordinates) {
+      this.showResolvedTile(
+        sourceId,
+        coordinate.level,
+        coordinate.x,
+        coordinate.y,
+      );
+    }
+
+    await Promise.all(
+      tileSelection.requestCoordinates.map(coordinate =>
+        this.requestSourceTileHint(
+          sourceId,
+          coordinate.level,
+          coordinate.x,
+          coordinate.y,
+          true,
+        ),
+      ),
     );
   }
 
@@ -557,7 +630,10 @@ export class SceneLayer {
     if (cachedHandle) {
       this.promoteRenderedTileHandle(renderTileKey);
       if (cachedHandle.byteLength > 0) {
-        const visibilityChanged = setBucketRenderedTileVisibility(cachedHandle, true);
+        const visibilityChanged = setBucketRenderedTileVisibility(
+          cachedHandle,
+          true,
+        );
         this.tileManager.markShown(renderTileKey);
         if (visibilityChanged) {
           this.scene.requestRender();
@@ -574,7 +650,13 @@ export class SceneLayer {
     });
 
     try {
-      const renderedTileHandle = await this.resolveRenderedTile(sourceId, level, x, y, deferCreation);
+      const renderedTileHandle = await this.resolveRenderedTile(
+        sourceId,
+        level,
+        x,
+        y,
+        deferCreation,
+      );
       this.tileManager.setBlockers(renderTileKey, {
         requesting: false,
       });
@@ -596,7 +678,12 @@ export class SceneLayer {
     }
   }
 
-  private getTileAvailability(sourceId: string, level: number, x: number, y: number): TileAvailability {
+  private getTileAvailability(
+    sourceId: string,
+    level: number,
+    x: number,
+    y: number,
+  ): TileAvailability {
     const renderedTileHandle = this.renderedTileHandles.get(
       this.resolveRenderTileKey(sourceId, level, x, y),
     );
@@ -607,14 +694,24 @@ export class SceneLayer {
     return renderedTileHandle.byteLength > 0 ? 'ready' : 'empty';
   }
 
-  private retainResolvedTile(sourceId: string, level: number, x: number, y: number): void {
+  private retainResolvedTile(
+    sourceId: string,
+    level: number,
+    x: number,
+    y: number,
+  ): void {
     const renderTileKey = this.resolveRenderTileKey(sourceId, level, x, y);
     this.tileManager.markCandidate(renderTileKey);
     this.tileManager.markSelected(renderTileKey);
     this.tileManager.touch(renderTileKey);
   }
 
-  private showResolvedTile(sourceId: string, level: number, x: number, y: number): void {
+  private showResolvedTile(
+    sourceId: string,
+    level: number,
+    x: number,
+    y: number,
+  ): void {
     const renderTileKey = this.resolveRenderTileKey(sourceId, level, x, y);
     const renderedTileHandle = this.renderedTileHandles.get(renderTileKey);
     if (!renderedTileHandle) {
@@ -627,14 +724,22 @@ export class SceneLayer {
     }
 
     this.promoteRenderedTileHandle(renderTileKey);
-    const visibilityChanged = setBucketRenderedTileVisibility(renderedTileHandle, true);
+    const visibilityChanged = setBucketRenderedTileVisibility(
+      renderedTileHandle,
+      true,
+    );
     this.tileManager.markShown(renderTileKey);
     if (visibilityChanged) {
       this.scene.requestRender();
     }
   }
 
-  private resolveRenderTileKey(sourceId: string, level: number, x: number, y: number): string {
+  private resolveRenderTileKey(
+    sourceId: string,
+    level: number,
+    x: number,
+    y: number,
+  ): string {
     return createScopedRenderTileKey(
       createRenderTileKey(sourceId, level, x, y),
       this.styleEpoch,
@@ -652,20 +757,18 @@ export class SceneLayer {
     bucketTile,
     countTowardsBudget = false,
     key,
-    level,
     styleEpoch,
-    x,
-    y,
   }: {
     bucketTile: ParsedTileResult;
     countTowardsBudget?: boolean;
     key: string;
-    level: number;
     styleEpoch: number;
-    x: number;
-    y: number;
   }): BucketRenderedTileHandle {
-    if (this.destroyed || styleEpoch !== this.styleEpoch || !this.styleSet) {
+    if (
+      this.destroyed
+      || styleEpoch !== this.styleEpoch
+      || !this.styleSet
+    ) {
       return createEmptyBucketRenderedTileHandle(key);
     }
 
@@ -675,14 +778,13 @@ export class SceneLayer {
 
     const renderedTileHandle = createBucketRenderedTileHandle({
       bucketTile,
-      level,
       style: this.styleSet.style,
-      tilingScheme: this.tilingScheme,
-      x,
-      y,
     });
     mountBucketRenderedTileHandle(this.root, renderedTileHandle);
-    this.renderedTileHandles.set(renderedTileHandle.key, renderedTileHandle);
+    this.renderedTileHandles.set(
+      renderedTileHandle.key,
+      renderedTileHandle,
+    );
     this.frameUpdatePending = true;
     if (renderedTileHandle.byteLength > 0) {
       this.scene.requestRender();
@@ -693,43 +795,34 @@ export class SceneLayer {
   private enqueueRenderedTileCreationJob({
     bucketTile,
     key,
-    level,
     styleEpoch,
-    x,
-    y,
   }: {
     bucketTile: ParsedTileResult;
     key: string;
-    level: number;
     styleEpoch: number;
-    x: number;
-    y: number;
   }): Promise<BucketRenderedTileHandle> {
     if (this.canCreateRenderedTileThisFrame()) {
-      return Promise.resolve(this.createAndMountRenderedTileHandle({
-        bucketTile,
-        countTowardsBudget: true,
-        key,
-        level,
-        styleEpoch,
-        x,
-        y,
-      }));
+      return Promise.resolve(
+        this.createAndMountRenderedTileHandle({
+          bucketTile,
+          countTowardsBudget: true,
+          key,
+          styleEpoch,
+        }),
+      );
     }
 
     return new Promise((resolve) => {
       this.pendingRenderedTileJobs.push({
         key,
         resolve,
-        run: () => this.createAndMountRenderedTileHandle({
-          bucketTile,
-          countTowardsBudget: true,
-          key,
-          level,
-          styleEpoch,
-          x,
-          y,
-        }),
+        run: () =>
+          this.createAndMountRenderedTileHandle({
+            bucketTile,
+            countTowardsBudget: true,
+            key,
+            styleEpoch,
+          }),
       });
       this.frameUpdatePending = true;
       this.scene.requestRender();
@@ -767,8 +860,11 @@ export class SceneLayer {
   }
 
   private canCreateRenderedTileThisFrame(): boolean {
-    return this.frameUpdateActive
-      && this.renderedTileCreatesThisFrame < this.maximumRenderedTilesPerFrame;
+    return (
+      this.frameUpdateActive
+      && this.renderedTileCreatesThisFrame
+      < this.maximumRenderedTilesPerFrame
+    );
   }
 
   private cacheBucketTile(bucketTile: ParsedTileResult): void {
@@ -792,7 +888,9 @@ export class SceneLayer {
     });
 
     for (const entry of evictedEntries) {
-      const evictedHandle = entry.entry.handle as BucketRenderedTileHandle | undefined;
+      const evictedHandle = entry.entry.handle as
+        | BucketRenderedTileHandle
+        | undefined;
       if (!evictedHandle) {
         continue;
       }
@@ -836,22 +934,28 @@ function createTileSourceCache(
 }
 
 function getRenderableSourceIds(layerFamilies: LayerFamily[]): string[] {
-  return [...new Set(layerFamilies.map(layerFamily => layerFamily.sourceId))];
+  return [
+    ...new Set(layerFamilies.map(layerFamily => layerFamily.sourceId)),
+  ];
 }
 
 function resolveSceneViewportWidth(scene: Scene): number {
-  const canvasWidth = scene.canvas as {
-    clientWidth?: number;
-    width?: number;
-  } | undefined;
+  const canvasWidth = scene.canvas as
+    | {
+      clientWidth?: number;
+      width?: number;
+    }
+    | undefined;
   return canvasWidth?.clientWidth ?? canvasWidth?.width ?? 256;
 }
 
 function resolveSceneViewportHeight(scene: Scene): number {
-  const canvasHeight = scene.canvas as {
-    clientHeight?: number;
-    height?: number;
-  } | undefined;
+  const canvasHeight = scene.canvas as
+    | {
+      clientHeight?: number;
+      height?: number;
+    }
+    | undefined;
   return canvasHeight?.clientHeight ?? canvasHeight?.height ?? 256;
 }
 

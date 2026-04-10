@@ -4,7 +4,6 @@ import type {
   BufferPolygonCollection,
   BufferPolylineCollection,
   PrimitiveCollection,
-  WebMercatorTilingScheme,
 } from 'cesium';
 import type { ParsedTileResult } from '../worker/bucket/bucket-types';
 import type { BucketCircleTileHandle } from './backend/bucket-circle-backend';
@@ -14,7 +13,10 @@ import { createBucketCircleTileHandle } from './backend/bucket-circle-backend';
 import { createBucketFillTileHandle } from './backend/bucket-fill-backend';
 import { createBucketLineTileHandle } from './backend/bucket-line-backend';
 
-type MountedCollection = BufferPointCollection | BufferPolygonCollection | BufferPolylineCollection;
+type MountedCollection
+  = | BufferPointCollection
+    | BufferPolygonCollection
+    | BufferPolylineCollection;
 
 interface MountedCollectionEntry {
   collection: MountedCollection;
@@ -32,44 +34,24 @@ export interface BucketRenderedTileHandle {
 
 export interface CreateBucketRenderedTileHandleOptions {
   bucketTile: ParsedTileResult;
-  level: number;
   style: StyleSpecification;
-  tilingScheme?: WebMercatorTilingScheme;
-  x: number;
-  y: number;
 }
 
 export function createBucketRenderedTileHandle({
   bucketTile,
-  level,
   style,
-  tilingScheme,
-  x,
-  y,
 }: CreateBucketRenderedTileHandleOptions): BucketRenderedTileHandle {
   const circles = createBucketCircleTileHandle({
     bucketTile,
-    level,
     style,
-    tilingScheme,
-    x,
-    y,
   });
   const lines = createBucketLineTileHandle({
     bucketTile,
-    level,
     style,
-    tilingScheme,
-    x,
-    y,
   });
   const fills = createBucketFillTileHandle({
     bucketTile,
-    level,
     style,
-    tilingScheme,
-    x,
-    y,
   });
 
   const collections = createOrderedCollectionEntries({
@@ -78,9 +60,10 @@ export function createBucketRenderedTileHandle({
     lines,
     style,
   });
-  const byteLength = (circles?.byteLength ?? 0)
-    + (lines?.byteLength ?? 0)
-    + (fills?.byteLength ?? 0);
+  const byteLength
+    = (circles?.byteLength ?? 0)
+      + (lines?.byteLength ?? 0)
+      + (fills?.byteLength ?? 0);
 
   return {
     byteLength,
@@ -93,7 +76,9 @@ export function createBucketRenderedTileHandle({
   };
 }
 
-export function createEmptyBucketRenderedTileHandle(key: string): BucketRenderedTileHandle {
+export function createEmptyBucketRenderedTileHandle(
+  key: string,
+): BucketRenderedTileHandle {
   return {
     byteLength: 0,
     collections: [],

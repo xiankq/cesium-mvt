@@ -2,13 +2,13 @@ import type {
   CircleLayerSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
-import type { WebMercatorTilingScheme } from 'cesium';
-import type { Bucket, CircleBucketData, CircleBucketStats, ParsedTileResult } from '../../worker/bucket/bucket-types';
-import {
-  BufferPoint,
-  BufferPointCollection,
-  Cartesian3,
-} from 'cesium';
+import type {
+  Bucket,
+  CircleBucketData,
+  CircleBucketStats,
+  ParsedTileResult,
+} from '../../worker/bucket/bucket-types';
+import { BufferPoint, BufferPointCollection, Cartesian3 } from 'cesium';
 import { getCircleMaterial } from './material-cache';
 
 export interface BucketCircleCollectionHandle {
@@ -26,11 +26,7 @@ export interface BucketCircleTileHandle {
 
 export interface CreateBucketCircleTileHandleOptions {
   bucketTile: ParsedTileResult;
-  level: number;
   style: StyleSpecification;
-  tilingScheme?: WebMercatorTilingScheme;
-  x: number;
-  y: number;
 }
 
 export function createBucketCircleTileHandle({
@@ -43,15 +39,17 @@ export function createBucketCircleTileHandle({
   }
 
   const layersById = new Map(
-    style.layers
-      .filter(isCircleLayer)
-      .map(layer => [layer.id, layer]),
+    style.layers.filter(isCircleLayer).map(layer => [layer.id, layer]),
   );
 
   const collections: BucketCircleCollectionHandle[] = [];
 
   for (const bucket of circleBuckets) {
-    const collectionHandle = createCircleCollection(bucket, layersById, style);
+    const collectionHandle = createCircleCollection(
+      bucket,
+      layersById,
+      style,
+    );
     if (collectionHandle) {
       collections.push(collectionHandle);
     }
@@ -61,7 +59,10 @@ export function createBucketCircleTileHandle({
     return undefined;
   }
 
-  const byteLength = collections.reduce((total, c) => total + c.byteLength, 0);
+  const byteLength = collections.reduce(
+    (total, c) => total + c.byteLength,
+    0,
+  );
 
   return {
     byteLength,
@@ -110,10 +111,13 @@ function createCircleCollection(
 
     const featureId = data.featureIds[i] ?? 0;
 
-    collection.add({
-      material,
-      position: new Cartesian3(x, y, z),
-    }, flyweight);
+    collection.add(
+      {
+        material,
+        position: new Cartesian3(x, y, z),
+      },
+      flyweight,
+    );
     flyweight.featureId = featureId;
   }
 
@@ -135,10 +139,14 @@ function validateCircleBucketData(data: CircleBucketData): boolean {
   return true;
 }
 
-function isCircleBucket(bucket: Bucket): bucket is Bucket & { data: CircleBucketData; stats: CircleBucketStats } {
+function isCircleBucket(
+  bucket: Bucket,
+): bucket is Bucket & { data: CircleBucketData; stats: CircleBucketStats } {
   return bucket.type === 'circle';
 }
 
-function isCircleLayer(layer: any): layer is CircleLayerSpecification {
+function isCircleLayer(
+  layer: StyleSpecification['layers'][number],
+): layer is CircleLayerSpecification {
   return layer.type === 'circle';
 }
