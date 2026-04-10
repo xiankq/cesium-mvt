@@ -7,9 +7,8 @@ import type { Bucket, FillBucketData, FillBucketStats, ParsedTileResult } from '
 import {
   BufferPolygon,
   BufferPolygonCollection,
-  BufferPolygonMaterial,
-  Color,
 } from 'cesium';
+import { getFillMaterial } from './material-cache';
 
 export interface BucketFillCollectionHandle {
   byteLength: number;
@@ -32,8 +31,6 @@ export interface CreateBucketFillTileHandleOptions {
   x: number;
   y: number;
 }
-
-const DEFAULT_FILL_COLOR = Color.BLACK;
 
 export function createBucketFillTileHandle({
   bucketTile,
@@ -80,7 +77,7 @@ export function createBucketFillTileHandle({
         vertexCountMax: stats.vertexCount || 0,
       });
       const flyweight = new BufferPolygon();
-      const material = createFillMaterial(layer);
+      const material = getFillMaterial(style, layer);
 
       collection.add({
         holes: data.holes,
@@ -145,50 +142,4 @@ function isFillLayer(
   layer: StyleSpecification['layers'][number],
 ): layer is FillLayerSpecification {
   return layer.type === 'fill';
-}
-
-function createFillMaterial(layer: FillLayerSpecification) {
-  const paint = layer.paint ?? {};
-  const fillOpacity = resolveNumberPaintValue(paint['fill-opacity'], 1);
-  const hasOutlineColor = typeof paint['fill-outline-color'] === 'string';
-
-  return new BufferPolygonMaterial({
-    color: applyOpacity(
-      resolveColorPaintValue(
-        paint['fill-color'],
-        DEFAULT_FILL_COLOR,
-      ),
-      fillOpacity,
-    ),
-    outlineColor: applyOpacity(
-      resolveColorPaintValue(
-        paint['fill-outline-color'],
-        DEFAULT_FILL_COLOR,
-      ),
-      fillOpacity,
-    ),
-    outlineWidth: hasOutlineColor ? 1 : 0,
-  });
-}
-
-function resolveColorPaintValue(value: unknown, fallback: Color) {
-  if (typeof value !== 'string') {
-    return Color.clone(fallback);
-  }
-
-  return Color.fromCssColorString(value) ?? Color.clone(fallback);
-}
-
-function resolveNumberPaintValue(value: unknown, fallback: number) {
-  return typeof value === 'number' ? value : fallback;
-}
-
-function applyOpacity(color: Color, opacity: number) {
-  const resolvedColor = Color.clone(color);
-  resolvedColor.alpha *= clampOpacity(opacity);
-  return resolvedColor;
-}
-
-function clampOpacity(value: number) {
-  return Math.min(1, Math.max(0, value));
 }

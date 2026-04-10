@@ -713,7 +713,7 @@ describe('scene-layer-render', () => {
     sceneLayer.destroy();
   });
 
-  it('unloads hidden tile collections after they stay untouched for another frame', async () => {
+  it('keeps hidden tile collections mounted while they remain inside the cache budget', async () => {
     const scene = createSceneStub();
     const sceneLayer = new SceneLayer(scene);
     const style: StyleSpecification = {
@@ -761,6 +761,7 @@ describe('scene-layer-render', () => {
     scene.preRender.raiseEvent();
     scene.postRender.raiseEvent();
 
+    // Hidden tiles stay mounted (but invisible) for reuse
     expect(root.length).toBe(1);
     expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
       eligibleForUnloading: false,
@@ -770,7 +771,8 @@ describe('scene-layer-render', () => {
     scene.preRender.raiseEvent();
     scene.postRender.raiseEvent();
 
-    expect(root.length).toBe(0);
+    // Still mounted, just hidden — not unloaded
+    expect(root.length).toBe(1);
     expect(sceneLayer.tileManager.getTile(renderTile.key)).toMatchObject({
       eligibleForUnloading: true,
       state: 'hidden',
@@ -852,6 +854,46 @@ describe('scene-layer-render', () => {
 
     sceneLayer.updateStyle(createStyleSet(emptyStyle));
 
+    expect(root.length).toBe(0);
+
+    sceneLayer.destroy();
+  });
+
+  it('clears hidden tile cache when style is updated', async () => {
+    const scene = createSceneStub();
+    const sceneLayer = new SceneLayer(scene);
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        places: {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [0, 0] },
+                properties: { name: 'a' },
+              },
+            ],
+          },
+        },
+      },
+      layers: [{ id: 'poi', type: 'circle', source: 'places' }],
+    };
+
+    sceneLayer.updateStyle(createStyleSet(style));
+    const root = scene.primitives.get(0) as PrimitiveCollection;
+
+    await sceneLayer.ensureRenderedTile('places', 0, 0, 0);
+    expect(root.length).toBe(1);
+
+    scene.preRender.raiseEvent();
+    scene.postRender.raiseEvent();
+    scene.preRender.raiseEvent();
+    scene.postRender.raiseEvent();
+
+    sceneLayer.updateStyle(createStyleSet({ ...style, layers: [] }));
     expect(root.length).toBe(0);
 
     sceneLayer.destroy();

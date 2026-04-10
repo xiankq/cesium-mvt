@@ -7,9 +7,8 @@ import type { Bucket, LineBucketData, LineBucketStats, ParsedTileResult } from '
 import {
   BufferPolyline,
   BufferPolylineCollection,
-  BufferPolylineMaterial,
-  Color,
 } from 'cesium';
+import { getLineMaterial } from './material-cache';
 
 export interface BucketLineCollectionHandle {
   byteLength: number;
@@ -33,9 +32,6 @@ export interface CreateBucketLineTileHandleOptions {
   y: number;
 }
 
-const DEFAULT_LINE_COLOR = Color.BLACK;
-const DEFAULT_LINE_WIDTH = 1;
-
 export function createBucketLineTileHandle({
   bucketTile,
   style,
@@ -54,7 +50,7 @@ export function createBucketLineTileHandle({
   const collections: BucketLineCollectionHandle[] = [];
 
   for (const bucket of lineBuckets) {
-    const collectionHandle = createLineCollection(bucket, layersById);
+    const collectionHandle = createLineCollection(bucket, layersById, style);
     if (collectionHandle) {
       collections.push(collectionHandle);
     }
@@ -76,6 +72,7 @@ export function createBucketLineTileHandle({
 function createLineCollection(
   bucket: Bucket,
   layersById: Map<string, LineLayerSpecification>,
+  style: StyleSpecification,
 ): BucketLineCollectionHandle | undefined {
   const data = bucket.data as LineBucketData;
   const stats = bucket.stats as LineBucketStats;
@@ -99,7 +96,7 @@ function createLineCollection(
     vertexCountMax: stats.totalVertexCount,
   });
 
-  const material = createLineMaterial(layer);
+  const material = getLineMaterial(style, layer);
   const flyweight = new BufferPolyline();
 
   const vertexCounts = Array.from(data.vertexCounts);
@@ -170,42 +167,6 @@ function extractPositions(
     return new Float64Array(0);
   }
   return positions.slice(start, end);
-}
-
-function createLineMaterial(layer: LineLayerSpecification): BufferPolylineMaterial {
-  const color = resolveLineColor(layer);
-  return new BufferPolylineMaterial({
-    color,
-    width: resolveLineWidth(layer),
-  });
-}
-
-function resolveLineColor(layer: LineLayerSpecification): Color {
-  const paint = layer.paint;
-  if (!paint || !('line-color' in paint)) {
-    return DEFAULT_LINE_COLOR;
-  }
-
-  const colorSpec = paint['line-color'];
-  if (typeof colorSpec === 'string') {
-    return Color.fromCssColorString(colorSpec);
-  }
-
-  return DEFAULT_LINE_COLOR;
-}
-
-function resolveLineWidth(layer: LineLayerSpecification): number {
-  const paint = layer.paint;
-  if (!paint || !('line-width' in paint)) {
-    return DEFAULT_LINE_WIDTH;
-  }
-
-  const widthSpec = paint['line-width'];
-  if (typeof widthSpec === 'number') {
-    return widthSpec;
-  }
-
-  return DEFAULT_LINE_WIDTH;
 }
 
 function isLineBucket(bucket: Bucket): bucket is Bucket & { data: LineBucketData; stats: LineBucketStats } {

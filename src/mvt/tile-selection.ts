@@ -95,10 +95,10 @@ export function resolveTileSelection({
       continue;
     }
 
-    // 当前没有做 tile 区域裁剪，某个祖先一旦与已解析的可见子级同时显示，
-    // 就会在子级覆盖范围里发生重复绘制，因此这里先抑制这种 fallback。
-    if (hasResolvedVisibleDescendant(
-      coordinates,
+    // 只有当当前可见范围内、属于这个祖先的子瓦片都已经 resolved 时，
+    // 才能安全移除祖先 fallback；否则会在未就绪的子区域留下白洞。
+    if (isFullyCoveredByResolvedVisibleDescendants(
+      expandedCoordinates,
       availabilityByKey,
       fallbackCoordinate,
     )) {
@@ -147,17 +147,22 @@ function findFallbackCoordinate({
   return highestEmptyAncestor;
 }
 
-function hasResolvedVisibleDescendant(
+function isFullyCoveredByResolvedVisibleDescendants(
   coordinates: readonly TileCoordinate[],
   availabilityByKey: ReadonlyMap<string, TileAvailability>,
   ancestor: TileCoordinate,
 ): boolean {
-  return coordinates.some((coordinate) => {
-    if (!isDescendantCoordinate(coordinate, ancestor)) {
-      return false;
-    }
+  const descendantCoordinates = coordinates.filter((coordinate) => {
+    return isDescendantCoordinate(coordinate, ancestor);
+  });
 
-    return availabilityByKey.get(createCoordinateKey(coordinate)) !== 'missing';
+  if (descendantCoordinates.length === 0) {
+    return false;
+  }
+
+  return descendantCoordinates.every((coordinate) => {
+    const availability = availabilityByKey.get(createCoordinateKey(coordinate));
+    return availability !== 'missing';
   });
 }
 

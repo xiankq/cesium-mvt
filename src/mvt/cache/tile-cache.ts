@@ -7,6 +7,11 @@ export interface CacheEntry {
   [key: string]: any;
 }
 
+export interface EvictedCacheEntry {
+  entry: CacheEntry;
+  key: string;
+}
+
 export function calculateDynamicCacheSize(viewportSize: {
   height: number;
   tileSize: number;
@@ -43,19 +48,19 @@ export class TileCache {
     this.maxBytes = options.maxBytes;
   }
 
-  add(key: string, entry: CacheEntry): void {
+  add(key: string, entry: CacheEntry): EvictedCacheEntry[] {
+    const evictedEntries: EvictedCacheEntry[] = [];
+    this.delete(key);
+
     while (this.currentBytes + entry.byteLength > this.maxBytes && this.head) {
-      const oldestKey = this.head.key;
       const oldestNode = this.head;
-      this.head = this.head.next;
-      if (this.head) {
-        this.head.prev = null;
-      }
-      else {
-        this.tail = null;
-      }
-      this.cache.delete(oldestKey);
+      this.detachNode(oldestNode);
+      this.cache.delete(oldestNode.key);
       this.currentBytes -= oldestNode.entry.byteLength;
+      evictedEntries.push({
+        entry: oldestNode.entry,
+        key: oldestNode.key,
+      });
     }
 
     const newNode: CacheNode = {
@@ -75,10 +80,39 @@ export class TileCache {
 
     this.cache.set(key, newNode);
     this.currentBytes += entry.byteLength;
+    return evictedEntries;
   }
 
   has(key: string): boolean {
     return this.cache.has(key);
+  }
+
+  delete(key: string): CacheEntry | undefined {
+    const node = this.cache.get(key);
+    if (!node) {
+      return undefined;
+    }
+
+    this.detachNode(node);
+    this.cache.delete(key);
+    this.currentBytes -= node.entry.byteLength;
+    return node.entry;
+  }
+
+  clear(): EvictedCacheEntry[] {
+    const evictedEntries: EvictedCacheEntry[] = [];
+    for (const [key, node] of this.cache) {
+      evictedEntries.push({
+        entry: node.entry,
+        key,
+      });
+    }
+
+    this.cache.clear();
+    this.head = null;
+    this.tail = null;
+    this.currentBytes = 0;
+    return evictedEntries;
   }
 
   touch(key: string): void {
@@ -92,27 +126,38 @@ export class TileCache {
       return;
     }
 
-    // 从当前位置移除节点
-    if (node.prev) {
-      node.prev.next = node.next;
-    }
-    else {
-      this.head = node.next;
-    }
-    if (node.next) {
-      node.next.prev = node.prev;
-    }
-
-    // 将节点移到尾部
+    this.detachNode(node);
     node.prev = this.tail;
     node.next = null;
     if (this.tail) {
       this.tail.next = node;
+    }
+    else {
+      this.head = node;
     }
     this.tail = node;
   }
 
   getCurrentBytes(): number {
     return this.currentBytes;
+  }
+
+  private detachNode(node: CacheNode): void {
+    if (node.prev) {
+      node.prev.next = node.next;
+    }
+    else {
+      this.head = node.next;
+    }
+
+    if (node.next) {
+      node.next.prev = node.prev;
+    }
+    else {
+      this.tail = node.prev;
+    }
+
+    node.prev = null;
+    node.next = null;
   }
 }

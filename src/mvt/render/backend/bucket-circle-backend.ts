@@ -7,10 +7,9 @@ import type { Bucket, CircleBucketData, CircleBucketStats, ParsedTileResult } fr
 import {
   BufferPoint,
   BufferPointCollection,
-  BufferPointMaterial,
   Cartesian3,
-  Color,
 } from 'cesium';
+import { getCircleMaterial } from './material-cache';
 
 export interface BucketCircleCollectionHandle {
   byteLength: number;
@@ -34,9 +33,6 @@ export interface CreateBucketCircleTileHandleOptions {
   y: number;
 }
 
-const DEFAULT_CIRCLE_COLOR = Color.BLACK;
-const DEFAULT_CIRCLE_RADIUS = 5;
-
 export function createBucketCircleTileHandle({
   bucketTile,
   style,
@@ -55,7 +51,7 @@ export function createBucketCircleTileHandle({
   const collections: BucketCircleCollectionHandle[] = [];
 
   for (const bucket of circleBuckets) {
-    const collectionHandle = createCircleCollection(bucket, layersById);
+    const collectionHandle = createCircleCollection(bucket, layersById, style);
     if (collectionHandle) {
       collections.push(collectionHandle);
     }
@@ -77,6 +73,7 @@ export function createBucketCircleTileHandle({
 function createCircleCollection(
   bucket: Bucket,
   layersById: Map<string, CircleLayerSpecification>,
+  style: StyleSpecification,
 ): BucketCircleCollectionHandle | undefined {
   const data = bucket.data as CircleBucketData;
   const stats = bucket.stats as CircleBucketStats;
@@ -100,7 +97,7 @@ function createCircleCollection(
   });
 
   const flyweight = new BufferPoint();
-  const material = createCircleMaterial(layer);
+  const material = getCircleMaterial(style, layer);
 
   for (let i = 0; i < stats.pointCount; i++) {
     const x = data.positions[i * 3];
@@ -136,44 +133,6 @@ function validateCircleBucketData(data: CircleBucketData): boolean {
     return false;
   }
   return true;
-}
-
-function createCircleMaterial(layer: CircleLayerSpecification): BufferPointMaterial {
-  const color = resolveCircleColor(layer);
-  const radius = resolveCircleRadius(layer);
-  // circle-radius表示半径，而BufferPoint的size语义是完整点精灵尺寸
-  return new BufferPointMaterial({
-    color,
-    size: radius * 2,
-  });
-}
-
-function resolveCircleColor(layer: CircleLayerSpecification): Color {
-  const paint = layer.paint;
-  if (!paint || !('circle-color' in paint)) {
-    return DEFAULT_CIRCLE_COLOR;
-  }
-
-  const colorSpec = paint['circle-color'];
-  if (typeof colorSpec === 'string') {
-    return Color.fromCssColorString(colorSpec);
-  }
-
-  return DEFAULT_CIRCLE_COLOR;
-}
-
-function resolveCircleRadius(layer: CircleLayerSpecification): number {
-  const paint = layer.paint;
-  if (!paint || !('circle-radius' in paint)) {
-    return DEFAULT_CIRCLE_RADIUS;
-  }
-
-  const radiusSpec = paint['circle-radius'];
-  if (typeof radiusSpec === 'number') {
-    return radiusSpec;
-  }
-
-  return DEFAULT_CIRCLE_RADIUS;
 }
 
 function isCircleBucket(bucket: Bucket): bucket is Bucket & { data: CircleBucketData; stats: CircleBucketStats } {
