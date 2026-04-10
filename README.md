@@ -74,8 +74,18 @@ viewer.imageryLayers.addImageryProvider(provider);
 
 ```
 src/mvt/
-├── cache/              # 缓存系统
-│   └── tile-cache.ts       # LRU 缓存实现
+├── bucket/             # Bucket 数据结构
+│   ├── bucket-types.ts     # Bucket 类型定义
+│   ├── bucket-tile-compiler.ts  # Bucket 瓦片编译器
+│   ├── bucket-tile-dispatcher.ts  # Bucket 瓦片任务分发器
+│   ├── fill-bucket-builder.ts    # 填充 Bucket 构建器
+│   ├── line-bucket-builder.ts    # 线 Bucket 构建器
+│   └── circle-bucket-builder.ts  # 圆 Bucket 构建器
+├── geometry/           # 几何处理
+│   ├── grid-subdivision.ts      # 网格细分算法
+│   ├── line-subdivision.ts      # 线段细分算法
+│   ├── tile-projection.ts       # 瓦片投影
+│   └── utils.ts                 # 几何工具函数
 ├── render/             # 渲染相关
 │   ├── backend/            # 渲染后端（fill/line/circle）
 │   │   ├── bucket-circle-backend.ts
@@ -84,6 +94,7 @@ src/mvt/
 │   │   └── material-cache.ts
 │   ├── bucket-rendered-tile.ts
 │   ├── feature-tile.ts
+│   ├── feature-tile-dispatcher.ts  # Feature 瓦片任务分发器
 │   ├── render-order.ts
 │   └── render-tile.ts
 ├── source/             # 数据源管理
@@ -91,6 +102,7 @@ src/mvt/
 │   ├── source-cache.ts
 │   ├── tile-manager.ts
 │   ├── tile-request.ts
+│   ├── tile-selection.ts    # 瓦片选择逻辑
 │   └── vector-tile.ts
 ├── style/              # 样式处理
 │   ├── layer-family.ts
@@ -99,22 +111,28 @@ src/mvt/
 │   └── style-set.ts
 ├── utils/              # 工具函数
 │   ├── abort.ts
-│   └── clone.ts
+│   ├── clone.ts
+│   ├── worker-dispatcher.ts  # 通用 Worker Dispatcher 工具
+│   └── validation.ts
 ├── worker/             # Web Worker 相关
-│   ├── bucket/
-│   ├── geometry/
-│   ├── bucket-tile-compiler.ts
-│   ├── bucket-tile-dispatcher.ts
 │   ├── bucket-tile.worker.ts
-│   ├── feature-tile-dispatcher.ts
 │   └── feature-tile.worker.ts
 ├── imagery-provider.ts # ImageryProvider 门面
 ├── scene-layer.ts      # 场景图层核心
-├── tile-selection.ts   # 瓦片选择逻辑
 └── view-state.ts       # 视图状态
 ```
 
 ## 核心概念
+
+### 架构设计
+
+项目采用模块化设计，职责清晰：
+
+- **Geometry 模块**：处理几何细分和投影，确保渲染精度
+- **Bucket 模块**：管理瓦片数据的中间表示，连接数据解析和渲染
+- **Worker Dispatcher**：通用的任务分发系统，支持 Worker 和内联两种执行模式
+- **Source 模块**：管理数据源和瓦片请求，支持多种数据格式
+- **Style 模块**：处理样式规范，管理图层族
 
 ### 瓦片状态机
 
@@ -146,6 +164,22 @@ src/mvt/
 ## 开发指南
 
 详细开发规范请参考 [AGENTS.md](./AGENTS.md)。
+
+### 代码质量
+
+项目遵循严格的代码质量标准：
+
+- **模块化设计**：职责清晰，避免大文件和重复代码
+- **详细注释**：复杂算法添加中文注释，解释原理和步骤
+- **类型安全**：使用 TypeScript，确保类型正确性
+- **测试覆盖**：所有功能都有对应的测试用例
+
+### 最近优化
+
+- ✅ 重构 Geometry 模块，拆分大函数，提升可读性
+- ✅ 创建通用 Worker Dispatcher 工具，消除重复代码
+- ✅ 补充详细的中文注释，解释复杂算法
+- ✅ 优化模块结构，提升代码可维护性
 
 ## 许可证
 
