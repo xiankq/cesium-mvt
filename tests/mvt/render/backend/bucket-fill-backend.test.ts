@@ -1,185 +1,162 @@
 import { describe, expect, it } from 'vitest';
+import {
+  createMockEmptyBucketTile,
+  createMockFillBucketTile,
+  createMockFillBucketTileWithEmptyPositions,
+  createMockFillBucketTileWithInvalidPositions,
+  createMockFillBucketTileWithMissingLayer,
+} from '../../../helpers/bucket-helpers';
 import { createMockStyle } from '../../../helpers/style-helpers';
 
 describe('bucket-fill-backend', () => {
   describe('createBucketFillTileHandle', () => {
-    it('should create fill tile handle from bucket tile', async () => {
-      const { createBucketFillTileHandle }
-        = await import('@/mvt/render/backend/bucket-fill-backend');
+    describe('正常流程', () => {
+      it('应该从bucket tile创建填充瓦片句柄', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
 
-      const bucketTile = createMockBucketTile('fill');
-      const style = createMockStyle('fill');
+        const bucketTile = createMockFillBucketTile();
+        const style = createMockStyle('fill');
 
-      const handle = createBucketFillTileHandle({
-        bucketTile,
-        style,
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.key).toBe('source/0/0/0');
+        expect(handle?.collections).toBeDefined();
+        expect(handle?.collections.length).toBeGreaterThan(0);
+        expect(handle?.byteLength).toBeGreaterThan(0);
       });
 
-      expect(handle).toBeDefined();
-      expect(handle?.key).toBe('source/0/0/0');
-      expect(handle?.collections).toBeDefined();
-      expect(handle?.collections.length).toBeGreaterThan(0);
+      it('应该为空bucket tile返回undefined', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
+
+        const bucketTile = createMockEmptyBucketTile();
+        const style = createMockStyle('fill');
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeUndefined();
+      });
+
+      it('应该处理bucket中的多个要素', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
+
+        const bucketTile = createMockFillBucketTile({ featureCount: 2 });
+        const style = createMockStyle('fill');
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toBeDefined();
+        expect(handle?.collections.length).toBeGreaterThan(0);
+
+        const collectionHandle = handle!.collections[0];
+        expect(collectionHandle.polygonCount).toBe(2);
+        expect(collectionHandle.collection).toBeDefined();
+        expect(collectionHandle.byteLength).toBeGreaterThan(0);
+        expect(collectionHandle.layerId).toBe('layer1');
+      });
     });
 
-    it('should return undefined for empty bucket tile', async () => {
-      const { createBucketFillTileHandle }
-        = await import('@/mvt/render/backend/bucket-fill-backend');
+    describe('边界条件', () => {
+      it('应该处理空positions数组', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
 
-      const bucketTile = createMockEmptyBucketTile();
-      const style = createMockStyle('fill');
+        const bucketTile = createMockFillBucketTileWithEmptyPositions();
+        const style = createMockStyle('fill');
 
-      const handle = createBucketFillTileHandle({
-        bucketTile,
-        style,
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeUndefined();
       });
 
-      expect(handle).toBeUndefined();
+      it('应该处理包含NaN坐标的positions', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
+
+        const bucketTile = createMockFillBucketTileWithInvalidPositions();
+        const style = createMockStyle('fill');
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeUndefined();
+      });
+
+      it('应该处理layer不存在的情况', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
+
+        const bucketTile = createMockFillBucketTileWithMissingLayer();
+        const style = createMockStyle('fill');
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeUndefined();
+      });
     });
 
-    it('should handle multiple features in a bucket', async () => {
-      const { createBucketFillTileHandle }
-        = await import('@/mvt/render/backend/bucket-fill-backend');
+    describe('数据验证', () => {
+      it('应该正确计算byteLength', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
 
-      const bucketTile = createMockBucketTileWithMultipleFeatures();
-      const style = createMockStyle('fill');
+        const bucketTile = createMockFillBucketTile({ featureCount: 3 });
+        const style = createMockStyle('fill');
 
-      const handle = createBucketFillTileHandle({
-        bucketTile,
-        style,
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.byteLength).toBeGreaterThan(0);
+
+        const collectionByteLength = handle!.collections.reduce(
+          (total, c) => total + c.byteLength,
+          0,
+        );
+        expect(collectionByteLength).toBe(handle!.byteLength);
       });
 
-      expect(handle).toBeDefined();
-      expect(handle?.collections).toBeDefined();
-      expect(handle?.collections.length).toBeGreaterThan(0);
+      it('应该正确设置collection属性', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
 
-      const collectionHandle = handle!.collections[0];
-      expect(collectionHandle.polygonCount).toBe(2);
-      expect(collectionHandle.collection).toBeDefined();
+        const bucketTile = createMockFillBucketTile({ layerId: 'custom-layer' });
+        const style = createMockStyle('fill', { layerId: 'custom-layer' });
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        const collection = handle!.collections[0];
+        expect(collection.layerId).toBe('custom-layer');
+        expect(collection.polygonCount).toBeGreaterThan(0);
+        expect(collection.collection).toBeDefined();
+      });
     });
   });
 });
-
-function createMockBucketTile(type: 'fill' | 'line' | 'circle') {
-  return {
-    buckets: [
-      {
-        type: type as 'fill',
-        familyId: `source/layer/${type}/0`,
-        layerIds: ['layer1'],
-        sourceLayer: 'layer',
-        stats: {
-          type: type as 'fill',
-          featureCount: 1,
-          byteLength: 100,
-          polygonCount: type === 'fill' ? 1 : undefined,
-          triangleCount: type === 'fill' ? 1 : undefined,
-          vertexCount: type === 'fill' ? 3 : undefined,
-          holeCount: type === 'fill' ? 0 : undefined,
-        },
-        data: {
-          positions: new Float64Array([
-            0,
-            0,
-            0,
-            100,
-            0,
-            0,
-            100,
-            100,
-            0,
-          ]),
-          triangles: new Uint32Array([0, 1, 2]),
-          featureIds: new Float32Array([0, 0, 0]),
-          holes: new Uint32Array([]),
-        },
-        featureIndex: {
-          entries: [
-            {
-              id: 1,
-              properties: { name: 'test' },
-              type: 'polygon',
-            },
-          ],
-          byteLength: 50,
-        },
-      },
-    ],
-    epoch: 1,
-    key: 'source/0/0/0',
-    byteLength: 100,
-  } as any;
-}
-
-function createMockEmptyBucketTile() {
-  return {
-    buckets: [],
-    epoch: 1,
-    key: 'source/0/0/0',
-    byteLength: 0,
-  };
-}
-
-function createMockBucketTileWithMultipleFeatures() {
-  return {
-    buckets: [
-      {
-        type: 'fill' as const,
-        familyId: 'source/layer/fill/0',
-        layerIds: ['layer1'],
-        sourceLayer: 'layer',
-        stats: {
-          type: 'fill' as const,
-          featureCount: 2,
-          byteLength: 200,
-          polygonCount: 2,
-          triangleCount: 2,
-          vertexCount: 6,
-          holeCount: 0,
-        },
-        data: {
-          positions: new Float64Array([
-            0,
-            0,
-            0,
-            100,
-            0,
-            0,
-            100,
-            100,
-            0,
-            200,
-            0,
-            0,
-            300,
-            0,
-            0,
-            300,
-            100,
-            0,
-          ]),
-          triangles: new Uint32Array([0, 1, 2, 3, 4, 5]),
-          featureIds: new Float32Array([0, 0, 0, 1, 1, 1]),
-          holes: new Uint32Array([]),
-        },
-        featureIndex: {
-          entries: [
-            {
-              id: 1,
-              properties: { name: 'test1' },
-              type: 'polygon' as const,
-            },
-            {
-              id: 2,
-              properties: { name: 'test2' },
-              type: 'polygon' as const,
-            },
-          ],
-          byteLength: 100,
-        },
-      },
-    ],
-    epoch: 1,
-    key: 'source/0/0/0',
-    byteLength: 200,
-  };
-}

@@ -1,146 +1,164 @@
 import { describe, expect, it } from 'vitest';
+import {
+  createMockCircleBucketTile,
+  createMockCircleBucketTileWithEmptyPositions,
+  createMockCircleBucketTileWithInvalidPositions,
+  createMockCircleBucketTileWithMissingLayer,
+  createMockEmptyBucketTile,
+} from '../../../helpers/bucket-helpers';
 import { createMockStyle } from '../../../helpers/style-helpers';
 
 describe('bucket-circle-backend', () => {
   describe('createBucketCircleTileHandle', () => {
-    it('should return undefined for empty bucket tile', async () => {
-      const { createBucketCircleTileHandle }
-        = await import('@/mvt/render/backend/bucket-circle-backend');
+    describe('正常流程', () => {
+      it('应该为空bucket tile返回undefined', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
 
-      const bucketTile = createMockEmptyBucketTile();
-      const style = createMockStyle('circle');
+        const bucketTile = createMockEmptyBucketTile();
+        const style = createMockStyle('circle');
 
-      const handle = createBucketCircleTileHandle({
-        bucketTile,
-        style,
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeUndefined();
       });
 
-      expect(handle).toBeUndefined();
+      it('应该从bucket tile创建圆形瓦片句柄', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
+
+        const bucketTile = createMockCircleBucketTile();
+        const style = createMockStyle('circle');
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.key).toBe('source/0/0/0');
+        expect(handle?.collections).toBeDefined();
+        expect(handle?.collections.length).toBeGreaterThan(0);
+        expect(handle?.byteLength).toBeGreaterThan(0);
+      });
+
+      it('应该处理bucket中的多个要素', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
+
+        const bucketTile = createMockCircleBucketTile({ featureCount: 2 });
+        const style = createMockStyle('circle');
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toBeDefined();
+        expect(handle?.collections.length).toBeGreaterThan(0);
+
+        const collectionHandle = handle!.collections[0];
+        expect(collectionHandle.pointCount).toBe(2);
+        expect(collectionHandle.collection).toBeDefined();
+        expect(collectionHandle.byteLength).toBeGreaterThan(0);
+        expect(collectionHandle.layerId).toBe('layer1');
+      });
     });
 
-    it('should create circle tile handle from bucket tile', async () => {
-      const { createBucketCircleTileHandle }
-        = await import('@/mvt/render/backend/bucket-circle-backend');
+    describe('边界条件', () => {
+      it('应该处理空positions数组', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
 
-      const bucketTile = createMockBucketTile('circle');
-      const style = createMockStyle('circle');
+        const bucketTile = createMockCircleBucketTileWithEmptyPositions();
+        const style = createMockStyle('circle');
 
-      const handle = createBucketCircleTileHandle({
-        bucketTile,
-        style,
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeUndefined();
       });
 
-      expect(handle).toBeDefined();
-      expect(handle?.key).toBe('source/0/0/0');
-      expect(handle?.collections).toBeDefined();
-      expect(handle?.collections.length).toBeGreaterThan(0);
+      it('应该处理包含NaN坐标的positions', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
+
+        const bucketTile = createMockCircleBucketTileWithInvalidPositions();
+        const style = createMockStyle('circle');
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toBeDefined();
+        expect(handle?.collections.length).toBeGreaterThan(0);
+      });
+
+      it('应该处理layer不存在的情况', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
+
+        const bucketTile = createMockCircleBucketTileWithMissingLayer();
+        const style = createMockStyle('circle');
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeUndefined();
+      });
     });
 
-    it('should handle multiple features in a bucket', async () => {
-      const { createBucketCircleTileHandle }
-        = await import('@/mvt/render/backend/bucket-circle-backend');
+    describe('数据验证', () => {
+      it('应该正确计算byteLength', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
 
-      const bucketTile = createMockBucketTileWithMultipleFeatures();
-      const style = createMockStyle('circle');
+        const bucketTile = createMockCircleBucketTile({ featureCount: 3 });
+        const style = createMockStyle('circle');
 
-      const handle = createBucketCircleTileHandle({
-        bucketTile,
-        style,
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.byteLength).toBeGreaterThan(0);
+
+        const collectionByteLength = handle!.collections.reduce(
+          (total, c) => total + c.byteLength,
+          0,
+        );
+        expect(collectionByteLength).toBe(handle!.byteLength);
       });
 
-      expect(handle).toBeDefined();
-      expect(handle?.collections).toBeDefined();
-      expect(handle?.collections.length).toBeGreaterThan(0);
+      it('应该正确设置collection属性', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
 
-      const collectionHandle = handle!.collections[0];
-      expect(collectionHandle.pointCount).toBe(2);
-      expect(collectionHandle.collection).toBeDefined();
+        const bucketTile = createMockCircleBucketTile({ layerId: 'custom-layer' });
+        const style = createMockStyle('circle', { layerId: 'custom-layer' });
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        const collection = handle!.collections[0];
+        expect(collection.layerId).toBe('custom-layer');
+        expect(collection.pointCount).toBeGreaterThan(0);
+        expect(collection.collection).toBeDefined();
+      });
     });
   });
 });
-
-function createMockEmptyBucketTile() {
-  return {
-    buckets: [],
-    epoch: 1,
-    key: 'source/0/0/0',
-    byteLength: 0,
-  };
-}
-
-function createMockBucketTile(type: 'fill' | 'line' | 'circle') {
-  return {
-    buckets: [
-      {
-        type: type as 'circle',
-        familyId: `source/layer/${type}/0`,
-        layerIds: ['layer1'],
-        sourceLayer: 'layer',
-        stats: {
-          type: type as 'circle',
-          featureCount: 1,
-          byteLength: 100,
-          pointCount: type === 'circle' ? 1 : undefined,
-        },
-        data: {
-          positions: new Float64Array([0, 0, 0]),
-          featureIds: new Float32Array([0]),
-        },
-        featureIndex: {
-          entries: [
-            {
-              id: 1,
-              properties: { name: 'test' },
-              type: 'point',
-            },
-          ],
-          byteLength: 50,
-        },
-      },
-    ],
-    epoch: 1,
-    key: 'source/0/0/0',
-    byteLength: 100,
-  } as any;
-}
-
-function createMockBucketTileWithMultipleFeatures() {
-  return {
-    buckets: [
-      {
-        type: 'circle' as const,
-        familyId: 'source/layer/circle/0',
-        layerIds: ['layer1'],
-        sourceLayer: 'layer',
-        stats: {
-          type: 'circle' as const,
-          featureCount: 2,
-          byteLength: 200,
-          pointCount: 2,
-        },
-        data: {
-          positions: new Float64Array([0, 0, 0, 100, 100, 0]),
-          featureIds: new Float32Array([0, 1]),
-        },
-        featureIndex: {
-          entries: [
-            {
-              id: 1,
-              properties: { name: 'test1' },
-              type: 'point' as const,
-            },
-            {
-              id: 2,
-              properties: { name: 'test2' },
-              type: 'point' as const,
-            },
-          ],
-          byteLength: 100,
-        },
-      },
-    ],
-    epoch: 1,
-    key: 'source/0/0/0',
-    byteLength: 200,
-  } as any;
-}

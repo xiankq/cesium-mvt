@@ -1,12 +1,18 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 
-export function createMockStyle(type: 'fill' | 'line' | 'circle'): StyleSpecification {
+export interface MockStyleOptions {
+  layerId?: string;
+}
+
+export function createMockStyle(type: 'fill' | 'line' | 'circle', options: MockStyleOptions = {}): StyleSpecification {
+  const { layerId = 'layer1' } = options;
+
   return {
     version: 8 as const,
     sources: {},
     layers: [
       {
-        'id': 'layer1',
+        'id': layerId,
         type,
         'source': 'source',
         'source-layer': 'layer',
