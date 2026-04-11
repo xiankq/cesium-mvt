@@ -93,6 +93,10 @@ export class TileScheduler {
       return true;
     }
 
+    if (!tileSelection && this.lastViewSelectionKey === undefined) {
+      return true;
+    }
+
     return tileSelection?.key !== this.lastViewSelectionKey;
   }
 

@@ -3,6 +3,7 @@ import type { PrimitiveCollection } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
 import type { LayerFamily } from '../style/layer-family';
 import type { BucketRenderedTileHandle } from './bucket-rendered-tile';
+import type { RenderEntry } from './render-order';
 import {
   createBucketRenderedTileHandle,
   createEmptyBucketRenderedTileHandle,
@@ -19,13 +20,30 @@ export interface RenderManagerOptions {
 export class RenderManager {
   private readonly root: PrimitiveCollection;
   private readonly renderedTileHandles = new Map<string, BucketRenderedTileHandle>();
+  private renderOrder: RenderEntry[] = [];
+  private layerFamilies: LayerFamily[] = [];
+  private style?: StyleSpecification;
 
   constructor(options: RenderManagerOptions) {
     this.root = options.root;
   }
 
   updateLayerFamilies(style: StyleSpecification, layerFamilies: LayerFamily[]): void {
-    createRenderOrder(style, layerFamilies);
+    this.style = style;
+    this.layerFamilies = layerFamilies;
+    this.renderOrder = createRenderOrder(style, layerFamilies);
+  }
+
+  getRenderOrder(): RenderEntry[] {
+    return this.renderOrder;
+  }
+
+  getLayerFamilies(): LayerFamily[] {
+    return this.layerFamilies;
+  }
+
+  getStyle(): StyleSpecification | undefined {
+    return this.style;
   }
 
   mount(key: string, bucketTile: ParsedTileResult, style: StyleSpecification): BucketRenderedTileHandle {
@@ -33,6 +51,7 @@ export class RenderManager {
       bucketTile,
       style,
     });
+
     mountBucketRenderedTileHandle(this.root, handle);
     this.renderedTileHandles.set(key, handle);
     return handle;

@@ -145,13 +145,14 @@ export function collectSceneViewTileSelection({
   viewportWidth,
 }: CollectSceneViewTileCoordinatesOptions): SceneViewTileSelection | undefined {
   const viewRectangle = camera?.computeViewRectangle?.(tilingScheme.ellipsoid);
-  if (!viewRectangle) {
+  const effectiveViewRectangle = viewRectangle ?? rectangle;
+  if (!effectiveViewRectangle) {
     return undefined;
   }
 
   const coverageRectangle = rectangle
-    ? Rectangle.intersection(viewRectangle, rectangle, new Rectangle())
-    : Rectangle.clone(viewRectangle);
+    ? Rectangle.intersection(effectiveViewRectangle, rectangle, new Rectangle())
+    : Rectangle.clone(effectiveViewRectangle);
   if (!coverageRectangle) {
     return undefined;
   }

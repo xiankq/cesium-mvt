@@ -1,6 +1,7 @@
 import type { SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { WebMercatorTilingScheme } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
+import type { RenderTile } from '../render/render-tile';
 import type { TileCoordinate } from './tile-request';
 import { createBucketTileDispatcher } from '../bucket';
 import { GeojsonSourceCache } from './geojson-source-cache';
@@ -36,12 +37,21 @@ interface PendingRequest {
  * 负责管理多个数据源缓存，协调瓦片请求和解析
  */
 export class SourceManager {
+  private destroyed = false;
   private readonly sourceCaches = new Map<string, TileSourceCache>();
   private readonly bucketTileDispatcher = createBucketTileDispatcher();
   private readonly pendingRequests = new Map<string, PendingRequest>();
 
+  isDestroyed(): boolean {
+    return this.destroyed;
+  }
+
   getSourceCache(sourceId: string): TileSourceCache | undefined {
     return this.sourceCaches.get(sourceId);
+  }
+
+  getSourceIds(): string[] {
+    return Array.from(this.sourceCaches.keys());
   }
 
   getSourceConstraints(sourceId: string): {
@@ -62,6 +72,7 @@ export class SourceManager {
     y: number,
     renderTileKey: string,
     tilingScheme: WebMercatorTilingScheme,
+    renderTile: RenderTile,
     onCompile: (tile: ParsedTileResult) => void,
   ): Promise<ParsedTileResult> {
     const sourceCache = this.sourceCaches.get(sourceId);
@@ -88,9 +99,7 @@ export class SourceManager {
     try {
       const tileData = await sourceCache.requestTile({ level, x, y });
       const bucketTile = await this.bucketTileDispatcher.compile({
-        renderTile: {
-          key: renderTileKey,
-        } as any,
+        renderTile,
         signal: abortController.signal,
         tileData,
         tilingScheme,
@@ -122,6 +131,10 @@ export class SourceManager {
   }
 
   reconcileSources(sources: Record<string, SourceSpecification>): void {
+    if (this.destroyed) {
+      return;
+    }
+
     const nextSourceIds = new Set(Object.keys(sources));
 
     for (const [sourceId, source] of Object.entries(sources)) {
@@ -131,8 +144,10 @@ export class SourceManager {
         continue;
       }
 
-      sourceCache?.destroy();
-      this.sourceCaches.delete(sourceId);
+      if (sourceCache) {
+        sourceCache.destroy();
+        this.sourceCaches.delete(sourceId);
+      }
 
       const nextSourceCache = createTileSourceCache(sourceId, source);
       if (nextSourceCache) {
@@ -151,6 +166,11 @@ export class SourceManager {
   }
 
   destroy(): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.destroyed = true;
     this.abortAll();
     for (const cache of this.sourceCaches.values()) {
       cache.destroy();

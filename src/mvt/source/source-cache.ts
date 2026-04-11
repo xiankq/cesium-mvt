@@ -85,10 +85,23 @@ export class SourceCache<TValue = ArrayBuffer> {
     );
     const existingEntry = this.entries.get(key);
     if (existingEntry?.state === 'ready' && existingEntry.value !== undefined) {
-      return existingEntry.value;
+      if (existingEntry.value instanceof ArrayBuffer && isBufferDetached(existingEntry.value)) {
+        this.entries.delete(key);
+      }
+      else if (existingEntry.value instanceof ArrayBuffer) {
+        return existingEntry.value.slice(0);
+      }
+      else {
+        return existingEntry.value;
+      }
     }
     if (existingEntry?.promise) {
-      return existingEntry.promise;
+      return existingEntry.promise.then((value) => {
+        if (value instanceof ArrayBuffer) {
+          return value.slice(0);
+        }
+        return value;
+      });
     }
 
     const entry = existingEntry ?? this.createEntry(key);
@@ -309,4 +322,8 @@ function resolveUrl(resourceUrl: string, baseUrl: string) {
     .toString()
     .replaceAll('%7B', '{')
     .replaceAll('%7D', '}');
+}
+
+function isBufferDetached(buffer: ArrayBuffer): boolean {
+  return buffer.byteLength === 0;
 }

@@ -3,6 +3,7 @@ import type { PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'ce
 import type { ParsedTileResult } from './bucket';
 import type { TileAvailability } from './source/tile-selection';
 import { RenderManager } from './render';
+import { compileRenderTile } from './render/render-tile';
 import { SourceManager, TileCacheManager, TileScheduler } from './source';
 import { StyleManager } from './style/style-manager';
 
@@ -22,12 +23,17 @@ export interface FrameState {
 }
 
 export class CesiumVectorTileCoordinator {
+  private destroyed = false;
   private readonly scheduler: TileScheduler;
   private readonly cacheManager: TileCacheManager;
   private readonly renderManager: RenderManager;
   private readonly sourceManager: SourceManager;
   private readonly styleManager: StyleManager;
   private readonly tilingScheme: WebMercatorTilingScheme;
+
+  isDestroyed(): boolean {
+    return this.destroyed;
+  }
 
   constructor(options: CesiumVectorTileCoordinatorOptions) {
     this.tilingScheme = options.tilingScheme;
@@ -47,6 +53,10 @@ export class CesiumVectorTileCoordinator {
   }
 
   update(frameState: FrameState): void {
+    if (this.destroyed) {
+      return;
+    }
+
     const tileSelection = this.scheduler.schedule(
       frameState.camera,
       frameState.viewportWidth,
@@ -61,6 +71,10 @@ export class CesiumVectorTileCoordinator {
   }
 
   updateStyle(style: StyleSpecification): void {
+    if (this.destroyed) {
+      return;
+    }
+
     this.styleManager.updateStyle({ style });
     this.sourceManager.reconcileSources(style.sources as Record<string, SourceSpecification>);
     this.renderManager.updateLayerFamilies(style, this.styleManager.getLayerFamilies());
@@ -72,6 +86,11 @@ export class CesiumVectorTileCoordinator {
   }
 
   destroy(): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.destroyed = true;
     this.sourceManager.destroy();
     this.cacheManager.destroy();
     this.renderManager.destroy();
@@ -82,9 +101,9 @@ export class CesiumVectorTileCoordinator {
       return;
     }
 
-    const style = this.styleManager.getStyle()!;
-    const sources = style.sources;
-    for (const sourceId of Object.keys(sources)) {
+    const availableSourceIds = this.sourceManager.getSourceIds();
+
+    for (const sourceId of availableSourceIds) {
       const constraints = this.sourceManager.getSourceConstraints(sourceId);
       const sourceSelection = this.scheduler.resolveSourceTiles(
         coordinates,
@@ -149,6 +168,19 @@ export class CesiumVectorTileCoordinator {
       return;
     }
 
+    const style = this.styleManager.getStyle();
+    if (!style) {
+      return;
+    }
+
+    const renderTile = compileRenderTile({
+      key: `${sourceId}/${level}/${x}/${y}`,
+      layerFamilies: this.renderManager.getLayerFamilies(),
+      renderOrder: this.renderManager.getRenderOrder(),
+      style,
+      styleEpoch: this.styleManager.getStyleEpoch(),
+    });
+
     try {
       const tile = await this.sourceManager.requestTile(
         sourceId,
@@ -157,18 +189,18 @@ export class CesiumVectorTileCoordinator {
         y,
         key,
         this.tilingScheme,
+        renderTile,
         (parsedTile: ParsedTileResult) => {
           this.cacheManager.set(key, parsedTile);
         },
       );
 
-      const style = this.styleManager.getStyle();
       if (style) {
         this.renderManager.mount(key, tile, style);
       }
     }
-    catch {
-      // 错误已由 sourceManager 处理
+    catch (error) {
+      console.error(`[Coordinator] Failed to request tile ${key}:`, error);
     }
   }
 
