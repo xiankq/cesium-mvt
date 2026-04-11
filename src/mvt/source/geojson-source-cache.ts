@@ -6,8 +6,7 @@ import type { GeoJsonObject } from 'geojson';
 import type { TileCoordinate } from './tile-request';
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
-import { createAbortError, isAbortError } from '../utils/abort';
-import { deepClone } from '../utils/clone';
+import { createAbortError, deepClone, isAbortError } from '../utils/common';
 import { createTileKey } from './tile-request';
 
 // GeoJSON source 会先转成内存中的“向量瓦片形态”，这样下游渲染链路可以保持单轨实现。

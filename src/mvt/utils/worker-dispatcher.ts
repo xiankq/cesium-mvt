@@ -1,4 +1,4 @@
-import { createAbortError } from './abort';
+import { createAbortError } from './common';
 
 /**
  * Worker Dispatcher 通用工具模块

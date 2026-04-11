@@ -1,6 +1,6 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerFamily } from './layer-family';
-import type { StyleSet } from './style-set';
+import type { StyleSet } from './style-loader';
 import { createLayerFamilies } from './layer-family';
 import { loadStyleSet } from './style-loader';
 

@@ -2,7 +2,9 @@ import {
   Cartesian3,
   WebMercatorProjection,
 } from 'cesium';
-import { isValidNumber } from './utils';
+import { isValidNumber } from '../utils/common';
+
+export const DEFAULT_EXTENT = 4096;
 
 /**
  * 瓦片投影模块

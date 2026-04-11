@@ -1,5 +1,5 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { StyleSet } from './style/style-set';
+import type { StyleSet } from './style/style-loader';
 import { BoundingSphere, Event, PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
 import { CesiumVectorTileCoordinator } from './cesium-vector-tile-coordinator';
 import { loadStyleSet } from './style/style-loader';

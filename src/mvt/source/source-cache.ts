@@ -3,7 +3,7 @@ import type {
   VectorSourceSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import type { TileCoordinate, TileRequest } from './tile-request';
-import { createAbortError, isAbortError } from '../utils/abort';
+import { createAbortError, isAbortError, resolveUrl } from '../utils/common';
 import {
   createTileKey,
   createTileRequest,
@@ -315,13 +315,6 @@ async function loadTileBuffer(
   }
 
   return await response.arrayBuffer();
-}
-
-function resolveUrl(resourceUrl: string, baseUrl: string) {
-  return new URL(resourceUrl, baseUrl)
-    .toString()
-    .replaceAll('%7B', '{')
-    .replaceAll('%7D', '}');
 }
 
 function isBufferDetached(buffer: ArrayBuffer): boolean {

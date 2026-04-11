@@ -4,7 +4,8 @@ import type {
 } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
 import type { RenderEntry } from './render-order';
-import { isLayerVisibleAtZoom } from '../style/layer-visibility';
+import { createTileKey } from '../source/tile-request';
+import { isLayerVisibleAtZoom } from '../style/layer-family';
 
 // RenderTile 表示某个 source tile 在当前 styleEpoch 下的渲染计划，
 // 此时还没有真正构建出可提交给 Cesium 的几何资源。
@@ -39,14 +40,7 @@ export interface CompileRenderTileOptions {
   styleEpoch: number;
 }
 
-export function createRenderTileKey(
-  sourceId: string,
-  level: number,
-  x: number,
-  y: number,
-) {
-  return `${sourceId}/${level}/${x}/${y}`;
-}
+export { createTileKey as createRenderTileKey };
 
 export function createScopedRenderTileKey(
   key: string,

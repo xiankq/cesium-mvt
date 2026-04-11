@@ -1,5 +1,5 @@
 import { Cartesian3, Ellipsoid } from 'cesium';
-import { isValidNumber } from './utils';
+import { isValidNumber } from '../utils/common';
 
 /**
  * 测地线细分算法

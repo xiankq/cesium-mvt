@@ -8,7 +8,24 @@ import type {
 } from '@maplibre/maplibre-gl-style-spec';
 import { GEOJSON_SOURCE_LAYER } from '../source/geojson-source-cache';
 
-// layer family 用来归并相邻且兼容的几何图层，复用同一份解析后的几何批次。
+export function isLayerVisibleAtZoom(
+  layer: LayerSpecification,
+  zoom: number,
+) {
+  if (layer.layout?.visibility === 'none') {
+    return false;
+  }
+
+  const minzoom = typeof layer.minzoom === 'number'
+    ? layer.minzoom
+    : Number.NEGATIVE_INFINITY;
+  const maxzoom = typeof layer.maxzoom === 'number'
+    ? layer.maxzoom
+    : Number.POSITIVE_INFINITY;
+
+  return zoom >= minzoom && zoom < maxzoom;
+}
+
 export type SupportedGeometryLayer
   = | CircleLayerSpecification
     | FillLayerSpecification

@@ -1,5 +1,5 @@
 import type { Cartesian3 } from 'cesium';
-import { DEFAULT_EXTENT } from './utils';
+import { DEFAULT_EXTENT } from './tile-projection';
 
 /**
  * 三角形网格细分算法
