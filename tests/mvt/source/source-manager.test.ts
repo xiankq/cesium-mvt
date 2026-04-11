@@ -93,6 +93,7 @@ describe('sourceManager', () => {
 
       await expect(requestPromise).rejects.toThrow();
 
+      // 验证多次调用 destroy 的安全性
       sourceManager.destroy();
     });
 
@@ -149,6 +150,7 @@ describe('sourceManager', () => {
 
       await expect(requestPromise).rejects.toThrow();
 
+      // 验证多次调用 destroy 的安全性
       sourceManager.destroy();
     });
   });
