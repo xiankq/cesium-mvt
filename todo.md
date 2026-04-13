@@ -6,28 +6,29 @@
 
 ### 1.1 与 MapLibre/Cesium 思路一致性
 
-| 维度 | MapLibre/Cesium 做法 | 当前实现 | 一致性 |
-|------|---------------------|---------|--------|
-| **瓦片选择** | Cesium: SSE 多LOD混合；MapLibre: 视口覆盖 | 单层估算 | ⚠️ 简化 |
-| **请求去重** | MapLibre: WorkerTile 状态机 | SourceCache 状态机 | ✅ 一致 |
-| **Bucket 编译** | MapLibre: Worker 池 → Bucket | 单 Worker → BucketBuilder | ⚠️ 单实例 |
-| **样式求值** | MapLibre: 预编译 AST | 运行时递归遍历 | ❌ 不一致 |
-| **Fallback** | Cesium: 祖先瓦片过渡 | 祖先瓦片显示 | ✅ 一致 |
-| **缓存策略** | Cesium: 字节级 LRU | 自实现 LRU (256MB) | ✅ 一致 |
-| **渲染集成** | Cesium: ImageryLayer 基础设施 | PrimitiveCollection | ⚠️ 未复用 |
-| **Layer 分组** | MapLibre: 逐 layer 处理 | LayerFamily 合并 | ✅ 优化合理 |
+| 维度            | MapLibre/Cesium 做法                      | 当前实现                  | 一致性      |
+| --------------- | ----------------------------------------- | ------------------------- | ----------- |
+| **瓦片选择**    | Cesium: SSE 多LOD混合；MapLibre: 视口覆盖 | 单层估算                  | ⚠️ 简化     |
+| **请求去重**    | MapLibre: WorkerTile 状态机               | SourceCache 状态机        | ✅ 一致     |
+| **Bucket 编译** | MapLibre: Worker 池 → Bucket              | 单 Worker → BucketBuilder | ⚠️ 单实例   |
+| **样式求值**    | MapLibre: 预编译 AST                      | 运行时递归遍历            | ❌ 不一致   |
+| **Fallback**    | Cesium: 祖先瓦片过渡                      | 祖先瓦片显示              | ✅ 一致     |
+| **缓存策略**    | Cesium: 字节级 LRU                        | 自实现 LRU (256MB)        | ✅ 一致     |
+| **渲染集成**    | Cesium: ImageryLayer 基础设施             | PrimitiveCollection       | ⚠️ 未复用   |
+| **Layer 分组**  | MapLibre: 逐 layer 处理                   | LayerFamily 合并          | ✅ 优化合理 |
 
 ### 1.2 严重违规（造轮子）
 
 以下模块未复用已依赖库的现有功能，属于违规实现：
 
-| 编号 | 模块 | 当前实现 | 应使用的库 | 行数 | 严重度 |
-|------|------|---------|-----------|------|--------|
-| **W1** | 表达式求值器 | 自实现 600+ 行递归求值 | `@maplibre/maplibre-gl-style-spec` 的 `createExpression()` + `StyleExpression` | ~600 | 🔴 |
-| **W2** | Feature Filter | 自实现 filter 解析 | `@maplibre/maplibre-gl-style-spec` 的 `convertFilter` + `createExpression` | ~150 | 🔴 |
-| **W3** | 样式属性求值器 | 自实现 zoom/property/identity 函数 | `@maplibre/maplibre-gl-style-spec` 的 `StyleExpression.evaluate()` | ~200 | 🔴 |
+| 编号   | 模块           | 当前实现                           | 应使用的库                                                                     | 行数 | 严重度 |
+| ------ | -------------- | ---------------------------------- | ------------------------------------------------------------------------------ | ---- | ------ |
+| **W1** | 表达式求值器   | 自实现 600+ 行递归求值             | `@maplibre/maplibre-gl-style-spec` 的 `createExpression()` + `StyleExpression` | ~600 | 🔴     |
+| **W2** | Feature Filter | 自实现 filter 解析                 | `@maplibre/maplibre-gl-style-spec` 的 `convertFilter` + `createExpression`     | ~150 | 🔴     |
+| **W3** | 样式属性求值器 | 自实现 zoom/property/identity 函数 | `@maplibre/maplibre-gl-style-spec` 的 `StyleExpression.evaluate()`             | ~200 | 🔴     |
 
 **关键发现**：
+
 - `layer-style-resolver.ts` 已实现但 **未被任何模块调用**
 - `feature-filter.ts` 已实现但 **未在 bucket 编译中使用**
 - `request-scheduler.ts` 已定义但 **SourceCache 直接用 fetch()**
@@ -35,25 +36,25 @@
 
 ### 1.3 性能瓶颈
 
-| 编号 | 问题 | 位置 | 影响 | 优先级 |
-|------|------|------|------|--------|
-| **P1** | 单层 LOD，不支持多LOD混合 | `view-state.ts` | 远距离过采样，近距离欠采样 | 🔴 P0 |
-| **P2** | 表达式运行时求值（即使修复W1后也需预编译） | `expression-evaluator.ts` | 每瓦片×每图层重复遍历AST | 🔴 P0 |
-| **P3** | 样式 resolver 未被调用，所有样式用静态值 | `material-cache.ts` | 数据驱动样式完全不工作 | 🔴 P0 |
-| **P4** | 单 Worker 实例 | `bucket-tile-dispatcher.ts` | 多核CPU利用率低 | 🟡 P1 |
-| **P5** | BucketBuilder 使用 number[] 中间态再转 TypedArray | 所有 builder | 双份内存，GC压力大 | 🟡 P1 |
-| **P6** | 每帧 `getAllKeys()` 全量遍历 | `coordinator.ts` | O(n) 扫描已渲染瓦片 | 🟡 P1 |
+| 编号   | 问题                                              | 位置                        | 影响                       | 优先级 |
+| ------ | ------------------------------------------------- | --------------------------- | -------------------------- | ------ |
+| **P1** | 单层 LOD，不支持多LOD混合                         | `view-state.ts`             | 远距离过采样，近距离欠采样 | 🔴 P0  |
+| **P2** | 表达式运行时求值（即使修复W1后也需预编译）        | `expression-evaluator.ts`   | 每瓦片×每图层重复遍历AST   | 🔴 P0  |
+| **P3** | 样式 resolver 未被调用，所有样式用静态值          | `material-cache.ts`         | 数据驱动样式完全不工作     | 🔴 P0  |
+| **P4** | 单 Worker 实例                                    | `bucket-tile-dispatcher.ts` | 多核CPU利用率低            | 🟡 P1  |
+| **P5** | BucketBuilder 使用 number[] 中间态再转 TypedArray | 所有 builder                | 双份内存，GC压力大         | 🟡 P1  |
+| **P6** | 每帧 `getAllKeys()` 全量遍历                      | `coordinator.ts`            | O(n) 扫描已渲染瓦片        | 🟡 P1  |
 
 ### 1.4 欠缺核心功能
 
-| 编号 | 功能 | MapLibre实现 | 当前状态 | 工作量 | 优先级 |
-|------|------|-------------|---------|--------|--------|
-| **M1** | Symbol/Text渲染 | SDF字形+碰撞检测+布局 | 完全缺失 | 3-4周 | 🔴 P0 |
-| **M2** | 数据驱动样式 | DDSL完整支持 | 未接入渲染链路 | 1-2周 | 🔴 P0 |
-| **M3** | 多LOD混合 | Cesium SSE机制 | 单层选择 | 2-3周 | 🟡 P1 |
-| **M4** | Fill Extrusion | 3D建筑渲染 | 完全缺失 | 2-3周 | 🟡 P1 |
-| **M5** | Line Dash/Pattern | LineAtlas纹理 | 仅支持实线 | 1-2周 | 🟡 P1 |
-| **M6** | Feature Query | KDBush空间索引 | 有FeatureIndex但未使用 | 1周 | 🟢 P2 |
+| 编号   | 功能              | MapLibre实现          | 当前状态               | 工作量 | 优先级 |
+| ------ | ----------------- | --------------------- | ---------------------- | ------ | ------ |
+| **M1** | Symbol/Text渲染   | SDF字形+碰撞检测+布局 | 完全缺失               | 3-4周  | 🔴 P0  |
+| **M2** | 数据驱动样式      | DDSL完整支持          | 未接入渲染链路         | 1-2周  | 🔴 P0  |
+| **M3** | 多LOD混合         | Cesium SSE机制        | 单层选择               | 2-3周  | 🟡 P1  |
+| **M4** | Fill Extrusion    | 3D建筑渲染            | 完全缺失               | 2-3周  | 🟡 P1  |
+| **M5** | Line Dash/Pattern | LineAtlas纹理         | 仅支持实线             | 1-2周  | 🟡 P1  |
+| **M6** | Feature Query     | KDBush空间索引        | 有FeatureIndex但未使用 | 1周    | 🟢 P2  |
 
 ---
 
@@ -73,6 +74,7 @@
    - `convertFilter(filter)` → 转换为表达式
 
 2. 重构样式解析流程：
+
    ```
    样式加载 → 预编译所有表达式 → 存储 StyleExpression 对象
                                     ↓
@@ -94,6 +96,7 @@
    - 支持数据驱动样式的动态材质更新
 
 **验收标准**：
+
 - [ ] 表达式求值使用 `@maplibre/maplibre-gl-style-spec`
 - [ ] 表达式在样式加载时预编译
 - [ ] Feature filter 在 bucket 编译中生效
@@ -112,6 +115,7 @@
 3. 配置 `throttle: true` 和 `throttleByServer: true`
 
 **验收标准**：
+
 - [ ] 瓦片请求经过 Cesium RequestScheduler
 - [ ] 支持请求优先级
 - [ ] 支持服务器端节流
@@ -144,6 +148,7 @@
    - 同一 layer 在不同 zoom 可有不同的材质
 
 **验收标准**：
+
 - [ ] 样式加载时完成表达式预编译
 - [ ] Bucket 编译时使用预编译表达式
 - [ ] 材质按 (layer, zoom) 缓存
@@ -171,6 +176,7 @@
    - 无效时用长度回滚而非预拷贝
 
 **验收标准**：
+
 - [ ] Builder 不使用 number[] 中间态
 - [ ] 内存占用降低 30-50%
 - [ ] GC 频率降低
@@ -197,6 +203,7 @@
    - 同样支持 Worker 池
 
 **验收标准**：
+
 - [ ] 支持配置 Worker 数量
 - [ ] 多核 CPU 利用率提升
 - [ ] 编译吞吐量提升 2-4x
@@ -226,6 +233,7 @@
    - 避免 LOD 切换时的闪烁
 
 **验收标准**：
+
 - [ ] 近距离使用高 LOD
 - [ ] 远距离使用低 LOD
 - [ ] 同一视图内多LOD混合渲染
@@ -275,6 +283,7 @@
    - 使用 feature ID 作为稳定因子
 
 **验收标准**：
+
 - [ ] 支持地名、道路名标注
 - [ ] 支持 POI 图标
 - [ ] 碰撞检测避免重叠
@@ -302,6 +311,7 @@
    - 或使用 uniform 传递动态样式值
 
 **验收标准**：
+
 - [ ] `layer-style-resolver` 被调用
 - [ ] 数据驱动样式生效
 - [ ] 支持 zoom 函数
@@ -313,23 +323,23 @@
 
 ### 3.1 清理孤岛代码
 
-| 文件 | 当前状态 | 动作 |
-|------|---------|------|
-| `layer-style-resolver.ts` | 已实现但未使用 | 接入 bucket 编译链路 |
-| `feature-filter.ts` | 已实现但未使用 | 接入 bucket 编译链路 |
-| `request-scheduler.ts` | 已定义但未使用 | 接入 SourceCache |
-| `feature-tile.ts` | 功能重叠 | 评估是否合并到 bucket-tile |
-| `feature-tile-dispatcher.ts` | 功能重叠 | 评估是否合并到 bucket-tile |
+| 文件                         | 当前状态       | 动作                       |
+| ---------------------------- | -------------- | -------------------------- |
+| `layer-style-resolver.ts`    | 已实现但未使用 | 接入 bucket 编译链路       |
+| `feature-filter.ts`          | 已实现但未使用 | 接入 bucket 编译链路       |
+| `request-scheduler.ts`       | 已定义但未使用 | 接入 SourceCache           |
+| `feature-tile.ts`            | 功能重叠       | 评估是否合并到 bucket-tile |
+| `feature-tile-dispatcher.ts` | 功能重叠       | 评估是否合并到 bucket-tile |
 
 ### 3.2 命名规范修正
 
-| 当前命名 | 建议命名 | 原因 |
-|---------|---------|------|
-| `tileWidth` (TileScheduler) | `viewportTilePixelSize` | 语义更清晰 |
-| `styleEpoch` vs `epoch` | 统一为 `styleEpoch` | 命名一致 |
-| `createScopedRenderTileKey` vs `resolveRenderTileKey` | 统一为 `createRenderTileKey` | 功能相似 |
-| `compileBucketTileFromData` | `compileBucketTileFromRaw` | 与 `compileBucketTileFromParsed` 区分 |
-| `createBucketRenderedTileHandle` | `createRenderedTileHandle` | 上下文中无需 bucket 前缀 |
+| 当前命名                                              | 建议命名                     | 原因                                  |
+| ----------------------------------------------------- | ---------------------------- | ------------------------------------- |
+| `tileWidth` (TileScheduler)                           | `viewportTilePixelSize`      | 语义更清晰                            |
+| `styleEpoch` vs `epoch`                               | 统一为 `styleEpoch`          | 命名一致                              |
+| `createScopedRenderTileKey` vs `resolveRenderTileKey` | 统一为 `createRenderTileKey` | 功能相似                              |
+| `compileBucketTileFromData`                           | `compileBucketTileFromRaw`   | 与 `compileBucketTileFromParsed` 区分 |
+| `createBucketRenderedTileHandle`                      | `createRenderedTileHandle`   | 上下文中无需 bucket 前缀              |
 
 ### 3.3 架构约束
 
