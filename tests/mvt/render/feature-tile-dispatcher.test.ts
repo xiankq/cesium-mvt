@@ -170,7 +170,10 @@ class FakeWorker {
   }
 
   emitMessage(data: FeatureTileWorkerResponse) {
-    this.listeners.get('message')?.forEach(listener => listener({ data }));
+    const listeners = [...(this.listeners.get('message') ?? [])];
+    for (const listener of listeners) {
+      listener({ data });
+    }
   }
 }
 
@@ -179,7 +182,7 @@ describe('feature-tile-dispatcher', () => {
     vi.unstubAllGlobals();
   });
 
-  it('falls back to inline compilation when worker support is unavailable', async () => {
+  it('当 Worker 支持不可用时回退到内联编译', async () => {
     vi.stubGlobal('Worker', undefined);
     const dispatcher = createFeatureTileDispatcher();
 
@@ -210,7 +213,7 @@ describe('feature-tile-dispatcher', () => {
     dispatcher.destroy();
   });
 
-  it('dispatches feature tile compilation through a worker when a worker factory is provided', async () => {
+  it('当提供 worker factory 时通过 worker 分发 feature tile 编译任务', async () => {
     const fakeWorker = new FakeWorker();
     const dispatcher = createFeatureTileDispatcher({
       workerFactory: () => fakeWorker as never,
@@ -247,7 +250,57 @@ describe('feature-tile-dispatcher', () => {
     expect(fakeWorker.terminate).toHaveBeenCalledTimes(1);
   });
 
-  it('posts a cancel message and rejects with AbortError when a worker job is aborted', async () => {
+  it('当 worker 报告编译失败时使用 worker 错误消息拒绝', async () => {
+    const fakeWorker = new FakeWorker();
+    const dispatcher = createFeatureTileDispatcher({
+      workerFactory: () => fakeWorker as never,
+    });
+    const pendingFeatureTile = dispatcher.compile({
+      renderTile: createRenderTileFixture(),
+      tileData: createComplexTileBuffer(),
+    });
+    const compileMessage = fakeWorker.lastMessage;
+    if (!compileMessage || compileMessage.type !== 'compile-feature-tile') {
+      throw new Error('Expected compile request to be posted to worker.');
+    }
+
+    fakeWorker.emitMessage({
+      error: 'worker failed to parse tile',
+      id: compileMessage.id,
+      type: 'feature-tile-error',
+    });
+
+    await expect(pendingFeatureTile).rejects.toThrow('worker failed to parse tile');
+
+    dispatcher.destroy();
+  });
+
+  it('当 worker 报告空错误值时回退到通用错误消息', async () => {
+    const fakeWorker = new FakeWorker();
+    const dispatcher = createFeatureTileDispatcher({
+      workerFactory: () => fakeWorker as never,
+    });
+    const pendingFeatureTile = dispatcher.compile({
+      renderTile: createRenderTileFixture(),
+      tileData: createComplexTileBuffer(),
+    });
+    const compileMessage = fakeWorker.lastMessage;
+    if (!compileMessage || compileMessage.type !== 'compile-feature-tile') {
+      throw new Error('Expected compile request to be posted to worker.');
+    }
+
+    fakeWorker.emitMessage({
+      error: undefined as never,
+      id: compileMessage.id,
+      type: 'feature-tile-error',
+    });
+
+    await expect(pendingFeatureTile).rejects.toThrow('Feature tile worker failed.');
+
+    dispatcher.destroy();
+  });
+
+  it('当 worker 任务被中止时以 AbortError 拒绝并终止 worker', async () => {
     const fakeWorker = new FakeWorker();
     const dispatcher = createFeatureTileDispatcher({
       workerFactory: () => fakeWorker as never,
@@ -268,10 +321,8 @@ describe('feature-tile-dispatcher', () => {
     await expect(pendingFeatureTile).rejects.toMatchObject({
       name: 'AbortError',
     });
-    expect(fakeWorker.postMessage.mock.calls[1]?.[0]).toMatchObject({
-      id: compileMessage.id,
-      type: 'cancel-feature-tile',
-    });
+    expect(fakeWorker.postMessage).toHaveBeenCalledTimes(1);
+    expect(fakeWorker.terminate).toHaveBeenCalledTimes(1);
 
     dispatcher.destroy();
   });

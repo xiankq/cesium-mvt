@@ -4,6 +4,7 @@ import type { TileProjectionData } from '../geometry/tile-projection';
 import type { RenderTile } from '../render/render-tile';
 import type { WorkerLike } from '../utils/worker-dispatcher';
 import type { ParsedTileResult } from './bucket-types';
+import { formatErrorMessage } from '../utils/common';
 import {
   extractWorkerResponse,
   InlineDispatcher,
@@ -101,7 +102,7 @@ export function createBucketTileDispatcher(
         return { id: data.id, result: data.bucketTile };
       }
       if (data.type === 'bucket-tile-error') {
-        throw new Error(data.error);
+        throw new Error(formatErrorMessage(data.error, 'Bucket tile worker failed.'));
       }
       return null;
     },

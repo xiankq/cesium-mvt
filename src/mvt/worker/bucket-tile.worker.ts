@@ -2,6 +2,7 @@
 
 import type { BucketTileWorkerMessage, BucketTileWorkerResponse } from '../bucket/bucket-tile-dispatcher';
 import { compileBucketTileFromData } from '../bucket/bucket-tile-compiler';
+import { formatErrorMessage } from '../utils/common';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -26,7 +27,7 @@ self.addEventListener('message', (event: MessageEvent<BucketTileWorkerMessage>) 
     }
     catch (error) {
       const response: BucketTileWorkerResponse = {
-        error: error instanceof Error ? error.message : `${error}`,
+        error: formatErrorMessage(error, 'Bucket tile worker failed.'),
         id: compileMessage.id,
         type: 'bucket-tile-error',
       };

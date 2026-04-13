@@ -2,12 +2,12 @@ import type { WorkerLike } from '../utils/worker-dispatcher';
 import type { FeatureTile } from './feature-tile';
 import type { RenderTile } from './render-tile';
 import { parseVectorTile } from '../source/vector-tile';
+import { formatErrorMessage } from '../utils/common';
 import {
   extractWorkerResponse,
   InlineDispatcher,
-  WorkerDispatcher,
-
 } from '../utils/worker-dispatcher';
+import { WorkerPoolDispatcher } from '../utils/worker-pool-dispatcher';
 import { compileFeatureTile } from './feature-tile';
 
 /**
@@ -43,14 +43,7 @@ export interface FeatureTileCompileMessage extends CompileFeatureTileJob {
   type: 'compile-feature-tile';
 }
 
-export interface FeatureTileCancelMessage {
-  id: number;
-  type: 'cancel-feature-tile';
-}
-
-export type FeatureTileWorkerMessage
-  = | FeatureTileCancelMessage
-    | FeatureTileCompileMessage;
+export type FeatureTileWorkerMessage = FeatureTileCompileMessage;
 export type FeatureTileWorkerResponse
   = | FeatureTileErrorResponse
     | FeatureTileResultResponse;
@@ -74,25 +67,12 @@ export function createFeatureTileDispatcher(
   options: FeatureTileDispatcherOptions = {},
 ): FeatureTileDispatcher {
   const workerFactory = options.workerFactory ?? createDefaultWorker;
-  const worker = workerFactory();
 
-  if (!worker) {
-    return new InlineDispatcher({
-      execute: (job: CompileFeatureTileJob) => {
-        return compileFeatureTile({
-          renderTile: job.renderTile,
-          tile: parseVectorTile(job.tileData),
-        });
-      },
-    });
-  }
-
-  const dispatcher = new WorkerDispatcher<
+  const dispatcher = new WorkerPoolDispatcher<
     CompileFeatureTileJob,
     FeatureTile,
     FeatureTileWorkerMessage
   >({
-    createCancelMessage: id => ({ id, type: 'cancel-feature-tile' }),
     createJobMessage: (id, job) => ({
       message: {
         id,
@@ -108,12 +88,24 @@ export function createFeatureTileDispatcher(
         return { id: data.id, result: data.featureTile };
       }
       if (data.type === 'feature-tile-error') {
-        throw new Error(data.error);
+        throw new Error(formatErrorMessage(data.error, 'Feature tile worker failed.'));
       }
       return null;
     },
-    worker,
+    workerCount: 1,
+    workerFactory,
   });
+
+  if (!dispatcher.hasWorkers()) {
+    return new InlineDispatcher({
+      execute: (job: CompileFeatureTileJob) => {
+        return compileFeatureTile({
+          renderTile: job.renderTile,
+          tile: parseVectorTile(job.tileData),
+        });
+      },
+    });
+  }
 
   return {
     compile: (job: CompileFeatureTileJob) => dispatcher.dispatch(job, job.signal),

@@ -267,6 +267,36 @@ describe('source-cache', () => {
     );
   });
 
+  it('构建瓦片 URL 时优先使用 source 的 scheme 而非 tilejson 的 scheme', async () => {
+    const tileValue = new Uint8Array([7, 8, 9]).buffer;
+    const loadTile = vi.fn<(request: TileRequest, signal: AbortSignal) => Promise<ArrayBuffer>>(async () => tileValue as ArrayBuffer);
+    const loadTileJson = vi.fn(async () => ({
+      scheme: 'xyz' as const,
+      tiles: ['./{z}/{x}/{y}.pbf'],
+    }));
+    const sourceCache = new SourceCache({
+      loadTile,
+      loadTileJson,
+      source: createVectorSource({
+        scheme: 'tms',
+        tiles: undefined,
+        url: 'https://tiles.example.com/catalog/tilejson.json',
+      }),
+      sourceId: 'base',
+    });
+
+    await sourceCache.requestTile({
+      level: 3,
+      x: 2,
+      y: 1,
+    });
+
+    expect(loadTile).toHaveBeenCalledTimes(1);
+    expect(loadTile.mock.calls[0]![0]!.url).toBe(
+      'https://tiles.example.com/catalog/3/2/6.pbf',
+    );
+  });
+
   it('会把在途 tile 请求的 priority 作为静态值传给调度器', async () => {
     let resolveTileRequest: (value: ArrayBuffer) => void = () => {};
     const tilePromise = new Promise<ArrayBuffer>((resolve) => {

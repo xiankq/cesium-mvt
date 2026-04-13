@@ -3,7 +3,7 @@ import { createMockStyle } from '../../helpers/style-helpers';
 
 describe('bucket-tile-dispatcher', () => {
   describe('createBucketTileDispatcher', () => {
-    it('should create dispatcher with inline mode when worker factory returns undefined', async () => {
+    it('当 worker factory 返回 undefined 时创建内联模式的 dispatcher', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const dispatcher = createBucketTileDispatcher({
@@ -30,7 +30,7 @@ describe('bucket-tile-dispatcher', () => {
   });
 
   describe('compile', () => {
-    it('should compile bucket tile in inline mode', async () => {
+    it('在内联模式下编译 bucket tile', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const dispatcher = createBucketTileDispatcher({
@@ -45,7 +45,7 @@ describe('bucket-tile-dispatcher', () => {
       expect(result.key).toBe(job.renderTile.key);
     });
 
-    it('should compile bucket tile in worker mode', async () => {
+    it('在 worker 模式下编译 bucket tile', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const mockWorker = createMockWorker();
@@ -75,7 +75,30 @@ describe('bucket-tile-dispatcher', () => {
       expect(result.key).toBe(job.renderTile.key);
     });
 
-    it('should use multiple workers when the pool has capacity', async () => {
+    it('should fall back to a generic worker error message when the worker reports an empty error value', async () => {
+      const { createBucketTileDispatcher } = await import('@/mvt/bucket');
+
+      const mockWorker = createMockWorker();
+      const dispatcher = createBucketTileDispatcher({
+        workerFactory: () => mockWorker,
+      });
+
+      const job = createMockJob();
+      const compilePromise = dispatcher.compile(job);
+      const lastMessage = mockWorker.postMessage.mock.calls[mockWorker.postMessage.mock.calls.length - 1][0];
+
+      mockWorker.simulateMessage({
+        error: undefined,
+        id: lastMessage.id,
+        type: 'bucket-tile-error',
+      });
+
+      await expect(compilePromise).rejects.toThrow('Bucket tile worker failed.');
+
+      dispatcher.destroy();
+    });
+
+    it('当 worker 池有空闲容量时使用多个 worker', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const worker1 = createMockWorker();
@@ -137,7 +160,7 @@ describe('bucket-tile-dispatcher', () => {
       dispatcher.destroy();
     });
 
-    it('should queue excess jobs until a worker becomes available', async () => {
+    it('将多余的任务排队直到 worker 变为可用', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const worker1 = createMockWorker();
@@ -222,7 +245,7 @@ describe('bucket-tile-dispatcher', () => {
       dispatcher.destroy();
     });
 
-    it('should pass native mercator tile bounds to worker', async () => {
+    it('将原生墨卡托瓦片边界传递给 worker', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const mockWorker = createMockWorker();
@@ -269,7 +292,7 @@ describe('bucket-tile-dispatcher', () => {
       await expect(compilePromise).resolves.toBeDefined();
     });
 
-    it('should reject when signal is already aborted', async () => {
+    it('当 signal 已经中止时拒绝', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const dispatcher = createBucketTileDispatcher({
@@ -284,7 +307,7 @@ describe('bucket-tile-dispatcher', () => {
       await expect(dispatcher.compile(job)).rejects.toThrow();
     });
 
-    it('should reject when dispatcher is destroyed', async () => {
+    it('当 dispatcher 被销毁时拒绝', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const dispatcher = createBucketTileDispatcher({
@@ -321,7 +344,7 @@ describe('bucket-tile-dispatcher', () => {
       dispatcher.destroy();
     });
 
-    it('should handle worker error', async () => {
+    it('处理 worker 错误', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const mockWorker = createMockWorker();
@@ -341,7 +364,7 @@ describe('bucket-tile-dispatcher', () => {
   });
 
   describe('destroy', () => {
-    it('should terminate worker and reject pending requests', async () => {
+    it('终止 worker 并拒绝待处理的请求', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
       const mockWorker = createMockWorker();

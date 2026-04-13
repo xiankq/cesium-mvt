@@ -299,7 +299,7 @@ export class SourceCache<TValue = ArrayBuffer> {
     const tileJson = await this.getTileJson(priority);
     return createTileRequest({
       coordinate,
-      scheme: tileJson.scheme ?? getSourceScheme(this.source),
+      scheme: tileJson.scheme ?? getDefaultSourceScheme(this.source),
       sourceId: this.sourceId,
       tiles: tileJson.tiles ?? [],
     });
@@ -310,7 +310,7 @@ export class SourceCache<TValue = ArrayBuffer> {
   ): Promise<TileJson> {
     if (hasInlineTiles(this.source)) {
       const inlineTileJson: TileJson = {
-        scheme: getSourceScheme(this.source),
+        scheme: getDefaultSourceScheme(this.source),
         tiles: this.source.tiles,
       };
       this.cachedTileJson = inlineTileJson;
@@ -341,7 +341,7 @@ export class SourceCache<TValue = ArrayBuffer> {
       const normalized = normalizeTileJson(
         tileJson,
         tileJsonUrl,
-        getSourceScheme(this.source),
+        this.source,
       );
       this.cachedTileJson = normalized;
       return normalized;
@@ -375,23 +375,29 @@ function getTileJsonUrl(source: SourceSpecification) {
     : undefined;
 }
 
-function getSourceScheme(source: SourceSpecification) {
-  return 'scheme' in source && source.scheme === 'tms'
-    ? 'tms'
-    : 'xyz';
+function getDeclaredSourceScheme(source: SourceSpecification): 'tms' | 'xyz' | undefined {
+  if ('scheme' in source && (source.scheme === 'tms' || source.scheme === 'xyz')) {
+    return source.scheme;
+  }
+
+  return undefined;
 }
 
 function normalizeTileJson(
   tileJson: TileJson,
   tileJsonUrl: string,
-  fallbackScheme: 'tms' | 'xyz',
+  source: SourceSpecification,
 ): TileJson {
   return {
     maxzoom: tileJson.maxzoom,
     minzoom: tileJson.minzoom,
-    scheme: tileJson.scheme ?? fallbackScheme,
+    scheme: getDeclaredSourceScheme(source) ?? tileJson.scheme ?? 'xyz',
     tiles: tileJson.tiles?.map(tileUrl => resolveUrl(tileUrl, tileJsonUrl)),
   };
+}
+
+function getDefaultSourceScheme(source: SourceSpecification) {
+  return getDeclaredSourceScheme(source) ?? 'xyz';
 }
 
 function loadTileJson(
