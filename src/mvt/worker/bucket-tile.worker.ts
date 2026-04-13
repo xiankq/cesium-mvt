@@ -74,7 +74,14 @@ self.addEventListener('close', () => {
 function extractTransferables(bucketTile: any): Transferable[] {
   const transferables: Transferable[] = [];
 
+  if (!bucketTile?.buckets) {
+    return transferables;
+  }
+
   for (const bucket of bucketTile.buckets) {
+    if (!bucket?.data) {
+      continue;
+    }
     if (bucket.data.positions) {
       transferables.push(bucket.data.positions.buffer);
     }

@@ -1,450 +1,260 @@
-# Cesium-MVT 开发路线图
+# Cesium-MVT TODO
 
-## 一、架构分析结论 (2026-04-13)
+## 当前诊断（2026-04-13）
 
-基于对当前实现的深度分析，以及与 Cesium ImageryProvider 和 MapLibre GL JS 源码的对比，以下是核心结论：
+本文件只记录当前运行时主链路的真实问题，以及与 Cesium / MapLibre 上游源码对照后确认过的改造方向。
 
-### 1.1 与 MapLibre/Cesium 思路一致性
+### 1. 运行时主链路与上游对照
 
-| 维度            | MapLibre/Cesium 做法                      | 当前实现                  | 一致性      |
-| --------------- | ----------------------------------------- | ------------------------- | ----------- |
-| **瓦片选择**    | Cesium: SSE 多LOD混合；MapLibre: 视口覆盖 | 单层估算                  | ⚠️ 简化     |
-| **请求去重**    | MapLibre: WorkerTile 状态机               | SourceCache 状态机        | ✅ 一致     |
-| **Bucket 编译** | MapLibre: Worker 池 → Bucket              | 单 Worker → BucketBuilder | ⚠️ 单实例   |
-| **样式求值**    | MapLibre: 预编译 AST                      | 运行时递归遍历            | ❌ 不一致   |
-| **Fallback**    | Cesium: 祖先瓦片过渡                      | 祖先瓦片显示              | ✅ 一致     |
-| **缓存策略**    | Cesium: 字节级 LRU                        | 自实现 LRU (256MB)        | ✅ 一致     |
-| **渲染集成**    | Cesium: ImageryLayer 基础设施             | PrimitiveCollection       | ⚠️ 未复用   |
-| **Layer 分组**  | MapLibre: 逐 layer 处理                   | LayerFamily 合并          | ✅ 优化合理 |
+| 维度                                                                | 上游源码思路                                                  | 当前实现                      | 结论                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------- | ---------------------------- |
+| Cesium `QuadtreePrimitive`                                          | 多级 LOD、SSE、三档加载队列、替换队列                         | `view-state.ts` 只估单一 zoom | 只借到了“按视图选瓦片”的外壳 |
+| Cesium `RequestScheduler`                                           | 请求优先级、服务端并发限制、可丢弃低优先级请求                | 运行时直接 `fetch`            | 关键调度能力未接入           |
+| Cesium `TileReplacementQueue`                                       | 当前帧保活 + LRU 淘汰                                         | 只有编译后 tile 进入字节 LRU  | 生命周期模型不完整           |
+| MapLibre `covering_tiles` / `tile_manager`                          | 变 zoom 覆盖、retain children / parents、query/fade 配套      | 单层覆盖 + 简化 fallback      | 语义差距明显                 |
+| MapLibre `dispatcher` / `vector_tile_worker_source` / `worker_tile` | actor 池、load/reload/abort/remove 分离                       | 单 worker + 一次性编译        | 并发与生命周期偏弱           |
+| MapLibre `style_layer_index` / `worker_tile`                        | groupByLayout 后仍保留每 layer filter / paint / feature-state | 只做了 layer family 分组      | family 语义未闭环            |
+| MapLibre `symbol_bucket` / `placement` / `pauseable_placement`      | 文本、图标、碰撞、渐进 placement                              | 完全缺失                      | 关键地图能力缺口             |
 
-### 1.2 严重违规（造轮子）
+### 2. P0：当前必须先收敛的问题
 
-以下模块未复用已依赖库的现有功能，属于违规实现：
+#### P0-1：样式语义没有真正进入编译链路
 
-| 编号   | 模块           | 当前实现                           | 应使用的库                                                                     | 行数 | 严重度 |
-| ------ | -------------- | ---------------------------------- | ------------------------------------------------------------------------------ | ---- | ------ |
-| **W1** | 表达式求值器   | 自实现 600+ 行递归求值             | `@maplibre/maplibre-gl-style-spec` 的 `createExpression()` + `StyleExpression` | ~600 | 🔴     |
-| **W2** | Feature Filter | 自实现 filter 解析                 | `@maplibre/maplibre-gl-style-spec` 的 `convertFilter` + `createExpression`     | ~150 | 🔴     |
-| **W3** | 样式属性求值器 | 自实现 zoom/property/identity 函数 | `@maplibre/maplibre-gl-style-spec` 的 `StyleExpression.evaluate()`             | ~200 | 🔴     |
+现状：
 
-**关键发现**：
+- `compileBucketTile()` 只按 `source-layer + geometry type` 收集 feature。
+- `feature-filter.ts`、`layer-style-resolver.ts`、`style-property-evaluator.ts`、`expression-evaluator.ts` 都没有进入运行时主链路。
+- `material-cache.ts` 只解析静态字面量 paint 值。
 
-- `layer-style-resolver.ts` 已实现但 **未被任何模块调用**
-- `feature-filter.ts` 已实现但 **未在 bucket 编译中使用**
-- `request-scheduler.ts` 已定义但 **SourceCache 直接用 fetch()**
-- 表达式/过滤器/resolver 三个模块形成了"孤岛代码"
+结果：
 
-### 1.3 性能瓶颈
+- `filter`
+- 数据驱动 paint/layout
+- `feature-state`
+- 绝大多数 MapLibre layer 语义
 
-| 编号   | 问题                                              | 位置                        | 影响                       | 优先级 |
-| ------ | ------------------------------------------------- | --------------------------- | -------------------------- | ------ |
-| **P1** | 单层 LOD，不支持多LOD混合                         | `view-state.ts`             | 远距离过采样，近距离欠采样 | 🔴 P0  |
-| **P2** | 表达式运行时求值（即使修复W1后也需预编译）        | `expression-evaluator.ts`   | 每瓦片×每图层重复遍历AST   | 🔴 P0  |
-| **P3** | 样式 resolver 未被调用，所有样式用静态值          | `material-cache.ts`         | 数据驱动样式完全不工作     | 🔴 P0  |
-| **P4** | 单 Worker 实例                                    | `bucket-tile-dispatcher.ts` | 多核CPU利用率低            | 🟡 P1  |
-| **P5** | BucketBuilder 使用 number[] 中间态再转 TypedArray | 所有 builder                | 双份内存，GC压力大         | 🟡 P1  |
-| **P6** | 每帧 `getAllKeys()` 全量遍历                      | `coordinator.ts`            | O(n) 扫描已渲染瓦片        | 🟡 P1  |
+都只是“有测试模块”，不是“运行时能力”。
 
-### 1.4 欠缺核心功能
+#### P0-2：LayerFamily 只做了分组，没有保住每个 layer 的独立语义
 
-| 编号   | 功能              | MapLibre实现          | 当前状态               | 工作量 | 优先级 |
-| ------ | ----------------- | --------------------- | ---------------------- | ------ | ------ |
-| **M1** | Symbol/Text渲染   | SDF字形+碰撞检测+布局 | 完全缺失               | 3-4周  | 🔴 P0  |
-| **M2** | 数据驱动样式      | DDSL完整支持          | 未接入渲染链路         | 1-2周  | 🔴 P0  |
-| **M3** | 多LOD混合         | Cesium SSE机制        | 单层选择               | 2-3周  | 🟡 P1  |
-| **M4** | Fill Extrusion    | 3D建筑渲染            | 完全缺失               | 2-3周  | 🟡 P1  |
-| **M5** | Line Dash/Pattern | LineAtlas纹理         | 仅支持实线             | 1-2周  | 🟡 P1  |
-| **M6** | Feature Query     | KDBush空间索引        | 有FeatureIndex但未使用 | 1周    | 🟢 P2  |
+现状：
 
----
+- `fill` backend 会为 `bucket.layerIds` 中的每个 layer 建 collection。
+- `line` / `circle` backend 只取 `bucket.layerIds[0]`。
 
-## 二、架构重构计划
+结果：
 
-### 2.1 消除造轮子（必须执行）
+- 同一个 family 内的 line/circle layer 会丢失样式、顺序和独立语义。
+- 即便是 fill，当前也没有按 layer filter 拆特征，所以多个 layer 往往会画同一批 geometry。
 
-#### 任务 1：迁移到 @maplibre/maplibre-gl-style-spec 表达式系统
+#### P0-3：源数据缓存模型不成立
 
-**目标**：删除 `expression-evaluator.ts`、`feature-filter.ts`、`style-property-evaluator.ts` 三个文件，改用官方库。
+现状：
 
-**步骤**：
+- `TileCacheManager` 只管理编译后的 `ParsedTileResult`。
+- `SourceCache` / `GeojsonSourceCache` 的 ready 数据不在统一 LRU 里。
+- `bucket-tile-dispatcher.ts` 会把 `tileData` 作为 transferable 发给 worker。
 
-1. 研究 `@maplibre/maplibre-gl-style-spec` 的 API：
-   - `createExpression(expression, type)` → 预编译为 `StyleExpression`
-   - `StyleExpression.evaluate(context)` → 运行时求值
-   - `convertFilter(filter)` → 转换为表达式
+结果：
 
-2. 重构样式解析流程：
+- 源数据缓存没有统一内存预算。
+- `ArrayBuffer` 被 transfer 后会 detach，ready cache 的复用不可靠。
+- `GeojsonSourceCache` 连 detached 检查都没有，风控更差。
 
-   ```
-   样式加载 → 预编译所有表达式 → 存储 StyleExpression 对象
-                                    ↓
-   Bucket编译 → 使用预编译的表达式求值 → 生成数据驱动样式
-   ```
+#### P0-4：调度、优先级、取消机制都不完整
 
-3. 删除文件：
-   - `src/mvt/style/expression-evaluator.ts` (~600行)
-   - `src/mvt/style/feature-filter.ts` (~150行)
-   - `src/mvt/style/style-property-evaluator.ts` (~200行)
+现状：
 
-4. 重构 `layer-style-resolver.ts`：
-   - 使用 `createExpression` 预编译 paint 属性
-   - 在 bucket 编译阶段调用 resolver
-   - 将求值结果传入渲染后端
+- `request-scheduler.ts` 未接入运行时。
+- `tile-visibility.ts`、`tile-lifecycle.ts` 未接入运行时。
+- `SourceManager.abort(key)` 没有在视图更新时使用。
+- Worker cancel 只能在真正编译前生效，编译中无法中断。
 
-5. 重构 `material-cache.ts`：
-   - 材质缓存 key 改为 `(layer, zoom)` 而非 `(style, layer)`
-   - 支持数据驱动样式的动态材质更新
+结果：
 
-**验收标准**：
+- 离屏 tile 不会被及时取消。
+- 没有高 / 中 / 低优先级加载队列。
+- 没有按服务端并发节流。
+- 没有按距离或可见性排序请求。
 
-- [ ] 表达式求值使用 `@maplibre/maplibre-gl-style-spec`
-- [ ] 表达式在样式加载时预编译
-- [ ] Feature filter 在 bucket 编译中生效
-- [ ] 数据驱动样式能在渲染中动态变化
+#### P0-5：错误状态会被永久“空瓦片化”
 
----
+现状：
 
-#### 任务 2：启用 request-scheduler
+- `CesiumVectorTileCoordinator.requestTile()` 捕获异常后调用 `renderManager.setEmpty(key)`。
+- `tile-selection.ts` 会把这类 handle 视作 `empty`。
 
-**目标**：让 `SourceCache` 使用 `scheduleTileRequest()` 而非直接 `fetch()`。
+结果：
 
-**步骤**：
+- 网络错误、worker 错误、临时异常都会在当前 style epoch 内被当成“空瓦片”。
+- 这不是 retry / backoff，而是永久跳过重试。
 
-1. 在 `SourceCache.requestTile()` 中调用 `scheduleTileRequest()`
-2. 传入 Cesium `Request` 对象，支持优先级和取消
-3. 配置 `throttle: true` 和 `throttleByServer: true`
+### 3. P1：高价值但次一级的问题
 
-**验收标准**：
+#### P1-1：单层 zoom 调度过于粗糙
 
-- [ ] 瓦片请求经过 Cesium RequestScheduler
-- [ ] 支持请求优先级
-- [ ] 支持服务器端节流
+现状：
 
----
+- `view-state.ts` 只用 `camera.computeViewRectangle()` 与 `viewportWidth` 估单一 zoom。
+- `viewportHeight` 没有参与调度。
+- 当前实现没有真正复用 `tile-visibility.ts` 的视锥与地平线判断。
 
-### 2.2 性能优化
+影响：
 
-#### 任务 3：样式预编译 + 材质缓存
+- 和 Cesium `QuadtreePrimitive`、MapLibre `covering_tiles` 的多层混合思路差距很大。
+- 容易在远处过采样、近处欠采样。
 
-**目标**：表达式和 paint 属性在样式加载时预编译，避免运行时重复求值。
+#### P1-2：TileJSON 约束获取过晚
 
-**步骤**：
+现状：
 
-1. 在 `StyleManager.updateStyle()` 时：
-   - 遍历所有 layer 的 paint 属性
-   - 使用 `createExpression()` 预编译每个属性
-   - 存储 `StyleExpression` 对象到 layer 缓存
+- `SourceCache` 在首次请求 tile 时才懒加载 TileJSON。
+- `TileScheduler.resolveSourceTiles()` 在 TileJSON 未就绪前拿不到 `minzoom` / `maxzoom`。
 
-2. 在 `RenderManager.updateLayerFamilies()` 时：
-   - 为每个 layerFamily 预计算 layer order Map
-   - 缓存 `(layerId, index)` 映射，避免每瓦片重建
+影响：
 
-3. 在 bucket 编译阶段：
-   - 调用 `layer-style-resolver` 获取样式值
-   - 将样式值传入渲染后端创建 Material
+- 首批请求可能先按错误 zoom 发出去。
+- 与 MapLibre 先 `loadTileJson()` 再参与 tile manager 调度的模型不一致。
 
-4. 材质缓存优化：
-   - Key 改为 `(layerId, zoomLevel)`
-   - 同一 layer 在不同 zoom 可有不同的材质
+#### P1-3：热路径内有明显的额外分配
 
-**验收标准**：
+现状：
 
-- [ ] 样式加载时完成表达式预编译
-- [ ] Bucket 编译时使用预编译表达式
-- [ ] 材质按 (layer, zoom) 缓存
-- [ ] 每帧不再重复求值静态样式
+- bucket builder 仍大量使用 `number[] -> TypedArray`。
+- `line` backend 渲染时会对每条 polyline 做 `slice()`。
+- `circle` backend 为每个点创建新的 `Cartesian3`。
+- `RenderManager.hideInvisibleTiles()` 每轮都全量扫描已挂载 key。
 
----
+影响：
 
-#### 任务 4：BucketBuilder 性能优化
+- GC 压力偏大。
+- render path 和 compile path 都存在不必要分配。
 
-**目标**：消除 number[] 中间态，直接使用 TypedArray。
+#### P1-4：FeatureIndex 已写入，但查询能力缺失
 
-**步骤**：
+现状：
 
-1. `FillBucketBuilder` / `LineBucketBuilder` / `CircleBucketBuilder`：
-   - 预分配 TypedArray 缓冲区（初始容量）
-   - 容量不足时 2x 扩容
-   - `build()` 时 slice 到精确大小
+- bucket builder 会复制 `feature.properties` 并生成 `featureIndex`。
+- 当前对外没有 `queryRenderedFeatures` / `querySourceFeatures` 对应能力。
 
-2. 消除 `properties: { ...feature.properties }` 浅拷贝：
-   - 直接引用 `feature.properties`（只读）
-   - 如需修改，在明确需要的地方才拷贝
+影响：
 
-3. `LineBucketBuilder` 临时数组优化：
-   - 直接在主数组上操作
-   - 无效时用长度回滚而非预拷贝
+- 内存已经付出，但功能没有闭环。
+- 这是典型“先存一份以后可能有用”的负优化。
 
-**验收标准**：
+#### P1-5：测试覆盖与真实运行时脱节
 
-- [ ] Builder 不使用 number[] 中间态
-- [ ] 内存占用降低 30-50%
-- [ ] GC 频率降低
+现状：
 
----
+- 多个模块有完整单测，但这些模块不在主链路。
+- 当前主链路最容易出问题的地方，反而缺少 source -> bucket -> render 的语义级回归测试。
 
-#### 任务 5：Worker 池
+影响：
 
-**目标**：支持 4-8 个 Worker 实例，Round-Robin 分发任务。
+- “测试通过”不等于“运行时能力已接入”。
+- 容易继续累积看似完整、实际未落地的实现。
 
-**步骤**：
+### 4. 取消机制与优先级调度结论
 
-1. 重构 `WorkerDispatcher`：
-   - 支持 Worker 池配置
-   - Round-Robin 或负载感知分发
-   - 任务取消时通知正确 Worker
+#### 当前已有
 
-2. 修改 `BucketTileDispatcher`：
-   - 初始化时创建 Worker 池
-   - 编译任务分发到空闲 Worker
-   - 支持任务优先级
+- source 请求支持 `AbortController`
+- style update / destroy 会 `abortAll()`
+- worker dispatcher 支持 cancel message
+- pending request 会在同一 key 内去重
 
-3. 修改 `FeatureTileDispatcher`（如使用）：
-   - 同样支持 Worker 池
+#### 当前不足
 
-**验收标准**：
+- 没有视图变化时的逐 tile abort
+- 没有真正接入 Cesium `RequestScheduler`
+- 没有请求优先级
+- 没有按服务器并发限制
+- 没有 worker 池
+- 没有长任务中断
+- 没有失败重试 / 指数退避
 
-- [ ] 支持配置 Worker 数量
-- [ ] 多核 CPU 利用率提升
-- [ ] 编译吞吐量提升 2-4x
+### 5. 基于 MapLibre 源码梳理的功能缺口
 
----
+#### 必缺能力
 
-### 2.3 核心功能开发
+- Symbol text / icon bucket
+- collision index / cross-tile symbol id
+- `Placement` / `PauseablePlacement`
+- `queryRenderedFeatures` / `querySourceFeatures`
+- `feature-state`
+- line dash / line pattern / fill pattern
+- fill extrusion
+- background layer 实际渲染
 
-#### 任务 6：多 LOD 混合渲染
+#### 当前只做了“前半步”的能力
 
-**目标**：参考 Cesium 的 SSE（Screen Space Error）机制，支持同一视图内不同 LOD 瓦片混合渲染。
+- Layer family 分组：有
+- family 对应的 layer 语义保留：没有
+- FeatureIndex 数据结构：有
+- 查询链路：没有
+- worker cancel 壳子：有
+- 真正的调度与 worker 池：没有
 
-**步骤**：
+### 6. 代码质量与结构问题
 
-1. 重构 `view-state.ts`：
-   - 实现基于相机距离的 LOD 估算
-   - 支持多层级瓦片选择
-   - 计算屏幕空间误差阈值
+#### 命名与职责
 
-2. 重构 `tile-selection.ts`：
-   - 支持多LOD瓦片同时存在
-   - 根据 SSE 决定每个区域的 LOD
-   - Fallback 逻辑适配多LOD
+- `request-scheduler.ts` 与 `tile-request.ts` 都有 `createTileRequest()`，命名冲突且语义不同。
+- `TileCacheManager` 名字像“统一 tile cache”，实际只缓存编译结果。
+- `feature-tile.ts` / `feature-tile-dispatcher.ts` 是完整旁路实现，目前没有进入运行时。
 
-3. 修改 `render-manager.ts`：
-   - 支持不同 LOD 瓦片同时渲染
-   - 避免 LOD 切换时的闪烁
+#### 结构
 
-**验收标准**：
+- 存在多条并行但未闭环的“候选实现”。
+- 文档与测试会被这些候选实现误导，认为能力已经上线。
 
-- [ ] 近距离使用高 LOD
-- [ ] 远距离使用低 LOD
-- [ ] 同一视图内多LOD混合渲染
-- [ ] LOD 切换无闪烁
+#### 建议
 
----
+- 先明确唯一主链路，再决定“接入”还是“删除”这些旁路模块。
+- 对任何不在运行时中的模块，文档必须明确标注“未接入”，不要再写成“已支持”。
 
-#### 任务 7：Symbol 文本渲染（分阶段）
+## 改造路线
 
-**阶段 1：基础文本渲染（无碰撞检测）**
+### 第一阶段：把语义做正确
 
-1. 创建 `SymbolBucketBuilder`：
-   - 解析 `text-field`、`text-size`、`text-font` 等属性
-   - 加载字体（使用 `@mapbox/tiny-sdf`）
-   - 构建 SDF 字形图集
+1. 统一样式模型，决定只走一种运行时方案。
+2. 让 `filter`、数据驱动 paint、`feature-state` 真正进入 bucket 编译或渲染链路。
+3. 修正 family 语义，至少先解决 `line` / `circle` 只吃第一个 layer 的问题。
+4. 明确 background layer 是否支持；不支持就删掉伪入口。
 
-2. 创建 `bucket-symbol-backend.ts`：
-   - 使用 Cesium `Text` 或自定义 DrawCommand
-   - 支持文本颜色、大小、锚点
+### 第二阶段：把请求和缓存做对
 
-3. 文本布局：
-   - 基础文本整形（Shaping）
-   - 文本定位
-   - 锚点计算
+1. 把源数据缓存与编译结果缓存拆成清晰的两层，并统一内存预算。
+2. 修复 transferable 导致的缓存 detach 问题。
+3. 让 TileJSON 约束在参与调度前可用。
+4. 建立失败重试与退避，不再用 empty handle 吞掉错误。
 
-**阶段 2：图标渲染**
+### 第三阶段：把调度做成真正的 Cesium 风格
 
-1. 精灵管理器：
-   - 加载 sprite 图集
-   - 解析 sprite 元数据
-   - 提供图标坐标
+1. 参考 `QuadtreePrimitive` 引入可排序的加载队列。
+2. 接入 `RequestScheduler` 或等价能力。
+3. 增加视图变化时的 out-of-view abort。
+4. 从单层 zoom 走向多层 LOD / SSE。
 
-2. `icon-image` 渲染：
-   - 图标定位
-   - 图标旋转
-   - 图标缩放
+### 第四阶段：补齐 MapLibre 的核心地图能力
 
-**阶段 3：碰撞检测**
+1. Symbol / text / icon / collision
+2. Feature query
+3. line dash / pattern / fill pattern
+4. fill extrusion
 
-1. 碰撞索引：
-   - 网格空间索引（参考 MapLibre CollisionIndex）
-   - 碰撞框计算
-   - 优先级排序
+## 本轮建议优先级
 
-2. 跨瓦片符号稳定性：
-   - 符号位置不随瓦片加载/卸载抖动
-   - 使用 feature ID 作为稳定因子
+### 先做
 
-**验收标准**：
+- [ ] 修正 layer 语义：filter + family + line/circle 多 layer 问题
+- [ ] 修正源数据缓存：统一预算 + detached buffer 问题
+- [ ] 接入真实请求调度：优先级、取消、离屏 abort
+- [ ] 去掉“失败即 empty”模型，改成可重试失败态
 
-- [ ] 支持地名、道路名标注
-- [ ] 支持 POI 图标
-- [ ] 碰撞检测避免重叠
-- [ ] 跨瓦片符号稳定
+### 后做
 
----
-
-#### 任务 8：数据驱动样式接入
-
-**目标**：让 `layer-style-resolver.ts` 在 bucket 编译中生效。
-
-**步骤**：
-
-1. 在 `bucket-tile-compiler.ts` 中：
-   - 为每个 feature 创建样式上下文
-   - 调用 `layer-style-resolver` 获取样式值
-   - 将样式值传入 bucket builder
-
-2. 修改 bucket builder：
-   - `addFeature()` 接受样式上下文
-   - 根据样式值设置颜色、大小等属性
-
-3. 修改渲染后端：
-   - 支持 per-feature 样式
-   - 或使用 uniform 传递动态样式值
-
-**验收标准**：
-
-- [ ] `layer-style-resolver` 被调用
-- [ ] 数据驱动样式生效
-- [ ] 支持 zoom 函数
-- [ ] 支持属性函数
-
----
-
-## 三、代码质量改进
-
-### 3.1 清理孤岛代码
-
-| 文件                         | 当前状态       | 动作                       |
-| ---------------------------- | -------------- | -------------------------- |
-| `layer-style-resolver.ts`    | 已实现但未使用 | 接入 bucket 编译链路       |
-| `feature-filter.ts`          | 已实现但未使用 | 接入 bucket 编译链路       |
-| `request-scheduler.ts`       | 已定义但未使用 | 接入 SourceCache           |
-| `feature-tile.ts`            | 功能重叠       | 评估是否合并到 bucket-tile |
-| `feature-tile-dispatcher.ts` | 功能重叠       | 评估是否合并到 bucket-tile |
-
-### 3.2 命名规范修正
-
-| 当前命名                                              | 建议命名                     | 原因                                  |
-| ----------------------------------------------------- | ---------------------------- | ------------------------------------- |
-| `tileWidth` (TileScheduler)                           | `viewportTilePixelSize`      | 语义更清晰                            |
-| `styleEpoch` vs `epoch`                               | 统一为 `styleEpoch`          | 命名一致                              |
-| `createScopedRenderTileKey` vs `resolveRenderTileKey` | 统一为 `createRenderTileKey` | 功能相似                              |
-| `compileBucketTileFromData`                           | `compileBucketTileFromRaw`   | 与 `compileBucketTileFromParsed` 区分 |
-| `createBucketRenderedTileHandle`                      | `createRenderedTileHandle`   | 上下文中无需 bucket 前缀              |
-
-### 3.3 架构约束
-
-- **Buffer\*Collection API**：这是项目的技术选型，其能力边界即为项目边界。尊重并适配，不寻求替代方案。
-- **不贴地**：明确决策，不作为待办项。
-- **LayerFamily 合并**：这是合理的优化，保留并完善。
-
----
-
-## 四、优先级排序
-
-### P0 - 必须执行（本周-下周）
-
-1. 🔴 迁移到 `@maplibre/maplibre-gl-style-spec` 表达式系统（消除 W1/W2/W3）
-2. 🔴 启用数据驱动样式（让 resolver 生效）
-3. 🔴 样式预编译 + 材质缓存优化
-
-### P1 - 重要功能（1-2月）
-
-4. 🟡 Worker 池实现
-5. 🟡 BucketBuilder 性能优化（TypedArray 直接写入）
-6. 🟡 多 LOD 混合渲染
-7. 🟡 Symbol 文本渲染（阶段 1+2）
-
-### P2 - 完善功能（3-6月）
-
-8. 🟢 Symbol 碰撞检测（阶段 3）
-9. 🟢 Line Dash/Pattern 支持
-10. 🟢 Fill Extrusion（3D 建筑）
-11. 🟢 Feature Query API
-
-### P3 - 长期优化
-
-12. 样式热更新（diff 算法）
-13. 性能监控面板
-14. 交互功能（点击/悬停/Popup）
-
----
-
-## 五、里程碑规划
-
-### Milestone 1: 架构合规 ✅ 基础完成
-
-- [x] 表达式求值系统（自实现版本）
-- [x] Feature Filter（自实现版本）
-- [x] 请求调度器定义
-
-### Milestone 2: 消除造轮子（目标：复用官方库）
-
-- [ ] 迁移到 `@maplibre/maplibre-gl-style-spec` 表达式
-- [ ] 删除自实现表达式/过滤器/求值器
-- [ ] 启用 request-scheduler
-- [ ] 数据驱动样式接入
-
-### Milestone 3: 性能优化（目标：流畅渲染）
-
-- [ ] 样式预编译 + 材质缓存
-- [ ] BucketBuilder 性能优化
+- [ ] 多 LOD / SSE
 - [ ] Worker 池
-- [ ] 多 LOD 混合
-
-### Milestone 4: 功能完整（目标：支持完整地图）
-
-- [ ] Symbol 文本渲染
-- [ ] 碰撞检测
-- [ ] Line Dash/Pattern
-- [ ] Feature Query
-
-### Milestone 5: 生产就绪（目标：性能和稳定性）
-
-- [ ] 性能监控
-- [ ] 内存管理
-- [ ] 错误处理
-- [ ] 文档完善
-
----
-
-## 六、技术债务
-
-### 6.1 代码质量
-
-- [ ] 添加更多代码注释（解释为什么，而非是什么）
-- [ ] 统一错误处理
-- [ ] 添加日志系统
-- [ ] 代码覆盖率提升
-
-### 6.2 类型安全
-
-- [ ] 完善 TypeScript 类型定义
-- [ ] 消除 any 类型
-- [ ] 添加类型守卫
-
-### 6.3 测试补充
-
-- [ ] Symbol 布局测试
-- [ ] 碰撞检测测试
-- [ ] 缓存淘汰测试
-- [ ] 内存泄漏测试
-- [ ] 大数据量性能测试
-
----
-
-## 七、参考文档
-
-- [架构分析报告](./.archive/mvt-analysis-report.md) - 完整的架构分析和对比
-- [AGENTS.md](./AGENTS.md) - 开发规范
-- [MapLibre GL JS Architecture](https://github.com/maplibre/maplibre-gl-js/blob/main/ARCHITECTURE.md)
-- [Cesium ImageryProvider Documentation](https://cesium.com/learn/cesiumjs/ref-doc/ImageryProvider.html)
+- [ ] Symbol 与 query
+- [ ] pattern / extrusion

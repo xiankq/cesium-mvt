@@ -1,35 +1,29 @@
 # Cesium MVT
 
-基于 Cesium 的 MVT（Mapbox Vector Tiles）矢量瓦片渲染器。
+基于 Cesium 的 MVT（Mapbox Vector Tile）实验性渲染实现。
 
-## 项目简介
+## 当前状态
 
-本项目借鉴 MapLibre 在样式解析、瓦片生命周期、bucket 化上的成熟经验，遵循 Cesium 的瓦片调度和渲染架构，实现了一套以 Cesium 为核心的矢量瓦片渲染系统。
+这套实现已经打通了“样式加载 -> 瓦片选择 -> 源数据请求 -> Bucket 编译 -> Cesium `Buffer*Collection` 渲染”的主链路，但它目前更接近“可运行的基础版本”，还不能视为和 MapLibre 或 Cesium 原生瓦片体系等价。
 
-### 核心特性
+当前真正进入运行时主链路的能力只有：
 
-- ✅ **基础几何渲染**：支持 fill、line、circle 三种基础几何类型
-- ✅ **瓦片管理**：完整的瓦片状态机和生命周期管理（candidate → selected → shown）
-- ✅ **缓存系统**：LRU 字节级缓存（默认 256MB）
-- ✅ **Fallback 机制**：父瓦片降级显示，避免白洞
-- ✅ **多数据源**：支持 Vector Tile Source 和 GeoJSON Source
-- ✅ **Web Worker**：Worker/Inline 双模式编译
-- ✅ **样式系统**：支持 MapLibre Style Specification（基础 paint 属性）
+- Vector source / GeoJSON source
+- `fill` / `line` / `circle` 三类基础几何
+- 祖先瓦片 fallback
+- 编译后瓦片的字节级 LRU
+- Worker / Inline 两种 bucket 编译模式
+- 样式 epoch 驱动的整层重建
 
-### 架构理念
+当前没有真正接入主链路的能力包括：
 
-- **尊重 MapLibre 设计思路**：Bucket 机制、LayerFamily 合并、Worker 通信、GeoJSON → MVT 转换
-- **遵循 Cesium 架构方法**：瓦片调度、请求去重、缓存驱逐、PrimitiveCollection 集成
-- **复用已有生态库**：`@mapbox/vector-tile` 解析 MVT、`@maplibre/geojson-vt` 处理 GeoJSON、`earcut` 三角剖分、Cesium `Buffer*Collection` 渲染
-
-### 技术栈
-
-- **Cesium** (`@cesium/engine` + `cesium`) - 3D 地球渲染引擎
-- **Vue 3** - 前端框架
-- **TypeScript** - 类型安全
-- **MapLibre 生态** - `@maplibre/maplibre-gl-style-spec`（样式规范）、`@maplibre/geojson-vt`、`@maplibre/vt-pbf`
-- **Mapbox 生态** - `@mapbox/vector-tile`（MVT 解析）、`earcut`（三角剖分）
-- **Vitest** - 测试框架
+- `feature-filter`
+- 数据驱动样式 / `feature-state`
+- Cesium `RequestScheduler`
+- 视锥 / 地平线可见性裁剪
+- Symbol 文本与碰撞检测
+- Feature Query
+- Background layer 渲染
 
 ## 快速开始
 
@@ -69,195 +63,107 @@ pnpm lint:tsc
 ```typescript
 import { CesiumVectorTile } from './mvt/cesium-vector-tile';
 
-// 从样式 URL 创建
 const mvtLayer = await CesiumVectorTile.fromUrl(
   'https://tiles.openfreemap.org/styles/liberty',
-  { scene: viewer.scene }
 );
 
 viewer.scene.primitives.add(mvtLayer);
 ```
 
-## 架构概览
+## 主链路
 
-### 数据流
-
-```
+```text
 Cesium 帧循环
-    ↓
-CesiumVectorTileCoordinator (协调中心)
-    ├── TileScheduler → 计算视图覆盖瓦片
-    ├── TileSelection → 分类为 ready/request/fallback
-    ├── SourceManager → 请求 MVT 数据
-    │     ├── SourceCache (请求去重)
-    │     └── BucketTileDispatcher (Worker/Inline 编译)
-    │           └── BucketBuilder (Fill/Line/Circle)
-    ├── TileCacheManager → LRU 缓存管理
-    └── RenderManager → 挂载/显示/隐藏渲染瓦片
-          └── BucketRenderedTileHandle
-                ├── Fill → BufferPolygonCollection
-                ├── Line → BufferPolylineCollection
-                └── Circle → BufferPointCollection
+  -> CesiumVectorTileCoordinator.update()
+  -> TileScheduler.schedule()
+  -> resolveTileSelection()
+  -> SourceManager.requestTile()
+     -> SourceCache / GeojsonSourceCache
+     -> BucketTileDispatcher.compile()
+        -> compileBucketTile()
+        -> Fill / Line / CircleBucketBuilder
+  -> RenderManager.mount()
+     -> BufferPolygonCollection / BufferPolylineCollection / BufferPointCollection
 ```
 
-### 核心模块
+这条链路里的关键现实约束是：
 
-| 模块            | 职责                                          | 关键文件                                                       |
-| --------------- | --------------------------------------------- | -------------------------------------------------------------- |
-| **顶层集成**    | Cesium PrimitiveCollection 封装，驱动每帧调度 | `cesium-vector-tile.ts`                                        |
-| **协调器**      | 串联调度/缓存/渲染/源管理                     | `cesium-vector-tile-coordinator.ts`                            |
-| **数据源**      | Vector Tile / GeoJSON 请求和缓存              | `source/source-cache.ts`、`source/geojson-source-cache.ts`     |
-| **调度**        | 视图瓦片选择、LOD 估算、Fallback              | `source/tile-scheduler.ts`、`source/tile-selection.ts`         |
-| **Bucket 编译** | MVT → Bucket 中间表示（Worker/Inline）        | `bucket/bucket-tile-compiler.ts`、`bucket/*-bucket-builder.ts` |
-| **渲染**        | Bucket → Cesium Primitive                     | `render/bucket-rendered-tile.ts`、`render/backend/*.ts`        |
-| **样式**        | MapLibre Style 解析                           | `style/style-loader.ts`、`style/layer-family.ts`               |
-| **几何处理**    | 坐标投影、网格细分、测地线细分                | `geometry/tile-projection.ts`、`geometry/grid-subdivision.ts`  |
+- 调度层目前基于 `camera.computeViewRectangle()` 和 `viewportWidth` 估算单一 zoom，不是 Cesium `QuadtreePrimitive` 那种多级 LOD + SSE。
+- 请求层目前依赖 `fetch + AbortController`，没有真正走 Cesium `RequestScheduler`。
+- 样式层目前只把图层顺序和基础静态 paint 值带进渲染，`filter`、表达式、`feature-state` 都没有接进主链路。
+- 渲染层目前直接挂 `PrimitiveCollection`，没有复用 Cesium 现成的地表瓦片基础设施。
 
-### 与 Cesium/MapLibre 思路对比
+## 与上游源码对照
 
-| 维度            | MapLibre/Cesium       | 当前实现            | 一致性    |
-| --------------- | --------------------- | ------------------- | --------- |
-| **瓦片选择**    | Cesium: SSE 多LOD混合 | 单层估算            | ⚠️ 简化   |
-| **请求去重**    | MapLibre: 状态机      | SourceCache 状态机  | ✅ 一致   |
-| **Bucket 编译** | MapLibre: Worker 池   | 单 Worker/Inline    | ⚠️ 单实例 |
-| **Fallback**    | Cesium: 祖先过渡      | 祖先瓦片显示        | ✅ 一致   |
-| **缓存策略**    | Cesium: 字节级 LRU    | 自实现 LRU (256MB)  | ✅ 一致   |
-| **Layer 分组**  | MapLibre: 逐 layer    | LayerFamily 合并    | ✅ 优化   |
-| **渲染集成**    | Cesium: ImageryLayer  | PrimitiveCollection | ⚠️ 未复用 |
+本轮分析对照的上游实现主要包括：
 
-## 已实现功能
+- Cesium：`RequestScheduler`、`QuadtreePrimitive`、`TileReplacementQueue`
+- MapLibre GL JS：`covering_tiles`、`tile_manager`、`vector_tile_source`、`vector_tile_worker_source`、`worker_tile`、`style_layer_index`、`feature_index`、`symbol_bucket`、`placement`、`pauseable_placement`
+
+### 结论概览
+
+| 维度        | 上游思路                                                                            | 当前状态                                             | 结论                   |
+| ----------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------- |
+| 视图覆盖    | Cesium / MapLibre 都会按 tile 粒度做更细的覆盖与优先级计算                          | 单一 zoom + 矩形覆盖                                 | 明显简化               |
+| 请求调度    | Cesium 有 `RequestScheduler`，MapLibre 有 `TileManager` + actor/worker 体系         | 直接 `fetch`，无优先级                               | 与上游差异大           |
+| Worker 模型 | MapLibre 默认多 worker actor 池                                                     | 单 worker / inline                                   | 吞吐明显偏弱           |
+| LayerFamily | 借鉴了 MapLibre `groupByLayout` 思路                                                | 只完成了 family 分组，没有把 layer 语义完整保留下来  | 只借到“形”，没借到“义” |
+| 缓存        | Cesium 有统一 tile 生命周期与替换队列；MapLibre 有 in-view / out-of-view tile cache | 只有编译后 tile 进入 LRU，源数据缓存独立且无统一预算 | 部分借鉴               |
+| Symbol      | MapLibre 有 `symbol_bucket + placement + pauseable_placement` 全链路                | 完全缺失                                             | 关键能力缺口           |
+
+## 运行时已实现
 
 ### 数据源
 
-- [x] Vector Tile Source（URL + TileJSON 自动解析）
-- [x] Vector Tile Source（内联 tiles 数组）
-- [x] GeoJSON Source（URL + 内联数据）
-- [x] TMS/XYZ 坐标方案自动处理
+- Vector source：支持内联 `tiles` 与远程 TileJSON
+- GeoJSON source：先转成内存内 MVT，再复用同一编译链路
+- TMS / XYZ 模板替换
 
-### 几何类型
+### 几何编译
 
-- [x] **Fill**：多边形三角剖分（earcut）+ 网格细分（抗裂缝）
-- [x] **Line**：测地线细分（适配地球曲率）
-- [x] **Circle**：点精灵渲染
+- Fill：`earcut` 三角剖分 + 网格细分
+- Line：测地线细分
+- Circle：点精灵
 
-### 样式
+### 渲染与缓存
 
-- [x] MapLibre Style 加载（URL + 对象）
-- [x] 基础 paint 属性：fill-color、fill-opacity、line-color、line-width、circle-color、circle-radius
-- [x] LayerFamily 合并（相邻兼容 layer 共用 Bucket）
-- [x] 样式热更新（epoch 机制防竞争）
+- 编译结果以 `ParsedTileResult` 进入 `TileCacheManager`
+- 祖先 fallback 可避免完全白洞
+- 样式更新通过 `styleEpoch` 让旧渲染结果整体失效
 
-### 调度
+## 当前已知问题
 
-- [x] 视口瓦片选择
-- [x] 请求去重（SourceCache 状态机）
-- [x] Fallback 祖先瓦片降级
-- [x] 层级映射（超 maxZoom / 低于 minZoom）
-- [x] 可见性裁剪（视锥体 + 地平线检测）
+### 语义正确性
 
-### 缓存
+- `filter`、表达式、`feature-state` 没有进入运行时主链路。
+- `line` / `circle` family 只渲染 `layerIds[0]` 的样式；`fill` 会为每个 `layerId` 重建 collection，三者行为并不一致。
+- `background` layer 会进入 `RenderTile`，但没有实际渲染后端。
+- 当前 bucket 编译阶段按 `source-layer + geometry type` 抓取全部 feature，没有按 layer filter 切分。
 
-- [x] LRU 字节级缓存（默认 256MB）
-- [x] 缓存驱逐（通知渲染层清理）
-- [x] 请求缓存（pending 请求复用）
+### 调度与取消
 
-### Worker
+- 视图变化时不会中止离屏中的 pending 请求；只有样式切换 / destroy 才会 `abortAll()`。
+- Worker 取消只能在编译真正开始前生效，长时间编译中的任务无法中断。
+- 请求优先级、按服务器节流、距离排序都没有真正接入。
+- TileJSON 的 `minzoom` / `maxzoom` 约束是懒加载得到的，首批请求可能先按错误 zoom 发出去。
 
-- [x] Bucket 编译 Worker
-- [x] Worker/Inline 双模式
-- [x] Transferable 优化
-- [x] 请求取消支持
+### 性能与内存
 
-## 已知限制
+- 只有编译后 tile 进入 256MB LRU，源数据缓存没有统一预算。
+- `ArrayBuffer` 在 worker transfer 后会被 detach，当前源缓存对这个问题处理不完整，缓存复用并不可靠，GeoJSON 路径尤其危险。
+- `number[] -> TypedArray` 的构建方式和渲染期切片/对象创建会引入额外分配。
+- `RenderManager.getAllKeys()` 每次更新都全量扫描已挂载瓦片。
+- `FeatureIndex` 和属性浅拷贝已经存进 bucket，但运行时没有查询链路消费它们。
 
-### 未实现功能
+### 代码结构
 
-| 功能                  | 说明                           | 优先级 |
-| --------------------- | ------------------------------ | ------ |
-| **Symbol/Text 渲染**  | 地名、道路名、POI 标注         | 🔴 P0  |
-| **数据驱动样式**      | 按属性/zoom 动态变化颜色、大小 | 🔴 P0  |
-| **多 LOD 混合**       | 基于屏幕空间误差的自适应 LOD   | 🟡 P1  |
-| **Fill Extrusion**    | 3D 建筑渲染                    | 🟡 P1  |
-| **Line Dash/Pattern** | 虚线、纹理填充                 | 🟡 P1  |
-| **Feature Query**     | 点击/悬停查询                  | 🟢 P2  |
+- 多个模块只被测试引用，不在运行时主链路：`request-scheduler.ts`、`tile-visibility.ts`、`tile-lifecycle.ts`、`feature-filter.ts`、`style-property-evaluator.ts`、`layer-style-resolver.ts`、`feature-tile-dispatcher.ts`。
+- 这会让单测通过与运行时真实能力之间出现偏差，文档也容易被“测试存在”误导成“功能已接入”。
 
-### 架构约束
+## 文档说明
 
-- **不贴地**：明确决策，不使用 Cesium 的地形高度采样
-- **Buffer\*Collection API**：项目使用 Cesium 实验性 API，其能力边界即为项目边界
-- **单层 LOD**：当前整个视图使用单一层级，不支持远距离/近距离不同精度
-
-### 性能现状
-
-- 🔴 表达式/样式在运行时重复求值，未预编译
-- 🟡 单个 Worker 实例，多核 CPU 利用率低
-- 🟡 BucketBuilder 使用 number[] 中间态再转 TypedArray，内存效率低
-
-详细性能分析和优化计划见 [todo.md](./todo.md)。
-
-## 架构分析与优化计划
-
-本项目已完成深度架构分析，对比了 Cesium ImageryProvider 和 MapLibre GL JS 的源码实现。
-
-### 核心优势
-
-- ✅ 多数据源协调机制清晰
-- ✅ 瓦片状态机完整 (candidate → selected → shown)
-- ✅ Fallback 机制健壮
-- ✅ LRU 缓存实现合理
-- ✅ LayerFamily 合并优化合理
-
-### 已识别的改进项
-
-| 类型        | 问题                                                                    | 优化方向                         |
-| ----------- | ----------------------------------------------------------------------- | -------------------------------- |
-| 🔴 架构合规 | 自实现表达式求值器（600+行），未复用 `@maplibre/maplibre-gl-style-spec` | 迁移到官方表达式系统             |
-| 🔴 功能缺失 | 数据驱动样式未接入渲染链路                                              | 让 resolver 在 bucket 编译中生效 |
-| 🔴 性能     | 表达式运行时重复求值                                                    | 样式预编译 + 材质缓存            |
-| 🟡 性能     | 单 Worker 实例                                                          | Worker 池（4-8 实例）            |
-| 🟡 性能     | number[] 中间态                                                         | TypedArray 直接写入              |
-| 🟡 架构     | 单层 LOD                                                                | 多 LOD 混合（SSE 机制）          |
-
-### 详细分析报告
-
-完整架构分析见 [`.archive/mvt-analysis-report.md`](./.archive/mvt-analysis-report.md)。
-
-包含：
-
-- 与 Cesium/MapLibre 源码思路对比
-- 冗余优化识别
-- 性能瓶颈深度分析
-- 欠缺功能清单（基于 MapLibre 源码）
-- 改进建议与优先级排序
-
-## 开发路线图
-
-### Milestone 1: 基础可用 ✅ 已完成
-
-- [x] 基础 Fill/Line/Circle 渲染
-- [x] 瓦片状态机和生命周期
-- [x] LRU 缓存管理
-- [x] Fallback 机制
-
-### Milestone 2: 架构合规（目标：消除造轮子）
-
-- [ ] 迁移到 `@maplibre/maplibre-gl-style-spec` 表达式
-- [ ] 删除自实现表达式/过滤器/求值器
-- [ ] 数据驱动样式接入
-
-### Milestone 3: 性能优化（目标：流畅渲染）
-
-- [ ] 样式预编译 + 材质缓存
-- [ ] BucketBuilder 性能优化
-- [ ] Worker 池
-- [ ] 多 LOD 混合
-
-### Milestone 4: 功能完整（目标：支持完整地图）
-
-- [ ] Symbol 文本渲染
-- [ ] 碰撞检测
-- [ ] Line Dash/Pattern
-- [ ] Feature Query
+- [todo.md](./todo.md) 是当前实现问题与改造路线的权威入口。
+- [`.archive/mvt-analysis-report.md`](./.archive/mvt-analysis-report.md) 保留历史分析快照，不再保证与当前实现完全一致。
 
 详细路线图见 [todo.md](./todo.md)。
 
@@ -265,17 +171,11 @@ CesiumVectorTileCoordinator (协调中心)
 
 详细开发规范请参考 [AGENTS.md](./AGENTS.md)。
 
-### 代码质量
+当前推荐的工程策略是：
 
-- **模块化设计**：source/bucket/render/style/geometry/worker 各层职责清晰
-- **类型安全**：使用 TypeScript，确保类型正确性
-- **测试覆盖**：核心功能有对应的测试用例
-
-### 关键设计决策
-
-- **复用已有生态库**：优先使用 `@mapbox/vector-tile`、`@maplibre/geojson-vt`、`earcut` 等成熟库
-- **尊重 MapLibre 思路**：Bucket 机制、Worker 通信、GeoJSON → MVT 转换遵循 MapLibre 设计
-- **遵循 Cesium 架构**：瓦片调度、缓存驱逐、PrimitiveCollection 集成使用 Cesium 模式
+- 优先让文档、测试、运行时主链路三者保持一致
+- 优先复用 Cesium、MapLibre 及其子模块已有能力
+- 对未接入主链路的模块，显式标记为“候选实现”或直接删除
 
 ## 许可证
 
