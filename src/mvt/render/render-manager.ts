@@ -47,6 +47,11 @@ export class RenderManager {
   }
 
   mount(key: string, bucketTile: ParsedTileResult, style: StyleSpecification): BucketRenderedTileHandle {
+    const existingHandle = this.renderedTileHandles.get(key);
+    if (existingHandle) {
+      return existingHandle;
+    }
+
     const handle = createBucketRenderedTileHandle({
       bucketTile,
       style,
@@ -85,6 +90,10 @@ export class RenderManager {
 
   hasHandle(key: string): boolean {
     return this.renderedTileHandles.has(key);
+  }
+
+  getAllKeys(): string[] {
+    return Array.from(this.renderedTileHandles.keys());
   }
 
   remove(key: string): boolean {

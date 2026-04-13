@@ -1,10 +1,13 @@
 import type { SourceSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
-import type { ParsedTileResult } from './bucket';
 import type { TileAvailability } from './source/tile-selection';
 import { RenderManager } from './render';
 import { compileRenderTile } from './render/render-tile';
-import { SourceManager, TileCacheManager, TileScheduler } from './source';
+import {
+  SourceManager,
+  TileCacheManager,
+  TileScheduler,
+} from './source';
 import { StyleManager } from './style/style-manager';
 
 export interface CesiumVectorTileCoordinatorOptions {
@@ -48,6 +51,9 @@ export class CesiumVectorTileCoordinator {
 
     this.cacheManager = new TileCacheManager();
     this.renderManager = new RenderManager({ root: options.root });
+    this.cacheManager.setOnEvict((key: string) => {
+      this.renderManager.remove(key);
+    });
     this.sourceManager = new SourceManager();
     this.styleManager = new StyleManager();
   }
@@ -74,6 +80,10 @@ export class CesiumVectorTileCoordinator {
     if (this.destroyed) {
       return;
     }
+
+    this.sourceManager.abortAll();
+    this.cacheManager.clear(true); // 样式更新时需要通知渲染层清理旧瓦片
+    this.renderManager.clear();
 
     this.styleManager.updateStyle({ style });
     this.sourceManager.reconcileSources(style.sources as Record<string, SourceSpecification>);
@@ -102,6 +112,7 @@ export class CesiumVectorTileCoordinator {
     }
 
     const availableSourceIds = this.sourceManager.getSourceIds();
+    const visibleKeys = new Set<string>();
 
     for (const sourceId of availableSourceIds) {
       const constraints = this.sourceManager.getSourceConstraints(sourceId);
@@ -114,11 +125,33 @@ export class CesiumVectorTileCoordinator {
       );
 
       for (const coord of sourceSelection.readyCoordinates) {
+        const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
+        visibleKeys.add(key);
+        this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
+      }
+
+      for (const coord of sourceSelection.fallbackCoordinates) {
+        const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
+        visibleKeys.add(key);
         this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
       }
 
       for (const coord of sourceSelection.requestCoordinates) {
         this.requestTile(sourceId, coord.level, coord.x, coord.y);
+      }
+    }
+
+    this.hideInvisibleTiles(visibleKeys);
+  }
+
+  private hideInvisibleTiles(visibleKeys: Set<string>): void {
+    const allKeys = this.renderManager.getAllKeys();
+    for (const key of allKeys) {
+      if (!visibleKeys.has(key)) {
+        this.renderManager.hide(key);
+        if (!this.cacheManager.has(key)) {
+          this.renderManager.remove(key);
+        }
       }
     }
   }
@@ -155,6 +188,10 @@ export class CesiumVectorTileCoordinator {
   ): Promise<void> {
     const key = this.resolveRenderTileKey(sourceId, level, x, y);
 
+    if (this.renderManager.hasHandle(key)) {
+      return;
+    }
+
     if (this.cacheManager.has(key)) {
       const tile = this.cacheManager.get(key)!;
       const style = this.styleManager.getStyle();
@@ -181,26 +218,40 @@ export class CesiumVectorTileCoordinator {
       styleEpoch: this.styleManager.getStyleEpoch(),
     });
 
-    try {
-      const tile = await this.sourceManager.requestTile(
-        sourceId,
-        level,
-        x,
-        y,
-        key,
-        this.tilingScheme,
-        renderTile,
-        (parsedTile: ParsedTileResult) => {
-          this.cacheManager.set(key, parsedTile);
-        },
-      );
+    const requestPromise = this.sourceManager.requestTile(
+      sourceId,
+      level,
+      x,
+      y,
+      key,
+      this.tilingScheme,
+      renderTile,
+      () => {},
+    );
+    this.cacheManager.setPending(key, requestPromise);
 
-      if (style) {
-        this.renderManager.mount(key, tile, style);
+    try {
+      const tile = await requestPromise;
+
+      // 使用 epoch 检测样式是否在请求期间发生了变化
+      if (this.styleManager.getStyleEpoch() !== renderTile.epoch) {
+        return;
       }
+
+      this.renderManager.mount(key, tile, style);
+      this.cacheManager.set(key, tile);
     }
     catch (error) {
       console.error(`[Coordinator] Failed to request tile ${key}:`, error);
+      // 样式已变更时不创建 empty handle，避免孤儿资源残留
+      if (this.styleManager.getStyleEpoch() !== renderTile.epoch) {
+        return;
+      }
+      // 标记为 empty，避免每帧重复请求
+      this.renderManager.setEmpty(key);
+    }
+    finally {
+      this.cacheManager.deletePending(key);
     }
   }
 

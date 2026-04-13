@@ -94,9 +94,16 @@ function createLineCollection(
     return undefined;
   }
 
+  const primitiveCountMax = Math.min(stats.polylineCount || 0, 10000000);
+  const vertexCountMax = Math.min(stats.totalVertexCount || 0, 10000000);
+
+  if (primitiveCountMax === 0 || vertexCountMax === 0) {
+    return undefined;
+  }
+
   const collection = new BufferPolylineCollection({
-    primitiveCountMax: stats.polylineCount,
-    vertexCountMax: stats.totalVertexCount,
+    primitiveCountMax,
+    vertexCountMax,
   });
 
   const material = getLineMaterial(style, layer);

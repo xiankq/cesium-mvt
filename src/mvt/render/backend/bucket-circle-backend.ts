@@ -94,8 +94,14 @@ function createCircleCollection(
     return undefined;
   }
 
+  const primitiveCountMax = Math.min(stats.pointCount || 0, 10000000);
+
+  if (primitiveCountMax === 0) {
+    return undefined;
+  }
+
   const collection = new BufferPointCollection({
-    primitiveCountMax: stats.pointCount,
+    primitiveCountMax,
   });
 
   const flyweight = new BufferPoint();

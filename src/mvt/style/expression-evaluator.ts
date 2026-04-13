@@ -284,21 +284,32 @@ function evaluateMultiply(args: unknown[], context: ExpressionContext): number {
 
 /**
  * / 表达式 - 除法运算
+ *
+ * MapLibre 直接执行 JS 除法：x/0 返回 Infinity/-Infinity，0/0 返回 NaN
+ * 上层 StyleExpression.evaluate() 会拦截 NaN 返回默认值
  */
 function evaluateDivide(args: unknown[], context: ExpressionContext): number {
   const values = evaluateArgs(args, context);
   const first = getNumberArg(values[0]);
   const second = getNumberArg(values[1]);
+
   return first / second;
 }
 
 /**
  * % 表达式 - 取模运算
+ *
+ * MapLibre 直接执行 JS 取模：x%0 返回 NaN，由上层拦截返回默认值
  */
 function evaluateModulo(args: unknown[], context: ExpressionContext): number {
   const values = evaluateArgs(args, context);
   const first = getNumberArg(values[0]);
   const second = getNumberArg(values[1]);
+
+  if (second === 0) {
+    return 0;
+  }
+
   return first % second;
 }
 
@@ -361,19 +372,31 @@ function evaluateGreaterThanOrEqual(args: unknown[], context: ExpressionContext)
 }
 
 /**
- * all 表达式 - 逻辑与
+ * all 表达式 - 逻辑与（短路求值）
+ *
+ * MapLibre 规范要求 all 必须短路求值：遇到第一个 falsy 值即返回 false
  */
 function evaluateAll(args: unknown[], context: ExpressionContext): boolean {
-  const values = evaluateArgs(args, context);
-  return values.every(value => Boolean(value));
+  for (const arg of args) {
+    if (!evaluateExpression(arg, context)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
- * any 表达式 - 逻辑或
+ * any 表达式 - 逻辑或（短路求值）
+ *
+ * MapLibre 规范要求 any 必须短路求值：遇到第一个 truthy 值即返回 true
  */
 function evaluateAny(args: unknown[], context: ExpressionContext): boolean {
-  const values = evaluateArgs(args, context);
-  return values.some(value => Boolean(value));
+  for (const arg of args) {
+    if (evaluateExpression(arg, context)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -672,34 +695,51 @@ function evaluateMax(args: unknown[], context: ExpressionContext): number {
 
 /**
  * sqrt 表达式 - 平方根
+ *
+ * MapLibre 直接调用 Math.sqrt()，负数返回 NaN，由上层 StyleExpression.evaluate() 兜底
  */
 function evaluateSqrt(args: unknown[], context: ExpressionContext): number {
   const value = evaluateExpression(args[0], context);
-  return Math.sqrt(getNumberArg(value));
+  const num = getNumberArg(value);
+
+  return Math.sqrt(num);
 }
 
 /**
  * ln 表达式 - 自然对数
+ *
+ * MapLibre 直接调用 Math.log()：ln(0) 返回 -Infinity，负数返回 NaN
+ * 上层 StyleExpression.evaluate() 会拦截 NaN 返回默认值，但不拦截 -Infinity
  */
 function evaluateLn(args: unknown[], context: ExpressionContext): number {
   const value = evaluateExpression(args[0], context);
-  return Math.log(getNumberArg(value));
+  const num = getNumberArg(value);
+
+  return Math.log(num);
 }
 
 /**
  * log2 表达式 - 以 2 为底的对数
+ *
+ * MapLibre 行为：log2(0) 返回 -Infinity，负数返回 NaN
  */
 function evaluateLog2(args: unknown[], context: ExpressionContext): number {
   const value = evaluateExpression(args[0], context);
-  return Math.log2(getNumberArg(value));
+  const num = getNumberArg(value);
+
+  return Math.log2(num);
 }
 
 /**
  * log10 表达式 - 以 10 为底的对数
+ *
+ * MapLibre 行为：log10(0) 返回 -Infinity，负数返回 NaN
  */
 function evaluateLog10(args: unknown[], context: ExpressionContext): number {
   const value = evaluateExpression(args[0], context);
-  return Math.log10(getNumberArg(value));
+  const num = getNumberArg(value);
+
+  return Math.log10(num);
 }
 
 /**
@@ -720,12 +760,19 @@ function evaluateCos(args: unknown[], context: ExpressionContext): number {
 
 /**
  * at 表达式 - 数组访问
+ *
+ * MapLibre 规范：负索引应抛出异常，越界返回 undefined
+ * 当前实现：负索引和越界均返回 undefined（不抛异常的安全版本）
  */
 function evaluateAt(args: unknown[], context: ExpressionContext): unknown {
   const index = getNumberArg(evaluateExpression(args[0], context));
   const array = evaluateExpression(args[1], context);
 
   if (Array.isArray(array)) {
+    // MapLibre 不支持负索引，直接返回 undefined
+    if (index < 0 || index >= array.length || index !== Math.floor(index)) {
+      return undefined;
+    }
     return array[index];
   }
 

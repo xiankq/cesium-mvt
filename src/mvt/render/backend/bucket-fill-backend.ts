@@ -60,17 +60,28 @@ export function createBucketFillTileHandle({
       continue;
     }
 
+    // 遍历 bucket 的所有 layerId，为每个 layer 创建独立的 collection
+    // 这符合 MapLibre 规范：每个 layer 应有独立的样式和渲染
     for (const layerId of bucket.layerIds) {
       const layer = layersById.get(layerId);
       if (!layer) {
         continue;
       }
 
+      const vertexCountMax = Math.min(stats.vertexCount, 10000000);
+      const triangleCountMax = Math.min(stats.triangleCount, 10000000);
+      const holeCountMax = Math.min(stats.holeCount, 10000000);
+      const primitiveCountMax = Math.min(stats.polygonCount || 1, 10000000);
+
+      if (vertexCountMax === 0) {
+        continue;
+      }
+
       const collection = new BufferPolygonCollection({
-        holeCountMax: stats.holeCount || 0,
-        primitiveCountMax: stats.polygonCount || 1,
-        triangleCountMax: stats.triangleCount || 0,
-        vertexCountMax: stats.vertexCount || 0,
+        holeCountMax,
+        primitiveCountMax,
+        triangleCountMax,
+        vertexCountMax,
       });
       const flyweight = new BufferPolygon();
       const material = getFillMaterial(style, layer);
