@@ -7,7 +7,6 @@ import type { BucketRenderedTileHandle } from './bucket-rendered-tile';
 import type { RenderEntry } from './render-order';
 import {
   createBucketRenderedTileHandle,
-  createEmptyBucketRenderedTileHandle,
   destroyBucketRenderedTileHandle,
   mountBucketRenderedTileHandle,
   setBucketRenderedTileVisibility,
@@ -115,12 +114,6 @@ export class RenderManager {
 
       this.refresh(key, bucketTile, style);
     }
-  }
-
-  setEmpty(key: string): BucketRenderedTileHandle {
-    const handle = createEmptyBucketRenderedTileHandle(key);
-    this.renderedTileHandles.set(key, handle);
-    return handle;
   }
 
   show(key: string): boolean {

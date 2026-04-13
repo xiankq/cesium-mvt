@@ -19,7 +19,7 @@ export interface TileCacheManagerOptions {
 export class TileCacheManager {
   private readonly bucketTileBudget: TileBudget;
   private readonly bucketTiles = new Map<string, ParsedTileResult>();
-  private readonly pendingRequests = new Map<string, Promise<ParsedTileResult>>();
+  private readonly pendingRequests = new Map<string, Promise<ParsedTileResult | undefined>>();
   private onEvict?: OnEvictCallback;
 
   constructor(options: number | TileCacheManagerOptions = DEFAULT_CACHE_SIZE) {
@@ -43,7 +43,7 @@ export class TileCacheManager {
     return cached;
   }
 
-  getPending(key: string): Promise<ParsedTileResult> | undefined {
+  getPending(key: string): Promise<ParsedTileResult | undefined> | undefined {
     return this.pendingRequests.get(key);
   }
 
@@ -68,7 +68,7 @@ export class TileCacheManager {
     });
   }
 
-  setPending(key: string, promise: Promise<ParsedTileResult>): void {
+  setPending(key: string, promise: Promise<ParsedTileResult | undefined>): void {
     this.pendingRequests.set(key, promise);
   }
 

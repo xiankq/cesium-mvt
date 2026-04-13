@@ -45,18 +45,18 @@ describe('geojson-source-cache', () => {
       sourceId: 'places',
     });
 
-    const firstResult = await sourceCache.requestTile({
+    const firstResult = (await sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    });
+    }))!;
     structuredClone(firstResult, { transfer: [firstResult] });
 
-    const secondResult = await sourceCache.requestTile({
+    const secondResult = (await sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    });
+    }))!;
 
     expect(secondResult.byteLength).toBeGreaterThan(0);
     expect(loadData).toHaveBeenCalledTimes(1);
@@ -74,16 +74,16 @@ describe('geojson-source-cache', () => {
       sourceId: 'places',
     });
 
-    const firstResult = await sourceCache.requestTile({
+    const firstResult = (await sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    });
-    const secondResult = await sourceCache.requestTile({
+    }))!;
+    const secondResult = (await sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    });
+    }))!;
 
     expect(firstResult.byteLength).toBe(0);
     expect(secondResult.byteLength).toBe(0);
@@ -115,18 +115,18 @@ describe('geojson-source-cache', () => {
       sourceId: 'places',
     } as any);
 
-    const firstResult = await sourceCache.requestTile({
+    const firstResult = (await sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    });
+    }))!;
     expect(firstResult.byteLength).toBeGreaterThan(0);
 
-    const secondResult = await sourceCache.requestTile({
+    const secondResult = (await sourceCache.requestTile({
       level: 2,
       x: 2,
       y: 3,
-    });
+    }))!;
     expect(secondResult.byteLength).toBeGreaterThan(0);
 
     expect(sourceCache.getEntry('places/2/1/3')).toBeUndefined();
@@ -134,11 +134,11 @@ describe('geojson-source-cache', () => {
       state: 'ready',
     });
 
-    const thirdResult = await sourceCache.requestTile({
+    const thirdResult = (await sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    });
+    }))!;
     expect(thirdResult.byteLength).toBeGreaterThan(0);
     expect(loadData).toHaveBeenCalledTimes(1);
   });
@@ -177,9 +177,7 @@ describe('geojson-source-cache', () => {
     });
     sourceCache.abortTile('places/2/1/3');
 
-    await expect(firstPromise).rejects.toMatchObject({
-      name: 'AbortError',
-    });
+    await expect(firstPromise).resolves.toBeUndefined();
 
     await expect(sourceCache.requestTile({
       level: 2,

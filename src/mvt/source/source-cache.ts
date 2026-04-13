@@ -39,7 +39,7 @@ export type SourceEntryState = 'failed' | 'idle' | 'ready' | 'requesting';
 interface SourceEntryRecord<TValue> extends SourceEntry<TValue> {
   abortController?: AbortController;
   failureCount: number;
-  promise?: Promise<TValue>;
+  promise?: Promise<TValue | undefined>;
   nextRetryAt?: number;
 }
 
@@ -112,7 +112,7 @@ export class SourceCache<TValue = ArrayBuffer> {
   async requestTile(
     coordinate: TileCoordinate,
     priority = 0,
-  ) {
+  ): Promise<TValue | undefined> {
     const key = createTileKey(
       this.sourceId,
       coordinate.level,
@@ -125,7 +125,7 @@ export class SourceCache<TValue = ArrayBuffer> {
       return cloneValue(existingEntry.value);
     }
     if (existingEntry?.promise) {
-      return existingEntry.promise.then(cloneValue);
+      return existingEntry.promise.then(v => v === undefined ? undefined : cloneValue(v)) as Promise<TValue | undefined>;
     }
 
     const entry = existingEntry ?? this.createEntry(key);
@@ -172,7 +172,7 @@ export class SourceCache<TValue = ArrayBuffer> {
           entry.state = 'idle';
           entry.failureCount = 0;
           entry.nextRetryAt = undefined;
-          throw error;
+          return undefined as TValue | undefined;
         }
 
         entry.error = error;

@@ -40,8 +40,8 @@ describe('source-cache', () => {
       y: 3,
     });
 
-    const firstResult = await firstPromise;
-    const secondResult = await secondPromise;
+    const firstResult = (await firstPromise)!;
+    const secondResult = (await secondPromise)!;
 
     expect(firstResult.byteLength).toBe(3);
     expect(secondResult.byteLength).toBe(3);
@@ -69,8 +69,8 @@ describe('source-cache', () => {
       y: 3,
     });
 
-    const firstResult = await firstPromise;
-    const secondResult = await secondPromise;
+    const firstResult = (await firstPromise)!;
+    const secondResult = (await secondPromise)!;
 
     structuredClone(firstResult, { transfer: [firstResult] });
     expect(firstResult.byteLength).toBe(0);
@@ -113,19 +113,17 @@ describe('source-cache', () => {
     });
     sourceCache.abortTile('base/2/1/3');
 
-    await expect(firstPromise).rejects.toMatchObject({
-      name: 'AbortError',
-    });
+    await expect(firstPromise).resolves.toBeUndefined();
     expect(sourceCache.getEntry('base/2/1/3')).toMatchObject({
       key: 'base/2/1/3',
       state: 'idle',
     });
 
-    const retriedResult = await sourceCache.requestTile({
+    const retriedResult = (await sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    });
+    }))!;
     expect(retriedResult).toBeInstanceOf(ArrayBuffer);
     expect(retriedResult.byteLength).toBe(3);
     expect(loadTile).toHaveBeenCalledTimes(2);
@@ -216,9 +214,7 @@ describe('source-cache', () => {
     sourceCache.abortTile('base/2/1/3');
 
     expect(loadTileJsonAbort).toHaveBeenCalledTimes(1);
-    await expect(firstPromise).rejects.toMatchObject({
-      name: 'AbortError',
-    });
+    await expect(firstPromise).resolves.toBeUndefined();
     expect(sourceCache.getEntry('base/2/1/3')).toMatchObject({
       key: 'base/2/1/3',
       state: 'idle',
@@ -241,16 +237,16 @@ describe('source-cache', () => {
       sourceId: 'base',
     });
 
-    const firstResult = await sourceCache.requestTile({
+    const firstResult = (await sourceCache.requestTile({
       level: 3,
       x: 4,
       y: 5,
-    });
-    const secondResult = await sourceCache.requestTile({
+    }))!;
+    const secondResult = (await sourceCache.requestTile({
       level: 4,
       x: 5,
       y: 6,
-    });
+    }))!;
 
     expect(firstResult).toBeInstanceOf(ArrayBuffer);
     expect(firstResult.byteLength).toBe(3);
@@ -351,19 +347,19 @@ describe('source-cache', () => {
       sourceId: 'base',
     });
 
-    const firstResult = await sourceCache.requestTile({
+    const firstResult = (await sourceCache.requestTile({
       level: 1,
       x: 0,
       y: 0,
-    });
+    }))!;
 
     expect(firstResult.byteLength).toBe(5);
 
-    const secondResult = await sourceCache.requestTile({
+    const secondResult = (await sourceCache.requestTile({
       level: 1,
       x: 0,
       y: 0,
-    });
+    }))!;
 
     expect(secondResult.byteLength).toBe(5);
     expect(secondResult).not.toBe(firstResult);
@@ -380,18 +376,18 @@ describe('source-cache', () => {
       sourceId: 'base',
     });
 
-    const firstResult = await sourceCache.requestTile({
+    const firstResult = (await sourceCache.requestTile({
       level: 1,
       x: 0,
       y: 0,
-    });
+    }))!;
     structuredClone(firstResult, { transfer: [firstResult] });
 
-    const secondResult = await sourceCache.requestTile({
+    const secondResult = (await sourceCache.requestTile({
       level: 1,
       x: 0,
       y: 0,
-    });
+    }))!;
 
     expect(secondResult.byteLength).toBe(4);
     expect(loadTile).toHaveBeenCalledTimes(1);
@@ -405,16 +401,16 @@ describe('source-cache', () => {
       sourceId: 'base',
     });
 
-    const firstResult = await sourceCache.requestTile({
+    const firstResult = (await sourceCache.requestTile({
       level: 1,
       x: 0,
       y: 0,
-    });
-    const secondResult = await sourceCache.requestTile({
+    }))!;
+    const secondResult = (await sourceCache.requestTile({
       level: 1,
       x: 0,
       y: 0,
-    });
+    }))!;
 
     expect(firstResult.byteLength).toBe(0);
     expect(secondResult.byteLength).toBe(0);
@@ -529,11 +525,11 @@ describe('source-cache', () => {
       structuredClone(entry.value, { transfer: [entry.value] });
     }
 
-    const secondResult = await sourceCache.requestTile({
+    const secondResult = (await sourceCache.requestTile({
       level: 1,
       x: 0,
       y: 0,
-    });
+    }))!;
 
     expect(secondResult.byteLength).toBe(3);
     expect(loadTile).toHaveBeenCalledTimes(1);

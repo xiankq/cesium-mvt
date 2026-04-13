@@ -5,8 +5,9 @@ import type { RenderTile } from '../render/render-tile';
 import type { TileBudget } from '../utils/tile-budget';
 import type { TileCoordinate } from './tile-request';
 import { createBucketTileDispatcher } from '../bucket';
-import { createAbortError } from '../utils/common';
+import { isAbortError } from '../utils/common';
 import { GeojsonSourceCache } from './geojson-source-cache';
+import { isThrottleError } from './request-scheduler';
 import { SourceCache } from './source-cache';
 
 /**
@@ -29,7 +30,7 @@ interface TileSourceCache {
   requestTile: (
     coordinate: TileCoordinate,
     priority?: number,
-  ) => Promise<ArrayBuffer>;
+  ) => Promise<ArrayBuffer | undefined>;
   updateSource: (source: SourceSpecification) => void;
 }
 
@@ -39,7 +40,7 @@ interface TileSourceCache {
 interface PendingRequest {
   abortController: AbortController;
   cleanup: () => void;
-  promise: Promise<ParsedTileResult>;
+  promise: Promise<ParsedTileResult | undefined>;
 }
 
 /**
@@ -132,7 +133,7 @@ export class SourceManager {
     style: StyleSpecification,
     onCompile: (tile: ParsedTileResult) => void,
     priority = 0,
-  ): Promise<ParsedTileResult> {
+  ): Promise<ParsedTileResult | undefined> {
     const sourceCache = this.sourceCaches.get(sourceId);
     if (!sourceCache) {
       throw new Error(`Source cache not found: ${sourceId}`);
@@ -161,8 +162,8 @@ export class SourceManager {
           { level, x, y },
           priority,
         );
-        if (abortController.signal.aborted) {
-          throw createAbortError();
+        if (abortController.signal.aborted || tileData === undefined) {
+          return undefined;
         }
         const bucketTile = await this.bucketTileDispatcher.compile({
           renderTile,
@@ -172,10 +173,16 @@ export class SourceManager {
           tilingScheme,
         });
         if (abortController.signal.aborted) {
-          throw createAbortError();
+          return undefined;
         }
         onCompile(bucketTile);
         return bucketTile;
+      }
+      catch (error) {
+        if (isAbortError(error) || isThrottleError(error)) {
+          return undefined;
+        }
+        throw error;
       }
       finally {
         this.pendingRequests.get(renderTileKey)?.cleanup();

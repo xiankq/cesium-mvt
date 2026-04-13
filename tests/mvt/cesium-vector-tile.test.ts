@@ -110,6 +110,50 @@ describe('cesiumVectorTile', () => {
     vectorTile.destroy();
   });
 
+  it('prePassesUpdate 应该委托给协调器', () => {
+    const vectorTile = new CesiumVectorTile();
+    const coordinator = {
+      destroy: vi.fn(),
+      prePassesUpdate: vi.fn(),
+    };
+    (vectorTile as any).coordinator = coordinator;
+
+    const frameState = {
+      afterRender: [],
+    };
+
+    (vectorTile as any).prePassesUpdate(frameState);
+
+    expect(coordinator.prePassesUpdate).toHaveBeenCalledWith(frameState);
+
+    vectorTile.destroy();
+  });
+
+  it('prePassesUpdate 应该保留父类对子 primitive 的遍历', () => {
+    const vectorTile = new CesiumVectorTile();
+    const child = new PrimitiveCollection();
+    const childPrePassesUpdate = vi.fn();
+    (child as any).prePassesUpdate = childPrePassesUpdate;
+    vectorTile.add(child);
+
+    const coordinator = {
+      destroy: vi.fn(),
+      prePassesUpdate: vi.fn(),
+    };
+    (vectorTile as any).coordinator = coordinator;
+
+    const frameState = {
+      afterRender: [],
+    };
+
+    (vectorTile as any).prePassesUpdate(frameState);
+
+    expect(childPrePassesUpdate).toHaveBeenCalledWith(frameState);
+    expect(coordinator.prePassesUpdate).toHaveBeenCalledWith(frameState);
+
+    vectorTile.destroy();
+  });
+
   it('销毁时清理所有资源', () => {
     const vectorTile = new CesiumVectorTile();
 

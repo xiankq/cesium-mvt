@@ -5,7 +5,7 @@ import type {
 import type { ParsedTileResult } from '@/mvt/bucket';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-async function createCoordinator() {
+async function createCoordinator(options: Record<string, unknown> = {}) {
   const { CesiumVectorTileCoordinator } = await import('@/mvt/cesium-vector-tile-coordinator');
   const { PrimitiveCollection, WebMercatorTilingScheme, Rectangle } = await import('cesium');
 
@@ -15,6 +15,7 @@ async function createCoordinator() {
     root: new PrimitiveCollection(),
     tileWidth: 256,
     tilingScheme: new WebMercatorTilingScheme(),
+    ...options,
   });
 }
 
@@ -168,6 +169,56 @@ describe('cesiumVectorTileCoordinator', () => {
     expect(updateSpy).toHaveBeenCalled();
   });
 
+  it('更新样式后应该在新帧中排队请求重新渲染', async () => {
+    const coordinator = await createCoordinator();
+
+    coordinator.updateStyle(createStyle());
+
+    const frameState = {
+      afterRender: [] as Array<() => boolean | void>,
+      newFrame: true,
+    };
+
+    (coordinator as any).prePassesUpdate(frameState);
+
+    expect(frameState.afterRender).toHaveLength(1);
+    expect(frameState.afterRender[0]?.()).toBe(true);
+
+    coordinator.destroy();
+  });
+
+  it('更新样式时不应该重复驱逐同一批渲染句柄', async () => {
+    const coordinator = await createCoordinator();
+    coordinator.updateStyle(createStyle());
+
+    const renderManager = (coordinator as any).renderManager;
+    const cacheManager = (coordinator as any).cacheManager;
+    const renderKey = `${(coordinator as any).styleManager.getStyleEpoch()}:base/0/0/0`;
+    const bucketTile = createParsedTileResult(renderKey);
+
+    renderManager.mount(renderKey, bucketTile, createStyle());
+    cacheManager.set(renderKey, bucketTile);
+
+    const removeSpy = vi.spyOn(renderManager, 'remove');
+    const clearSpy = vi.spyOn(renderManager, 'clear');
+
+    coordinator.updateStyle({
+      ...createStyle(),
+      layers: [
+        {
+          'id': 'water',
+          'source': 'base',
+          'source-layer': 'water',
+          'type': 'fill',
+        },
+      ],
+    });
+
+    expect(removeSpy).not.toHaveBeenCalled();
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+    expect(renderManager.getHandle(renderKey)).toBeUndefined();
+  });
+
   it('会按请求顺序传递优先级', async () => {
     const coordinator = await createCoordinator();
     coordinator.updateStyle(createStyle());
@@ -268,6 +319,57 @@ describe('cesiumVectorTileCoordinator', () => {
     expect(renderManager.getHandle(renderKey)).toBeDefined();
   });
 
+  it('异步瓦片完成挂载后应该在新帧中排队请求重新渲染', async () => {
+    const coordinator = await createCoordinator();
+    coordinator.updateStyle(createStyle());
+
+    let resolveRequest: (value: ParsedTileResult | undefined) => void = () => {};
+    const requestPromise = new Promise<ParsedTileResult | undefined>((resolve) => {
+      resolveRequest = resolve;
+    });
+
+    const sourceManager = {
+      abort: vi.fn(),
+      abortAll: vi.fn(),
+      destroy: vi.fn(),
+      getNextRetryAt: vi.fn(() => undefined),
+      getSourceConstraints: vi.fn(() => ({})),
+      getSourceIds: vi.fn(() => ['base']),
+      isDestroyed: vi.fn(() => false),
+      reconcileSources: vi.fn(),
+      requestTile: vi.fn(() => requestPromise),
+    };
+    (coordinator as any).sourceManager = sourceManager;
+
+    const requestTile = (coordinator as any).requestTile.bind(coordinator);
+    const pending = requestTile('base', 0, 0, 0);
+
+    // 先把样式更新触发的补帧消费掉，避免把前一帧的状态算进来。
+    const styleFrameState = {
+      afterRender: [] as Array<() => boolean | void>,
+      newFrame: true,
+    };
+    (coordinator as any).prePassesUpdate(styleFrameState);
+
+    expect(styleFrameState.afterRender).toHaveLength(1);
+    expect(styleFrameState.afterRender[0]?.()).toBe(true);
+
+    resolveRequest(createParsedTileResult('base/0/0/0@1'));
+    await pending;
+
+    const frameState = {
+      afterRender: [] as Array<() => boolean | void>,
+      newFrame: true,
+    };
+    (coordinator as any).prePassesUpdate(frameState);
+
+    expect(frameState.afterRender).toHaveLength(1);
+    expect(frameState.afterRender[0]?.()).toBe(true);
+    expect((coordinator as any).renderManager.getHandle(
+      `${(coordinator as any).styleManager.getStyleEpoch()}:base/0/0/0`,
+    )).toBeDefined();
+  });
+
   it('失败请求到达重试时间后会重新触发一次选择更新', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-13T00:00:00Z'));
@@ -349,7 +451,7 @@ describe('cesiumVectorTileCoordinator', () => {
     }
   });
 
-  it('feature-state 写入后会刷新已挂载瓦片并重新计算样式', async () => {
+  it('feature-state 写入后会刷新已挂载瓦片并排队请求重新渲染', async () => {
     const { BufferPoint, BufferPointMaterial } = await import('cesium');
     const coordinator = await createCoordinator();
     const style: StyleSpecification = {
@@ -411,6 +513,14 @@ describe('cesiumVectorTileCoordinator', () => {
       selected: true,
     });
 
+    const frameState = {
+      afterRender: [] as Array<() => boolean | void>,
+    };
+    (coordinator as any).prePassesUpdate(frameState);
+
+    expect(frameState.afterRender).toHaveLength(1);
+    expect(frameState.afterRender[0]?.()).toBe(true);
+
     const refreshedHandle = renderManager.getHandle(renderKey);
     if (!refreshedHandle) {
       throw new Error('Expected render handle to exist after feature-state update.');
@@ -449,6 +559,32 @@ describe('cesiumVectorTileCoordinator', () => {
     const renderKey = `${(coordinator as any).styleManager.getStyleEpoch()}:base/0/0/0`;
     expect(sourceManager.abort).toHaveBeenCalledWith(renderKey);
     expect((coordinator as any).renderManager.getHandle(renderKey)).toBeUndefined();
+  });
+
+  it('取消请求不应该打印错误日志', async () => {
+    const coordinator = await createCoordinator();
+    coordinator.updateStyle(createStyle());
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sourceManager = {
+      abort: vi.fn(),
+      abortAll: vi.fn(),
+      destroy: vi.fn(),
+      getNextRetryAt: vi.fn(() => undefined),
+      getSourceConstraints: vi.fn(() => ({})),
+      getSourceIds: vi.fn(() => ['base']),
+      isDestroyed: vi.fn(() => false),
+      reconcileSources: vi.fn(),
+      requestTile: vi.fn(() => Promise.reject(Object.assign(new Error('aborted'), {
+        name: 'AbortError',
+      }))),
+    };
+    (coordinator as any).sourceManager = sourceManager;
+
+    const requestTile = (coordinator as any).requestTile.bind(coordinator);
+    await requestTile('base', 0, 0, 0);
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
   describe('destroy', () => {

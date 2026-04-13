@@ -29,7 +29,7 @@ interface SourceEntryRecord {
   error?: unknown;
   failureCount: number;
   key: string;
-  promise?: Promise<ArrayBuffer>;
+  promise?: Promise<ArrayBuffer | undefined>;
   state: SourceEntryState;
   value?: ArrayBuffer;
   nextRetryAt?: number;
@@ -89,7 +89,7 @@ export class GeojsonSourceCache {
   async requestTile(
     coordinate: TileCoordinate,
     priority = 0,
-  ) {
+  ): Promise<ArrayBuffer | undefined> {
     const key = createTileKey(
       this.sourceId,
       coordinate.level,
@@ -102,7 +102,7 @@ export class GeojsonSourceCache {
       return cloneValue(existingEntry.value);
     }
     if (existingEntry?.promise) {
-      return existingEntry.promise.then(cloneValue);
+      return existingEntry.promise.then(v => v === undefined ? undefined : cloneValue(v));
     }
 
     const entry = existingEntry ?? this.createEntry(key);
@@ -154,7 +154,7 @@ export class GeojsonSourceCache {
           entry.state = 'idle';
           entry.failureCount = 0;
           entry.nextRetryAt = undefined;
-          throw error;
+          return undefined;
         }
 
         entry.error = error;

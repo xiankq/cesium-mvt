@@ -82,17 +82,6 @@ export function createBucketRenderedTileHandle({
   };
 }
 
-export function createEmptyBucketRenderedTileHandle(
-  key: string,
-): BucketRenderedTileHandle {
-  return {
-    byteLength: 0,
-    collections: [],
-    key,
-    visible: false,
-  };
-}
-
 export function mountBucketRenderedTileHandle(
   root: PrimitiveCollection,
   handle: BucketRenderedTileHandle,

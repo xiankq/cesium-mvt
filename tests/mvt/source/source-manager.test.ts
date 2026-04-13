@@ -2,6 +2,49 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMockStyle } from '../../helpers/style-helpers';
 
 describe('sourceManager', () => {
+  it('底层 source 请求失败时应该向上抛出错误', async () => {
+    const { SourceManager } = await import('@/mvt/source/source-manager');
+
+    const networkError = new Error('network failed');
+    const sourceManager = new SourceManager();
+    const sourceCache = {
+      destroy: vi.fn(),
+      getMaxZoom: vi.fn(() => undefined),
+      getMinZoom: vi.fn(() => undefined),
+      isDestroyed: vi.fn(() => false),
+      requestTile: vi.fn(() => Promise.reject(networkError)),
+      sourceType: 'vector' as const,
+      updateSource: vi.fn(),
+    };
+
+    (sourceManager as any).sourceCaches.set('test', sourceCache);
+
+    const requestPromise = sourceManager.requestTile(
+      'test',
+      0,
+      0,
+      0,
+      'test/0/0/0',
+      {
+        tileXYToNativeRectangle: () => ({
+          east: 1,
+          north: 1,
+          south: 0,
+          west: 0,
+        }),
+      } as any,
+      {
+        epoch: 1,
+        geometryBatches: [],
+        key: 'test/0/0/0',
+      } as any,
+      createMockStyle('fill'),
+      () => {},
+    );
+
+    await expect(requestPromise).rejects.toThrow('network failed');
+  });
+
   describe('destroy', () => {
     it('应该能够安全地多次调用 destroy', async () => {
       const { SourceManager } = await import('@/mvt/source/source-manager');
@@ -94,7 +137,7 @@ describe('sourceManager', () => {
 
       sourceManager.destroy();
 
-      await expect(requestPromise).rejects.toThrow();
+      await expect(requestPromise).resolves.toBeUndefined();
 
       // 验证多次调用 destroy 的安全性
       sourceManager.destroy();
@@ -153,7 +196,7 @@ describe('sourceManager', () => {
 
       sourceManager.destroy();
 
-      await expect(requestPromise).rejects.toThrow();
+      await expect(requestPromise).resolves.toBeUndefined();
 
       // 验证多次调用 destroy 的安全性
       sourceManager.destroy();
@@ -422,9 +465,7 @@ describe('sourceManager', () => {
         key: 'test/0/0/0@1',
       });
 
-      await expect(requestPromise).rejects.toMatchObject({
-        name: 'AbortError',
-      });
+      await expect(requestPromise).resolves.toBeUndefined();
       expect(onCompile).not.toHaveBeenCalled();
     });
   });

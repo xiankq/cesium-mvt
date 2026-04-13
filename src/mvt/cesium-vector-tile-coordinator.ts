@@ -33,6 +33,7 @@ export interface CesiumVectorTileCoordinatorOptions {
 }
 
 export interface FrameState {
+  afterRender?: Array<() => boolean | void>;
   camera: any;
   viewportHeight: number;
   viewportWidth: number;
@@ -48,6 +49,7 @@ export class CesiumVectorTileCoordinator {
   private readonly featureStateManager: FeatureStateStore;
   private readonly tilingScheme: WebMercatorTilingScheme;
   private readonly requestedTileKeys = new Set<string>();
+  private renderRequested = false;
 
   isDestroyed(): boolean {
     return this.destroyed;
@@ -120,7 +122,7 @@ export class CesiumVectorTileCoordinator {
     const hadStyle = this.styleManager.hasStyle();
     this.sourceManager.abortAll();
     this.requestedTileKeys.clear();
-    this.cacheManager.clear(true); // 样式更新时需要通知渲染层清理旧瓦片
+    this.cacheManager.clear();
     this.renderManager.clear();
 
     if (hadStyle) {
@@ -131,6 +133,7 @@ export class CesiumVectorTileCoordinator {
     this.sourceManager.reconcileSources(style.sources as Record<string, SourceSpecification>);
     this.renderManager.updateLayerFamilies(style, this.styleManager.getLayerFamilies());
     this.scheduler.invalidate();
+    this.renderRequested = true;
   }
 
   getStyle(): StyleSpecification | undefined {
@@ -160,6 +163,7 @@ export class CesiumVectorTileCoordinator {
       key => this.cacheManager.get(key),
       style,
     );
+    this.renderRequested = true;
   }
 
   destroy(): void {
@@ -173,6 +177,19 @@ export class CesiumVectorTileCoordinator {
     this.renderManager.destroy();
     this.featureStateManager.clear();
     this.requestedTileKeys.clear();
+    this.renderRequested = false;
+  }
+
+  prePassesUpdate(frameState: FrameState): void {
+    if (this.destroyed || !this.renderRequested || !frameState.afterRender) {
+      return;
+    }
+
+    // 让当前场景在帧尾自己补一次 requestRender，避免把场景能力暴露到外部。
+    frameState.afterRender.push(() => {
+      this.renderRequested = false;
+      return true;
+    });
   }
 
   private processTileSelection(coordinates: any[]): void {
@@ -334,18 +351,24 @@ export class CesiumVectorTileCoordinator {
         return;
       }
 
+      if (tile === undefined) {
+        return;
+      }
+
       this.renderManager.mount(key, tile, style);
       this.cacheManager.set(key, tile);
+      this.renderRequested = true;
     }
     catch (error) {
-      if (isAbortError(error) || isThrottleError(error)) {
+      if (this.styleManager.getStyleEpoch() !== renderTile.epoch) {
+        return;
+      }
+
+      if (error === undefined || isAbortError(error) || isThrottleError(error)) {
         return;
       }
 
       console.error(`[Coordinator] Failed to request tile ${key}:`, error);
-      if (this.styleManager.getStyleEpoch() !== renderTile.epoch) {
-        return;
-      }
     }
     finally {
       this.cacheManager.deletePending(key);
