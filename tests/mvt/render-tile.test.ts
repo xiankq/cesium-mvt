@@ -94,6 +94,49 @@ describe('render-tile', () => {
     });
   });
 
+  it('resolves background color expressions with tile zoom', () => {
+    const style = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          id: 'background',
+          type: 'background',
+          paint: {
+            'background-color': {
+              stops: [
+                [0, '#000000'],
+                [10, '#ffffff'],
+              ],
+            },
+          },
+        },
+      ],
+    } as unknown as StyleSpecification;
+    const layerFamilies = createLayerFamilies(style);
+    const renderOrder = createRenderOrder(style, layerFamilies);
+
+    expect(compileRenderTile({
+      key: createRenderTileKey('base', 5, 4, 5),
+      layerFamilies,
+      renderOrder,
+      style,
+      styleEpoch: 2,
+    })).toMatchObject({
+      background: {
+        color: '#808080',
+        layerId: 'background',
+        order: 0,
+      },
+      key: 'base/5/4/5@2',
+    });
+  });
+
   it('emits one geometry batch per family for the requested source', () => {
     const style: StyleSpecification = {
       version: 8,

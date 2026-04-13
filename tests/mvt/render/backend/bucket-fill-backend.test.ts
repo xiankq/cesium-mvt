@@ -1,3 +1,4 @@
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
 import {
   createMockEmptyBucketTile,
@@ -28,6 +29,88 @@ describe('bucket-fill-backend', () => {
         expect(handle?.collections).toBeDefined();
         expect(handle?.collections.length).toBeGreaterThan(0);
         expect(handle?.byteLength).toBeGreaterThan(0);
+      });
+
+      it('应该按 filter 和数据驱动样式分别渲染同一 family 的要素', async () => {
+        const { BufferPolygon, BufferPolygonMaterial } = await import('cesium');
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
+
+        const bucketTile = createMockFillBucketTile({
+          featureCount: 2,
+          layerId: 'park-layer',
+        });
+        const bucket = bucketTile.buckets[0]!;
+        bucket.layerIds = ['park-layer', 'water-layer'];
+        bucket.featureIndex.entries[0]!.properties = {
+          color: '#112233',
+          kind: 'park',
+        };
+        bucket.featureIndex.entries[1]!.properties = {
+          color: '#445566',
+          kind: 'water',
+        };
+
+        const style = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'filter': ['==', ['get', 'kind'], 'park'],
+              'id': 'park-layer',
+              'paint': {
+                'fill-color': ['get', 'color'],
+                'fill-opacity': 0.5,
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'fill' as const,
+            },
+            {
+              'filter': ['==', ['get', 'kind'], 'water'],
+              'id': 'water-layer',
+              'paint': {
+                'fill-color': ['get', 'color'],
+                'fill-opacity': 0.75,
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'fill' as const,
+            },
+          ],
+        } as StyleSpecification;
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toHaveLength(2);
+
+        const parkCollection = handle!.collections.find(collection => collection.layerId === 'park-layer');
+        const waterCollection = handle!.collections.find(collection => collection.layerId === 'water-layer');
+        expect(parkCollection).toBeDefined();
+        expect(waterCollection).toBeDefined();
+        expect(parkCollection?.collection.primitiveCount).toBe(1);
+        expect(waterCollection?.collection.primitiveCount).toBe(1);
+
+        const polygon = new BufferPolygon();
+        const material = new BufferPolygonMaterial();
+
+        parkCollection!.collection.get(0, polygon);
+        const parkMaterial = polygon.getMaterial(material);
+        expect(parkMaterial.color.red).toBeCloseTo(0x11 / 255, 4);
+        expect(parkMaterial.color.green).toBeCloseTo(0x22 / 255, 4);
+        expect(parkMaterial.color.blue).toBeCloseTo(0x33 / 255, 4);
+        expect(parkMaterial.color.alpha).toBeCloseTo(128 / 255, 4);
+
+        waterCollection!.collection.get(0, polygon);
+        const waterMaterial = polygon.getMaterial(material);
+        expect(waterMaterial.color.red).toBeCloseTo(0x44 / 255, 4);
+        expect(waterMaterial.color.green).toBeCloseTo(0x55 / 255, 4);
+        expect(waterMaterial.color.blue).toBeCloseTo(0x66 / 255, 4);
+        expect(waterMaterial.color.alpha).toBeCloseTo(192 / 255, 4);
       });
 
       it('应该为空bucket tile返回undefined', async () => {

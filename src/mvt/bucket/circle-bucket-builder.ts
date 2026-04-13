@@ -47,11 +47,11 @@ export class CircleBucketBuilder {
       return;
     }
 
-    this.featureIndexEntries.push({
+    this.featureIndexEntries[localId] = {
       id: feature.id,
       properties: { ...feature.properties },
       type: 'point',
-    });
+    };
 
     const geometry = feature.loadGeometry();
 
@@ -69,7 +69,7 @@ export class CircleBucketBuilder {
 
   build(): Bucket {
     const byteLength = calculateBucketByteLength(this._stats);
-    const featureIndexByteLength = calculateFeatureIndexByteLength(this.featureIndexEntries.length);
+    const featureIndexByteLength = calculateFeatureIndexByteLength(this.featureIndexEntries);
 
     this._stats.byteLength = byteLength;
 

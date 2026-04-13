@@ -6,6 +6,9 @@ import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-fam
 import type { RenderEntry } from './render-order';
 import { createTileKey } from '../source/tile-request';
 import { isLayerVisibleAtZoom } from '../style/layer-family';
+import { createStylePropertyEvaluator } from '../style/style-property-evaluator';
+
+const STYLE_EPOCH_PREFIX = /^\d+:/;
 
 // RenderTile 表示某个 source tile 在当前 styleEpoch 下的渲染计划，
 // 此时还没有真正构建出可提交给 Cesium 的几何资源。
@@ -70,10 +73,13 @@ export function compileRenderTile({
 
     if (entry.kind === 'background') {
       const backgroundLayer = layer as BackgroundLayerSpecification;
+      const backgroundColor = backgroundLayer.paint?.['background-color'];
       background = {
-        color: typeof backgroundLayer.paint?.['background-color'] === 'string'
-          ? backgroundLayer.paint['background-color']
-          : undefined,
+        color: backgroundColor === undefined
+          ? undefined
+          : createStylePropertyEvaluator<string>(backgroundColor)(
+              createBackgroundStyleContext(coordinate.level),
+            ),
         layerId: entry.layerId,
         order: entry.order,
       };
@@ -114,8 +120,11 @@ export function compileRenderTile({
   };
 }
 
-function parseRenderTileCoordinateFromKey(key: string) {
-  const parts = key.split('/');
+export function parseRenderTileCoordinateFromKey(key: string) {
+  const scopedKey = STYLE_EPOCH_PREFIX.test(key)
+    ? key.slice(key.indexOf(':') + 1)
+    : key;
+  const parts = scopedKey.split('/');
   if (parts.length < 4) {
     throw new Error(`Invalid render tile key: ${key}`);
   }
@@ -128,5 +137,13 @@ function parseRenderTileCoordinateFromKey(key: string) {
   return {
     level,
     sourceId: parts.slice(0, -3).join('/'),
+  };
+}
+
+function createBackgroundStyleContext(zoom: number) {
+  return {
+    geometryType: undefined,
+    properties: {},
+    zoom,
   };
 }

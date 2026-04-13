@@ -4,6 +4,14 @@ import type {
 } from '@maplibre/maplibre-gl-style-spec';
 import type { TileCoordinate, TileRequest } from './tile-request';
 import { createAbortError, isAbortError, resolveUrl } from '../utils/common';
+import { TileBudget } from '../utils/tile-budget';
+import {
+  createThrottleError,
+  isThrottleError,
+
+  scheduleJsonRequest,
+  scheduleTileRequest,
+} from './request-scheduler';
 import {
   createTileKey,
   createTileRequest,
@@ -20,6 +28,8 @@ export interface TileJson {
 export interface SourceEntry<TValue> {
   error?: unknown;
   key: string;
+  failureCount?: number;
+  nextRetryAt?: number;
   state: SourceEntryState;
   value?: TValue;
 }
@@ -28,31 +38,49 @@ export type SourceEntryState = 'failed' | 'idle' | 'ready' | 'requesting';
 
 interface SourceEntryRecord<TValue> extends SourceEntry<TValue> {
   abortController?: AbortController;
+  failureCount: number;
   promise?: Promise<TValue>;
+  nextRetryAt?: number;
 }
 
 interface SourceCacheOptions<TValue> {
-  loadTile?: (request: TileRequest, signal: AbortSignal) => Promise<TValue>;
-  loadTileJson?: (url: string, signal: AbortSignal) => Promise<TileJson>;
+  loadTile?: (
+    request: TileRequest,
+    signal: AbortSignal,
+    priority?: number,
+  ) => Promise<TValue>;
+  loadTileJson?: (
+    url: string,
+    signal: AbortSignal,
+    priority?: number,
+  ) => Promise<TileJson>;
+  maxBytes?: number;
+  readyTileBudget?: TileBudget;
   source: SourceSpecification;
   sourceId: string;
 }
 
 const DEFAULT_SOURCE_ENTRY_STATE: SourceEntryState = 'idle';
+const DEFAULT_SOURCE_CACHE_SIZE = 64 * 1024 * 1024;
+const INITIAL_RETRY_DELAY_MS = 1000;
+const MAX_RETRY_DELAY_MS = 30_000;
 
 export class SourceCache<TValue = ArrayBuffer> {
   readonly sourceType: SourceSpecification['type'];
 
   private destroyed = false;
   private readonly entries = new Map<string, SourceEntryRecord<TValue>>();
+  private readonly readyTileBudget: TileBudget;
   private readonly loadTile: (
     request: TileRequest,
     signal: AbortSignal,
+    priority?: number,
   ) => Promise<TValue>;
 
   private readonly loadTileJson: (
     url: string,
     signal: AbortSignal,
+    priority?: number,
   ) => Promise<TileJson>;
 
   private source: SourceSpecification;
@@ -68,15 +96,23 @@ export class SourceCache<TValue = ArrayBuffer> {
         ?? (loadTileBuffer as (
           request: TileRequest,
           signal: AbortSignal,
+          priority?: number,
         ) => Promise<TValue>);
     this.loadTileJson = options.loadTileJson ?? loadTileJson;
+    this.readyTileBudget = options.readyTileBudget
+      ?? new TileBudget({
+        maxBytes: options.maxBytes ?? DEFAULT_SOURCE_CACHE_SIZE,
+      });
     this.source = options.source;
     this.sourceType = options.source.type;
     this.sourceId = options.sourceId;
     this.sourceSignature = JSON.stringify(options.source);
   }
 
-  async requestTile(coordinate: TileCoordinate) {
+  async requestTile(
+    coordinate: TileCoordinate,
+    priority = 0,
+  ) {
     const key = createTileKey(
       this.sourceId,
       coordinate.level,
@@ -85,54 +121,64 @@ export class SourceCache<TValue = ArrayBuffer> {
     );
     const existingEntry = this.entries.get(key);
     if (existingEntry?.state === 'ready' && existingEntry.value !== undefined) {
-      if (existingEntry.value instanceof ArrayBuffer && isBufferDetached(existingEntry.value)) {
-        this.entries.delete(key);
-      }
-      else if (existingEntry.value instanceof ArrayBuffer) {
-        return existingEntry.value.slice(0);
-      }
-      else {
-        return existingEntry.value;
-      }
+      this.readyTileBudget.touch(key);
+      return cloneValue(existingEntry.value);
     }
     if (existingEntry?.promise) {
-      return existingEntry.promise.then((value) => {
-        if (value instanceof ArrayBuffer) {
-          return value.slice(0);
-        }
-        return value;
-      });
+      return existingEntry.promise.then(cloneValue);
     }
 
     const entry = existingEntry ?? this.createEntry(key);
+    if (this.isRetryCoolingDown(entry)) {
+      return Promise.reject(createThrottleError());
+    }
+
     const abortController = new AbortController();
     entry.abortController = abortController;
     entry.error = undefined;
     entry.state = 'requesting';
-    entry.promise = this.resolveTileRequest(coordinate)
-      .then(request => this.loadTile(request, abortController.signal))
+    entry.promise = this.resolveTileRequest(coordinate, priority)
+      .then(request => this.loadTile(
+        request,
+        abortController.signal,
+        priority,
+      ))
       .then((value) => {
         if (abortController.signal.aborted) {
           throw createAbortError();
         }
 
+        const cachedValue = cloneValue(value);
         entry.abortController = undefined;
         entry.promise = undefined;
         entry.state = 'ready';
-        entry.value = value;
-        return value;
+        entry.value = cachedValue;
+        this.readyTileBudget.add(key, {
+          byteLength: getValueByteLength(cachedValue),
+        }, (evictedKey) => {
+          this.entries.delete(evictedKey);
+        });
+        return cloneValue(cachedValue);
       })
       .catch((error) => {
         entry.abortController = undefined;
         entry.promise = undefined;
-        if (abortController.signal.aborted || isAbortError(error)) {
+        if (
+          abortController.signal.aborted
+          || isAbortError(error)
+          || isThrottleError(error)
+        ) {
           entry.error = undefined;
           entry.state = 'idle';
+          entry.failureCount = 0;
+          entry.nextRetryAt = undefined;
           throw error;
         }
 
         entry.error = error;
         entry.state = 'failed';
+        entry.failureCount += 1;
+        entry.nextRetryAt = Date.now() + calculateRetryDelay(entry.failureCount);
         throw error;
       });
 
@@ -141,6 +187,24 @@ export class SourceCache<TValue = ArrayBuffer> {
 
   abortTile(key: string) {
     this.entries.get(key)?.abortController?.abort();
+    if (!this.hasActiveTileRequests()) {
+      this.tileJsonAbortController?.abort();
+    }
+  }
+
+  getNextRetryAt(): number | undefined {
+    let nextRetryAt: number | undefined;
+    for (const entry of this.entries.values()) {
+      if (entry.state !== 'failed' || entry.nextRetryAt === undefined) {
+        continue;
+      }
+
+      if (nextRetryAt === undefined || entry.nextRetryAt < nextRetryAt) {
+        nextRetryAt = entry.nextRetryAt;
+      }
+    }
+
+    return nextRetryAt;
   }
 
   getEntry(key: string): SourceEntry<TValue> | undefined {
@@ -151,9 +215,13 @@ export class SourceCache<TValue = ArrayBuffer> {
 
     return {
       error: entry.error,
+      failureCount: entry.failureCount,
       key: entry.key,
+      nextRetryAt: entry.nextRetryAt,
       state: entry.state,
-      value: entry.value,
+      value: entry.value instanceof ArrayBuffer
+        ? cloneValue(entry.value)
+        : entry.value,
     };
   }
 
@@ -181,8 +249,22 @@ export class SourceCache<TValue = ArrayBuffer> {
     this.destroyed = true;
   }
 
+  private hasActiveTileRequests(): boolean {
+    for (const entry of this.entries.values()) {
+      if (
+        entry.state === 'requesting'
+        && !entry.abortController?.signal.aborted
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private createEntry(key: string) {
     const entry: SourceEntryRecord<TValue> = {
+      failureCount: 0,
       key,
       state: DEFAULT_SOURCE_ENTRY_STATE,
     };
@@ -190,18 +272,31 @@ export class SourceCache<TValue = ArrayBuffer> {
     return entry;
   }
 
+  private isRetryCoolingDown(entry: SourceEntryRecord<TValue>): boolean {
+    return entry.state === 'failed'
+      && entry.nextRetryAt !== undefined
+      && Date.now() < entry.nextRetryAt;
+  }
+
   private reset() {
     this.tileJsonAbortController?.abort();
     this.tileJsonAbortController = undefined;
     this.tileJsonPromise = undefined;
+    this.cachedTileJson = undefined;
+    for (const key of Array.from(this.entries.keys())) {
+      this.readyTileBudget.delete(key);
+    }
     for (const entry of this.entries.values()) {
       entry.abortController?.abort();
     }
     this.entries.clear();
   }
 
-  private async resolveTileRequest(coordinate: TileCoordinate) {
-    const tileJson = await this.getTileJson();
+  private async resolveTileRequest(
+    coordinate: TileCoordinate,
+    priority: number,
+  ) {
+    const tileJson = await this.getTileJson(priority);
     return createTileRequest({
       coordinate,
       scheme: tileJson.scheme ?? getSourceScheme(this.source),
@@ -210,7 +305,9 @@ export class SourceCache<TValue = ArrayBuffer> {
     });
   }
 
-  private async getTileJson(): Promise<TileJson> {
+  private async getTileJson(
+    priority: number,
+  ): Promise<TileJson> {
     if (hasInlineTiles(this.source)) {
       const inlineTileJson: TileJson = {
         scheme: getSourceScheme(this.source),
@@ -235,6 +332,7 @@ export class SourceCache<TValue = ArrayBuffer> {
     this.tileJsonPromise = this.loadTileJson(
       tileJsonUrl,
       abortController.signal,
+      priority,
     ).then((tileJson) => {
       if (abortController.signal.aborted) {
         throw createAbortError();
@@ -257,11 +355,11 @@ export class SourceCache<TValue = ArrayBuffer> {
   }
 
   getMaxZoom(): number | undefined {
-    return this.cachedTileJson?.maxzoom;
+    return getSourceMaxZoom(this.source) ?? this.cachedTileJson?.maxzoom;
   }
 
   getMinZoom(): number | undefined {
-    return this.cachedTileJson?.minzoom;
+    return getSourceMinZoom(this.source) ?? this.cachedTileJson?.minzoom;
   }
 }
 
@@ -296,27 +394,53 @@ function normalizeTileJson(
   };
 }
 
-async function loadTileJson(url: string, signal: AbortSignal) {
-  const response = await fetch(url, { signal });
-  if (!response.ok) {
-    throw new Error(`Failed to load tilejson: ${url}`);
-  }
-
-  return await response.json() as TileJson;
+function loadTileJson(
+  url: string,
+  signal: AbortSignal,
+  priority?: number,
+) {
+  return scheduleJsonRequest({
+    priority,
+    signal,
+    url,
+  }) as Promise<TileJson>;
 }
 
-async function loadTileBuffer(
+function loadTileBuffer(
   request: TileRequest,
   signal: AbortSignal,
+  priority?: number,
 ): Promise<ArrayBuffer> {
-  const response = await fetch(request.url, { signal });
-  if (!response.ok) {
-    throw new Error(`Failed to load tile: ${request.url}`);
-  }
-
-  return await response.arrayBuffer();
+  return scheduleTileRequest({
+    priority,
+    signal,
+    url: request.url,
+  });
 }
 
-function isBufferDetached(buffer: ArrayBuffer): boolean {
-  return buffer.byteLength === 0;
+function cloneValue<TValue>(value: TValue): TValue {
+  if (value instanceof ArrayBuffer) {
+    return value.slice(0) as TValue;
+  }
+
+  return value;
+}
+
+function getValueByteLength<TValue>(value: TValue): number {
+  return value instanceof ArrayBuffer ? value.byteLength : 0;
+}
+
+function calculateRetryDelay(failureCount: number): number {
+  const exponent = Math.max(0, failureCount - 1);
+  return Math.min(INITIAL_RETRY_DELAY_MS * 2 ** exponent, MAX_RETRY_DELAY_MS);
+}
+
+function getSourceMinZoom(source: SourceSpecification): number | undefined {
+  const minzoom = (source as { minzoom?: unknown }).minzoom;
+  return typeof minzoom === 'number' ? minzoom : undefined;
+}
+
+function getSourceMaxZoom(source: SourceSpecification): number | undefined {
+  const maxzoom = (source as { maxzoom?: unknown }).maxzoom;
+  return typeof maxzoom === 'number' ? maxzoom : undefined;
 }

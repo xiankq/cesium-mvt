@@ -6,88 +6,83 @@
 
 ### 1. 运行时主链路与上游对照
 
-| 维度                                                                | 上游源码思路                                                  | 当前实现                      | 结论                         |
-| ------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------- | ---------------------------- |
-| Cesium `QuadtreePrimitive`                                          | 多级 LOD、SSE、三档加载队列、替换队列                         | `view-state.ts` 只估单一 zoom | 只借到了“按视图选瓦片”的外壳 |
-| Cesium `RequestScheduler`                                           | 请求优先级、服务端并发限制、可丢弃低优先级请求                | 运行时直接 `fetch`            | 关键调度能力未接入           |
-| Cesium `TileReplacementQueue`                                       | 当前帧保活 + LRU 淘汰                                         | 只有编译后 tile 进入字节 LRU  | 生命周期模型不完整           |
-| MapLibre `covering_tiles` / `tile_manager`                          | 变 zoom 覆盖、retain children / parents、query/fade 配套      | 单层覆盖 + 简化 fallback      | 语义差距明显                 |
-| MapLibre `dispatcher` / `vector_tile_worker_source` / `worker_tile` | actor 池、load/reload/abort/remove 分离                       | 单 worker + 一次性编译        | 并发与生命周期偏弱           |
-| MapLibre `style_layer_index` / `worker_tile`                        | groupByLayout 后仍保留每 layer filter / paint / feature-state | 只做了 layer family 分组      | family 语义未闭环            |
-| MapLibre `symbol_bucket` / `placement` / `pauseable_placement`      | 文本、图标、碰撞、渐进 placement                              | 完全缺失                      | 关键地图能力缺口             |
+| 维度                                                                | 上游源码思路                                                  | 当前实现                                                                                                   | 结论                                   |
+| ------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Cesium `QuadtreePrimitive`                                          | 多级 LOD、SSE、三档加载队列、替换队列                         | `view-state.ts` 只估单一 zoom                                                                              | 只借到了“按视图选瓦片”的外壳           |
+| Cesium `RequestScheduler`                                           | 请求优先级、服务端并发限制、可丢弃低优先级请求                | 默认 loader 已接入，`update()` 也会每帧执行                                                                | 主请求链路已接通，仍可继续细化队列策略 |
+| Cesium `TileReplacementQueue`                                       | 当前帧保活 + LRU 淘汰                                         | 只有编译后 tile 进入字节 LRU                                                                               | 生命周期模型不完整                     |
+| MapLibre `covering_tiles` / `tile_manager`                          | 变 zoom 覆盖、retain children / parents、query/fade 配套      | 单层覆盖 + 简化 fallback                                                                                   | 语义差距明显                           |
+| MapLibre `dispatcher` / `vector_tile_worker_source` / `worker_tile` | actor 池、load/reload/abort/remove 分离                       | 单 worker + 一次性编译                                                                                     | 并发与生命周期偏弱                     |
+| MapLibre `style_layer_index` / `worker_tile`                        | groupByLayout 后仍保留每 layer filter / paint / feature-state | 只做了 layer family 分组，但 fill / line / circle 后端已经按 layer filter / paint / feature-state 独立求值 | family 语义未闭环                      |
+| MapLibre `symbol_bucket` / `placement` / `pauseable_placement`      | 文本、图标、碰撞、渐进 placement                              | 完全缺失                                                                                                   | 关键地图能力缺口                       |
 
 ### 2. P0：当前必须先收敛的问题
 
-#### P0-1：样式语义没有真正进入编译链路
+#### P0-1：样式语义没有真正进入编译链路（已修复）
 
 现状：
 
-- `compileBucketTile()` 只按 `source-layer + geometry type` 收集 feature。
-- `feature-filter.ts`、`layer-style-resolver.ts`、`style-property-evaluator.ts`、`expression-evaluator.ts` 都没有进入运行时主链路。
-- `material-cache.ts` 只解析静态字面量 paint 值。
+- `compileBucketTile()` 现在会接收 `style`，并按 `style.layers` 把同一 geometry batch 拆成独立的 layer bucket。
+- 静态 `filter` 已前置到编译阶段；包含 `feature-state` 的动态表达式仍保留到渲染期评估，避免把动态语义提前固化。
 
 结果：
 
-- `filter`
-- 数据驱动 paint/layout
-- `feature-state`
-- 绝大多数 MapLibre layer 语义
+- bucket 编译层已经把可静态判断的样式语义前置。
+- 动态语义仍由 render backend 处理，编译和渲染的边界已经收敛。
 
-都只是“有测试模块”，不是“运行时能力”。
-
-#### P0-2：LayerFamily 只做了分组，没有保住每个 layer 的独立语义
+#### P0-2：LayerFamily 只做了分组，没有保住每个 layer 的独立语义（已修复）
 
 现状：
 
-- `fill` backend 会为 `bucket.layerIds` 中的每个 layer 建 collection。
-- `line` / `circle` backend 只取 `bucket.layerIds[0]`。
+- `fill` / `line` / `circle` backend 仍然会按 `bucket.layerIds` 为每个 layer 独立建 collection。
+- bucket 编译阶段现在也会按 layer 拆桶，并把静态 `filter` 前置到 feature 切分里。
 
 结果：
 
-- 同一个 family 内的 line/circle layer 会丢失样式、顺序和独立语义。
-- 即便是 fill，当前也没有按 layer filter 拆特征，所以多个 layer 往往会画同一批 geometry。
+- 同一个 family 内的 layer 在编译层和渲染层都能保留独立语义。
+- family 只负责几何和布局兼容分组，不再承担额外的语义折叠。
 
-#### P0-3：源数据缓存模型不成立
+#### P0-3：源数据缓存已收口到统一预算（已修复）
 
 现状：
 
-- `TileCacheManager` 只管理编译后的 `ParsedTileResult`。
-- `SourceCache` / `GeojsonSourceCache` 的 ready 数据不在统一 LRU 里。
-- `bucket-tile-dispatcher.ts` 会把 `tileData` 作为 transferable 发给 worker。
+- `TileCacheManager` 现在和 `SourceCache` / `GeojsonSourceCache` 共享同一条 ready 字节预算。
+- `SourceCache` / `GeojsonSourceCache` 已经会给调用方返回独立副本，worker transfer 不会再直接 detach 缓存本体。
+- `SourceCache` / `GeojsonSourceCache` 仍各自维护请求状态，但 ready entry 已接入共享预算。
+- `bucket-tile-dispatcher.ts` 仍然会把调用方那份 `tileData` 作为 transferable 发给 worker。
 
 结果：
 
-- 源数据缓存没有统一内存预算。
-- `ArrayBuffer` 被 transfer 后会 detach，ready cache 的复用不可靠。
-- `GeojsonSourceCache` 连 detached 检查都没有，风控更差。
+- 源数据缓存和编译结果缓存已经收口到同一条预算里。
+- 统一预算下的回收顺序、预算大小和冷热 tile 占比仍然需要继续观察和调优。
 
-#### P0-4：调度、优先级、取消机制都不完整
+#### P0-4：调度、优先级、取消机制已接通主链路，队列策略和编译中断已补齐（已修复）
 
 现状：
 
-- `request-scheduler.ts` 未接入运行时。
-- `tile-visibility.ts`、`tile-lifecycle.ts` 未接入运行时。
-- `SourceManager.abort(key)` 没有在视图更新时使用。
-- Worker cancel 只能在真正编译前生效，编译中无法中断。
+- `request-scheduler.ts` 已接入运行时默认 loader，TileJSON / GeoJSON / tile 请求都会走 `RequestScheduler`。
+- `CesiumVectorTileCoordinator.update()` 会在每帧末尾驱动 `RequestScheduler.update()`。
+- `SourceManager.requestTile()`、`SourceCache`、`GeojsonSourceCache` 都已经透传 priority / signal，pending 请求也会复用同一个可变 priorityState。
+- `TileScheduler.resolveSourceTiles()` 现在会把请求队列按视图中心优先排序；`CesiumVectorTileCoordinator.processTileSelection()` 仍然会在每帧重新回放 pending 请求，刷新同一个可变 priorityState。
+- `computeTileLifecycle()` 已经进入请求路径，用来让缓存命中的瓦片直接回到展示分支。
+- `bucket-tile-dispatcher.ts` 已接入 worker 池，空闲时可并行编译多个瓦片；编译中的任务被中止时会直接终止对应 worker 并重新补位。
 
 结果：
 
-- 离屏 tile 不会被及时取消。
-- 没有高 / 中 / 低优先级加载队列。
-- 没有按服务端并发节流。
-- 没有按距离或可见性排序请求。
+- 目前还是 `RequestScheduler` 排队 + 可变 priorityState 刷新，但请求顺序已经从纯扫描顺序收紧为中心优先。
+- 仍然没有 MapLibre 那种更细的多级加载队列。
+- 动态 priority 重算还可以继续细化，但主请求顺序已经从纯扫描收紧为中心优先。
 
-#### P0-5：错误状态会被永久“空瓦片化”
+#### P0-5：错误重试已接入统一退避和到期唤醒（已修复）
 
 现状：
 
-- `CesiumVectorTileCoordinator.requestTile()` 捕获异常后调用 `renderManager.setEmpty(key)`。
-- `tile-selection.ts` 会把这类 handle 视作 `empty`。
+- `SourceCache` / `GeojsonSourceCache` 已经记录 `failureCount` 和 `nextRetryAt`，冷却期会直接返回 `RequestThrottledError`。
+- `CesiumVectorTileCoordinator.update()` 会在当前请求集合的重试时间到点后主动唤醒 selection 重新尝试。
 
 结果：
 
-- 网络错误、worker 错误、临时异常都会在当前 style epoch 内被当成“空瓦片”。
-- 这不是 retry / backoff，而是永久跳过重试。
+- 临时网络错误不会每帧盲目重试；到点后会重新进入请求链路。
 
 ### 3. P1：高价值但次一级的问题
 
@@ -162,13 +157,13 @@
 - style update / destroy 会 `abortAll()`
 - worker dispatcher 支持 cancel message
 - pending request 会在同一 key 内去重
+- 默认 tile / TileJSON / GeoJSON 请求已经接入 `RequestScheduler`
+- coordinator 会在每帧末尾执行 `RequestScheduler.update()`
 
 #### 当前不足
 
-- 没有视图变化时的逐 tile abort
-- 没有真正接入 Cesium `RequestScheduler`
-- 没有请求优先级
-- 没有按服务器并发限制
+- 没有真正的动态 priority 重算
+- 没有按 Cesium 那种多级队列去分发请求
 - 没有 worker 池
 - 没有长任务中断
 - 没有失败重试 / 指数退避
@@ -181,7 +176,6 @@
 - collision index / cross-tile symbol id
 - `Placement` / `PauseablePlacement`
 - `queryRenderedFeatures` / `querySourceFeatures`
-- `feature-state`
 - line dash / line pattern / fill pattern
 - fill extrusion
 - background layer 实际渲染
@@ -218,13 +212,13 @@
 ### 第一阶段：把语义做正确
 
 1. 统一样式模型，决定只走一种运行时方案。
-2. 让 `filter`、数据驱动 paint、`feature-state` 真正进入 bucket 编译或渲染链路。
+2. 让 `filter`、数据驱动 paint 进一步前置到 bucket 编译链路。
 3. 修正 family 语义，至少先解决 `line` / `circle` 只吃第一个 layer 的问题。
 4. 明确 background layer 是否支持；不支持就删掉伪入口。
 
 ### 第二阶段：把请求和缓存做对
 
-1. 把源数据缓存与编译结果缓存拆成清晰的两层，并统一内存预算。
+1. 已把源数据缓存与编译结果缓存收口到统一预算，后续只需继续观察参数和边界。
 2. 修复 transferable 导致的缓存 detach 问题。
 3. 让 TileJSON 约束在参与调度前可用。
 4. 建立失败重试与退避，不再用 empty handle 吞掉错误。
@@ -232,8 +226,8 @@
 ### 第三阶段：把调度做成真正的 Cesium 风格
 
 1. 参考 `QuadtreePrimitive` 引入可排序的加载队列。
-2. 接入 `RequestScheduler` 或等价能力。
-3. 增加视图变化时的 out-of-view abort。
+2. 接入 `RequestScheduler` 或等价能力，继续补动态 priority 重算。
+3. 增加视图变化时的 out-of-view abort，并进一步统一 tile visibility / lifecycle。
 4. 从单层 zoom 走向多层 LOD / SSE。
 
 ### 第四阶段：补齐 MapLibre 的核心地图能力
@@ -247,14 +241,15 @@
 
 ### 先做
 
-- [ ] 修正 layer 语义：filter + family + line/circle 多 layer 问题
-- [ ] 修正源数据缓存：统一预算 + detached buffer 问题
-- [ ] 接入真实请求调度：优先级、取消、离屏 abort
-- [ ] 去掉“失败即 empty”模型，改成可重试失败态
+- [x] 修正 layer 语义：filter + family + line/circle 多 layer 问题
+- [x] 修正源数据缓存：统一预算 + detached buffer 问题
+- [x] 接入真实请求调度：优先级、取消、离屏 abort
+- [x] 继续补请求优先级的动态重算
+- [x] 补 worker 池与编译中断
+- [x] 去掉“失败即 empty”模型，改成可重试失败态
 
 ### 后做
 
 - [ ] 多 LOD / SSE
-- [ ] Worker 池
 - [ ] Symbol 与 query
 - [ ] pattern / extrusion

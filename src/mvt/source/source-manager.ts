@@ -1,9 +1,11 @@
-import type { SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
+import type { SourceSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { WebMercatorTilingScheme } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
 import type { RenderTile } from '../render/render-tile';
+import type { TileBudget } from '../utils/tile-budget';
 import type { TileCoordinate } from './tile-request';
 import { createBucketTileDispatcher } from '../bucket';
+import { createAbortError } from '../utils/common';
 import { GeojsonSourceCache } from './geojson-source-cache';
 import { SourceCache } from './source-cache';
 
@@ -15,11 +17,19 @@ import { SourceCache } from './source-cache';
 interface TileSourceCache {
   abortTile?: (key: string) => void;
   destroy: () => void;
+  getEntry?: (key: string) => {
+    nextRetryAt?: number;
+    state: string;
+  } | undefined;
   getMaxZoom?: () => number | undefined;
   getMinZoom?: () => number | undefined;
+  getNextRetryAt?: () => number | undefined;
   isDestroyed: () => boolean;
   readonly sourceType: SourceSpecification['type'];
-  requestTile: (coordinate: TileCoordinate) => Promise<ArrayBuffer>;
+  requestTile: (
+    coordinate: TileCoordinate,
+    priority?: number,
+  ) => Promise<ArrayBuffer>;
   updateSource: (source: SourceSpecification) => void;
 }
 
@@ -29,6 +39,7 @@ interface TileSourceCache {
 interface PendingRequest {
   abortController: AbortController;
   cleanup: () => void;
+  promise: Promise<ParsedTileResult>;
 }
 
 /**
@@ -40,7 +51,12 @@ export class SourceManager {
   private destroyed = false;
   private readonly sourceCaches = new Map<string, TileSourceCache>();
   private readonly bucketTileDispatcher = createBucketTileDispatcher();
+  private readonly readyTileBudget?: TileBudget;
   private readonly pendingRequests = new Map<string, PendingRequest>();
+
+  constructor(options: { readyTileBudget?: TileBudget } = {}) {
+    this.readyTileBudget = options.readyTileBudget;
+  }
 
   isDestroyed(): boolean {
     return this.destroyed;
@@ -65,6 +81,46 @@ export class SourceManager {
     };
   }
 
+  getNextRetryAt(sourceIdOrKeys?: string | Iterable<string>): number | undefined {
+    if (typeof sourceIdOrKeys === 'string') {
+      return this.sourceCaches.get(sourceIdOrKeys)?.getNextRetryAt?.();
+    }
+
+    if (sourceIdOrKeys) {
+      let nextRetryAt: number | undefined;
+
+      for (const renderTileKey of sourceIdOrKeys) {
+        const sourceKey = stripStyleEpoch(renderTileKey);
+        const sourceId = sourceKey.split('/')[0];
+        const cache = this.sourceCaches.get(sourceId);
+        const entry = cache?.getEntry?.(sourceKey);
+        if (!entry || entry.state !== 'failed' || entry.nextRetryAt === undefined) {
+          continue;
+        }
+
+        if (nextRetryAt === undefined || entry.nextRetryAt < nextRetryAt) {
+          nextRetryAt = entry.nextRetryAt;
+        }
+      }
+
+      return nextRetryAt;
+    }
+
+    let nextRetryAt: number | undefined;
+    for (const cache of this.sourceCaches.values()) {
+      const cacheNextRetryAt = cache.getNextRetryAt?.();
+      if (cacheNextRetryAt === undefined) {
+        continue;
+      }
+
+      if (nextRetryAt === undefined || cacheNextRetryAt < nextRetryAt) {
+        nextRetryAt = cacheNextRetryAt;
+      }
+    }
+
+    return nextRetryAt;
+  }
+
   async requestTile(
     sourceId: string,
     level: number,
@@ -73,11 +129,18 @@ export class SourceManager {
     renderTileKey: string,
     tilingScheme: WebMercatorTilingScheme,
     renderTile: RenderTile,
+    style: StyleSpecification,
     onCompile: (tile: ParsedTileResult) => void,
+    priority = 0,
   ): Promise<ParsedTileResult> {
     const sourceCache = this.sourceCaches.get(sourceId);
     if (!sourceCache) {
       throw new Error(`Source cache not found: ${sourceId}`);
+    }
+
+    const existingRequest = this.pendingRequests.get(renderTileKey);
+    if (existingRequest) {
+      return existingRequest.promise;
     }
 
     const sourceTileKey = `${sourceId}/${level}/${x}/${y}`;
@@ -88,29 +151,45 @@ export class SourceManager {
     abortController.signal.addEventListener('abort', abortSourceRequest, {
       once: true,
     });
+    const cleanup = () => {
+      abortController.signal.removeEventListener('abort', abortSourceRequest);
+    };
+
+    const requestPromise = (async () => {
+      try {
+        const tileData = await sourceCache.requestTile(
+          { level, x, y },
+          priority,
+        );
+        if (abortController.signal.aborted) {
+          throw createAbortError();
+        }
+        const bucketTile = await this.bucketTileDispatcher.compile({
+          renderTile,
+          style,
+          signal: abortController.signal,
+          tileData,
+          tilingScheme,
+        });
+        if (abortController.signal.aborted) {
+          throw createAbortError();
+        }
+        onCompile(bucketTile);
+        return bucketTile;
+      }
+      finally {
+        this.pendingRequests.get(renderTileKey)?.cleanup();
+        this.pendingRequests.delete(renderTileKey);
+      }
+    })();
 
     this.pendingRequests.set(renderTileKey, {
       abortController,
-      cleanup: () => {
-        abortController.signal.removeEventListener('abort', abortSourceRequest);
-      },
+      cleanup,
+      promise: requestPromise,
     });
 
-    try {
-      const tileData = await sourceCache.requestTile({ level, x, y });
-      const bucketTile = await this.bucketTileDispatcher.compile({
-        renderTile,
-        signal: abortController.signal,
-        tileData,
-        tilingScheme,
-      });
-      onCompile(bucketTile);
-      return bucketTile;
-    }
-    finally {
-      this.pendingRequests.get(renderTileKey)?.cleanup();
-      this.pendingRequests.delete(renderTileKey);
-    }
+    return requestPromise;
   }
 
   abort(key: string): void {
@@ -149,7 +228,11 @@ export class SourceManager {
         this.sourceCaches.delete(sourceId);
       }
 
-      const nextSourceCache = createTileSourceCache(sourceId, source);
+      const nextSourceCache = createTileSourceCache(
+        sourceId,
+        source,
+        this.readyTileBudget,
+      );
       if (nextSourceCache) {
         this.sourceCaches.set(sourceId, nextSourceCache);
       }
@@ -183,9 +266,11 @@ export class SourceManager {
 function createTileSourceCache(
   sourceId: string,
   source: SourceSpecification,
+  readyTileBudget?: TileBudget,
 ): TileSourceCache | undefined {
   if (source.type === 'vector') {
     return new SourceCache<ArrayBuffer>({
+      readyTileBudget,
       source,
       sourceId,
     });
@@ -193,10 +278,18 @@ function createTileSourceCache(
 
   if (source.type === 'geojson') {
     return new GeojsonSourceCache({
+      readyTileBudget,
       source,
       sourceId,
     });
   }
 
   return undefined;
+}
+
+function stripStyleEpoch(renderTileKey: string): string {
+  const separatorIndex = renderTileKey.indexOf(':');
+  return separatorIndex >= 0
+    ? renderTileKey.slice(separatorIndex + 1)
+    : renderTileKey;
 }

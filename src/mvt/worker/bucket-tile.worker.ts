@@ -5,38 +5,16 @@ import { compileBucketTileFromData } from '../bucket/bucket-tile-compiler';
 
 declare const self: DedicatedWorkerGlobalScope;
 
-const cancelledRequestIds = new Set<number>();
-const scheduledJobs = new Map<number, number>();
-
 self.addEventListener('message', (event: MessageEvent<BucketTileWorkerMessage>) => {
-  if (event.data.type === 'cancel-bucket-tile') {
-    cancelledRequestIds.add(event.data.id);
-    const scheduledJob = scheduledJobs.get(event.data.id);
-    if (scheduledJob !== undefined) {
-      clearTimeout(scheduledJob);
-      scheduledJobs.delete(event.data.id);
-    }
-    return;
-  }
-
   const compileMessage = event.data;
-  const timer = self.setTimeout(() => {
-    scheduledJobs.delete(compileMessage.id);
-    if (cancelledRequestIds.has(compileMessage.id)) {
-      cancelledRequestIds.delete(compileMessage.id);
-      return;
-    }
-
+  self.setTimeout(() => {
     try {
       const bucketTile = compileBucketTileFromData({
         renderTile: compileMessage.renderTile,
+        style: compileMessage.style,
         tileData: compileMessage.tileData,
         tileProjection: compileMessage.tileProjection,
       });
-      if (cancelledRequestIds.has(compileMessage.id)) {
-        cancelledRequestIds.delete(compileMessage.id);
-        return;
-      }
 
       const transferables = extractTransferables(bucketTile);
       const response: BucketTileWorkerResponse = {
@@ -47,11 +25,6 @@ self.addEventListener('message', (event: MessageEvent<BucketTileWorkerMessage>) 
       self.postMessage(response, transferables);
     }
     catch (error) {
-      if (cancelledRequestIds.has(compileMessage.id)) {
-        cancelledRequestIds.delete(compileMessage.id);
-        return;
-      }
-
       const response: BucketTileWorkerResponse = {
         error: error instanceof Error ? error.message : `${error}`,
         id: compileMessage.id,
@@ -60,15 +33,6 @@ self.addEventListener('message', (event: MessageEvent<BucketTileWorkerMessage>) 
       self.postMessage(response);
     }
   }, 0);
-  scheduledJobs.set(compileMessage.id, timer);
-});
-
-self.addEventListener('close', () => {
-  for (const timer of scheduledJobs.values()) {
-    clearTimeout(timer);
-  }
-  scheduledJobs.clear();
-  cancelledRequestIds.clear();
 });
 
 function extractTransferables(bucketTile: any): Transferable[] {

@@ -4,47 +4,78 @@ import type {
   LineLayerSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
+import type { StylePropertyContext } from '../../style/style-property-evaluator';
 import {
   BufferPointMaterial,
   BufferPolygonMaterial,
   BufferPolylineMaterial,
   Color,
 } from 'cesium';
+import {
+  createCircleLayerStyleResolver,
+  createFillLayerStyleResolver,
+  createLineLayerStyleResolver,
+} from '../../style/layer-style-resolver';
 
 const DEFAULT_CIRCLE_COLOR = Color.BLACK;
-const DEFAULT_CIRCLE_RADIUS = 5;
 const DEFAULT_FILL_COLOR = Color.BLACK;
 const DEFAULT_LINE_COLOR = Color.BLACK;
-const DEFAULT_LINE_WIDTH = 1;
 
-const circleMaterialCache = new WeakMap<
+type LayerStyleResolver<TResolved> = (context: StylePropertyContext) => TResolved;
+type CircleLayerStyleResolver = ReturnType<typeof createCircleLayerStyleResolver>;
+type LineLayerStyleResolver = ReturnType<typeof createLineLayerStyleResolver>;
+type FillLayerStyleResolver = ReturnType<typeof createFillLayerStyleResolver>;
+
+const EMPTY_STYLE_CONTEXT: StylePropertyContext = {
+  properties: {},
+  zoom: 0,
+};
+
+const circleResolvers = new WeakMap<
   StyleSpecification,
-  WeakMap<CircleLayerSpecification, BufferPointMaterial>
+  WeakMap<CircleLayerSpecification, CircleLayerStyleResolver>
 >();
-const lineMaterialCache = new WeakMap<
+const circleMaterials = new WeakMap<
   StyleSpecification,
-  WeakMap<LineLayerSpecification, BufferPolylineMaterial>
+  WeakMap<CircleLayerSpecification, Map<string, BufferPointMaterial>>
 >();
-const fillMaterialCache = new WeakMap<
+
+const lineResolvers = new WeakMap<
   StyleSpecification,
-  WeakMap<FillLayerSpecification, BufferPolygonMaterial>
+  WeakMap<LineLayerSpecification, LineLayerStyleResolver>
+>();
+const lineMaterials = new WeakMap<
+  StyleSpecification,
+  WeakMap<LineLayerSpecification, Map<string, BufferPolylineMaterial>>
+>();
+
+const fillResolvers = new WeakMap<
+  StyleSpecification,
+  WeakMap<FillLayerSpecification, FillLayerStyleResolver>
+>();
+const fillMaterials = new WeakMap<
+  StyleSpecification,
+  WeakMap<FillLayerSpecification, Map<string, BufferPolygonMaterial>>
 >();
 
 export function getCircleMaterial(
   style: StyleSpecification,
   layer: CircleLayerSpecification,
+  context: StylePropertyContext = EMPTY_STYLE_CONTEXT,
 ): BufferPointMaterial {
-  return getOrCreateStyleScopedMaterial(
-    circleMaterialCache,
+  return getResolvedMaterial(
+    circleResolvers,
+    circleMaterials,
     style,
     layer,
-    () => {
-      const color = resolveCircleColor(layer);
-      const radius = resolveCircleRadius(layer);
+    context,
+    () => createCircleLayerStyleResolver(layer),
+    (resolvedStyle) => {
+      const color = toColor(resolvedStyle.color, resolvedStyle.opacity, DEFAULT_CIRCLE_COLOR);
       return new BufferPointMaterial({
         color,
         // circle-radius 表示半径，而 BufferPoint 的 size 语义是完整点精灵尺寸。
-        size: radius * 2,
+        size: resolvedStyle.radius * 2,
       });
     },
   );
@@ -53,14 +84,18 @@ export function getCircleMaterial(
 export function getLineMaterial(
   style: StyleSpecification,
   layer: LineLayerSpecification,
+  context: StylePropertyContext = EMPTY_STYLE_CONTEXT,
 ): BufferPolylineMaterial {
-  return getOrCreateStyleScopedMaterial(
-    lineMaterialCache,
+  return getResolvedMaterial(
+    lineResolvers,
+    lineMaterials,
     style,
     layer,
-    () => new BufferPolylineMaterial({
-      color: resolveLineColor(layer),
-      width: resolveLineWidth(layer),
+    context,
+    () => createLineLayerStyleResolver(layer),
+    resolvedStyle => new BufferPolylineMaterial({
+      color: toColor(resolvedStyle.color, resolvedStyle.opacity, DEFAULT_LINE_COLOR),
+      width: resolvedStyle.width,
     }),
   );
 }
@@ -68,129 +103,112 @@ export function getLineMaterial(
 export function getFillMaterial(
   style: StyleSpecification,
   layer: FillLayerSpecification,
+  context: StylePropertyContext = EMPTY_STYLE_CONTEXT,
 ): BufferPolygonMaterial {
-  return getOrCreateStyleScopedMaterial(
-    fillMaterialCache,
+  return getResolvedMaterial(
+    fillResolvers,
+    fillMaterials,
     style,
     layer,
-    () => {
-      const paint = layer.paint ?? {};
-      const fillOpacity = resolveNumberPaintValue(paint['fill-opacity'], 1);
-      const hasOutlineColor = typeof paint['fill-outline-color'] === 'string';
+    context,
+    () => createFillLayerStyleResolver(layer),
+    (resolvedStyle) => {
+      const color = toColor(resolvedStyle.color, resolvedStyle.opacity, DEFAULT_FILL_COLOR);
+      const outlineColor = resolvedStyle.outlineColor
+        ? toColor(resolvedStyle.outlineColor, resolvedStyle.opacity, DEFAULT_FILL_COLOR)
+        : Color.clone(DEFAULT_FILL_COLOR);
 
       return new BufferPolygonMaterial({
-        color: applyOpacity(
-          resolveColorPaintValue(
-            paint['fill-color'],
-            DEFAULT_FILL_COLOR,
-          ),
-          fillOpacity,
-        ),
-        outlineColor: applyOpacity(
-          resolveColorPaintValue(
-            paint['fill-outline-color'],
-            DEFAULT_FILL_COLOR,
-          ),
-          fillOpacity,
-        ),
-        outlineWidth: hasOutlineColor ? 1 : 0,
+        color,
+        outlineColor,
+        outlineWidth: resolvedStyle.outlineColor ? 1 : 0,
       });
     },
   );
 }
 
-function getOrCreateStyleScopedMaterial<TLayer extends object, TMaterial>(
-  cacheByStyle: WeakMap<StyleSpecification, WeakMap<TLayer, TMaterial>>,
+function getResolvedMaterial<TLayer extends object, TResolved, TMaterial>(
+  resolverCacheByStyle: WeakMap<StyleSpecification, WeakMap<TLayer, LayerStyleResolver<TResolved>>>,
+  materialCacheByStyle: WeakMap<StyleSpecification, WeakMap<TLayer, Map<string, TMaterial>>>,
   style: StyleSpecification,
   layer: TLayer,
-  factory: () => TMaterial,
+  context: StylePropertyContext,
+  createResolver: () => LayerStyleResolver<TResolved>,
+  createMaterial: (resolved: TResolved) => TMaterial,
 ): TMaterial {
-  let cacheByLayer = cacheByStyle.get(style);
-  if (!cacheByLayer) {
-    cacheByLayer = new WeakMap<TLayer, TMaterial>();
-    cacheByStyle.set(style, cacheByLayer);
-  }
+  const resolver = getOrCreateResolver(
+    resolverCacheByStyle,
+    style,
+    layer,
+    createResolver,
+  );
+  const resolved = resolver(context);
+  const materialKey = JSON.stringify(resolved);
 
-  const cachedMaterial = cacheByLayer.get(layer);
+  const cacheByLayer = getOrCreateLayerMaterialCache(
+    materialCacheByStyle,
+    style,
+    layer,
+  );
+
+  const cachedMaterial = cacheByLayer.get(materialKey);
   if (cachedMaterial) {
     return cachedMaterial;
   }
 
-  const material = factory();
-  cacheByLayer.set(layer, material);
+  const material = createMaterial(resolved);
+  cacheByLayer.set(materialKey, material);
   return material;
 }
 
-function resolveCircleColor(layer: CircleLayerSpecification): Color {
-  const paint = layer.paint;
-  if (!paint || !('circle-color' in paint)) {
-    return DEFAULT_CIRCLE_COLOR;
+function getOrCreateResolver<TLayer extends object, TResolved>(
+  resolverCacheByStyle: WeakMap<StyleSpecification, WeakMap<TLayer, LayerStyleResolver<TResolved>>>,
+  style: StyleSpecification,
+  layer: TLayer,
+  createResolver: () => LayerStyleResolver<TResolved>,
+): LayerStyleResolver<TResolved> {
+  let cacheByLayer = resolverCacheByStyle.get(style);
+  if (!cacheByLayer) {
+    cacheByLayer = new WeakMap<TLayer, LayerStyleResolver<TResolved>>();
+    resolverCacheByStyle.set(style, cacheByLayer);
   }
 
-  const colorSpec = paint['circle-color'];
-  if (typeof colorSpec === 'string') {
-    return Color.fromCssColorString(colorSpec) ?? DEFAULT_CIRCLE_COLOR;
+  const cachedResolver = cacheByLayer.get(layer);
+  if (cachedResolver) {
+    return cachedResolver;
   }
 
-  return DEFAULT_CIRCLE_COLOR;
+  const resolver = createResolver();
+  cacheByLayer.set(layer, resolver);
+  return resolver;
 }
 
-function resolveCircleRadius(layer: CircleLayerSpecification): number {
-  const paint = layer.paint;
-  if (!paint || !('circle-radius' in paint)) {
-    return DEFAULT_CIRCLE_RADIUS;
+function getOrCreateLayerMaterialCache<TLayer extends object, TMaterial>(
+  materialCacheByStyle: WeakMap<StyleSpecification, WeakMap<TLayer, Map<string, TMaterial>>>,
+  style: StyleSpecification,
+  layer: TLayer,
+): Map<string, TMaterial> {
+  let cacheByLayer = materialCacheByStyle.get(style);
+  if (!cacheByLayer) {
+    cacheByLayer = new WeakMap<TLayer, Map<string, TMaterial>>();
+    materialCacheByStyle.set(style, cacheByLayer);
   }
 
-  const radiusSpec = paint['circle-radius'];
-  if (typeof radiusSpec === 'number') {
-    return radiusSpec;
+  let cache = cacheByLayer.get(layer);
+  if (!cache) {
+    cache = new Map<string, TMaterial>();
+    cacheByLayer.set(layer, cache);
   }
 
-  return DEFAULT_CIRCLE_RADIUS;
+  return cache;
 }
 
-function resolveLineColor(layer: LineLayerSpecification): Color {
-  const paint = layer.paint;
-  if (!paint || !('line-color' in paint)) {
-    return DEFAULT_LINE_COLOR;
-  }
-
-  const colorSpec = paint['line-color'];
-  if (typeof colorSpec === 'string') {
-    return Color.fromCssColorString(colorSpec) ?? DEFAULT_LINE_COLOR;
-  }
-
-  return DEFAULT_LINE_COLOR;
-}
-
-function resolveLineWidth(layer: LineLayerSpecification): number {
-  const paint = layer.paint;
-  if (!paint || !('line-width' in paint)) {
-    return DEFAULT_LINE_WIDTH;
-  }
-
-  const widthSpec = paint['line-width'];
-  if (typeof widthSpec === 'number') {
-    return widthSpec;
-  }
-
-  return DEFAULT_LINE_WIDTH;
-}
-
-function resolveColorPaintValue(value: unknown, fallback: Color) {
-  if (typeof value !== 'string') {
-    return Color.clone(fallback);
-  }
-
-  return Color.fromCssColorString(value) ?? Color.clone(fallback);
-}
-
-function resolveNumberPaintValue(value: unknown, fallback: number) {
-  return typeof value === 'number' ? value : fallback;
-}
-
-function applyOpacity(color: Color, opacity: number) {
-  const resolvedColor = Color.clone(color);
+function toColor(
+  color: string,
+  opacity: number,
+  fallback: Color,
+): Color {
+  const resolvedColor = Color.fromCssColorString(color) ?? Color.clone(fallback);
   resolvedColor.alpha *= clampOpacity(opacity);
   return resolvedColor;
 }

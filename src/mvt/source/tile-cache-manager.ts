@@ -1,5 +1,5 @@
 import type { ParsedTileResult } from '../bucket';
-import { TileCache } from '../utils/tile-cache';
+import { TileBudget } from '../utils/tile-budget';
 
 const DEFAULT_CACHE_SIZE = 256 * 1024 * 1024;
 
@@ -11,14 +11,24 @@ export interface TileCacheEntry {
 
 export type OnEvictCallback = (key: string, tile: ParsedTileResult) => void;
 
+export interface TileCacheManagerOptions {
+  maxBytes?: number;
+  readyTileBudget?: TileBudget;
+}
+
 export class TileCacheManager {
-  private readonly bucketTileCache: TileCache;
+  private readonly bucketTileBudget: TileBudget;
   private readonly bucketTiles = new Map<string, ParsedTileResult>();
   private readonly pendingRequests = new Map<string, Promise<ParsedTileResult>>();
   private onEvict?: OnEvictCallback;
 
-  constructor(maxBytes: number = DEFAULT_CACHE_SIZE) {
-    this.bucketTileCache = new TileCache({ maxBytes });
+  constructor(options: number | TileCacheManagerOptions = DEFAULT_CACHE_SIZE) {
+    const maxBytes = typeof options === 'number'
+      ? options
+      : options.maxBytes ?? DEFAULT_CACHE_SIZE;
+    this.bucketTileBudget = typeof options === 'number'
+      ? new TileBudget({ maxBytes })
+      : options.readyTileBudget ?? new TileBudget({ maxBytes });
   }
 
   setOnEvict(callback: OnEvictCallback): void {
@@ -28,7 +38,7 @@ export class TileCacheManager {
   get(key: string): ParsedTileResult | undefined {
     const cached = this.bucketTiles.get(key);
     if (cached) {
-      this.bucketTileCache.touch(key);
+      this.bucketTileBudget.touch(key);
     }
     return cached;
   }
@@ -38,25 +48,24 @@ export class TileCacheManager {
   }
 
   set(key: string, tile: ParsedTileResult): void {
-    const evictedEntries = this.bucketTileCache.add(key, {
+    this.bucketTiles.set(key, tile);
+    this.bucketTileBudget.add(key, {
       key,
       byteLength: tile.byteLength,
-    });
-
-    this.bucketTiles.set(key, tile);
-
-    for (const evicted of evictedEntries) {
-      const evictedTile = this.bucketTiles.get(evicted.key);
-      if (evictedTile) {
-        this.bucketTiles.delete(evicted.key);
-        try {
-          this.onEvict?.(evicted.key, evictedTile);
-        }
-        catch (err) {
-          console.warn('[TileCacheManager] onEvict callback failed:', err);
-        }
+    }, (evictedKey) => {
+      const evictedTile = this.bucketTiles.get(evictedKey);
+      if (!evictedTile) {
+        return;
       }
-    }
+
+      this.bucketTiles.delete(evictedKey);
+      try {
+        this.onEvict?.(evictedKey, evictedTile);
+      }
+      catch (err) {
+        console.warn('[TileCacheManager] onEvict callback failed:', err);
+      }
+    });
   }
 
   setPending(key: string, promise: Promise<ParsedTileResult>): void {
@@ -90,8 +99,11 @@ export class TileCacheManager {
         }
       }
     }
+
+    for (const key of Array.from(this.bucketTiles.keys())) {
+      this.bucketTileBudget.delete(key);
+    }
     this.bucketTiles.clear();
-    this.bucketTileCache.clear();
     this.pendingRequests.clear();
   }
 

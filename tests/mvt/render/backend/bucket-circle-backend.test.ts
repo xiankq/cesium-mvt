@@ -1,3 +1,4 @@
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
 import {
   createMockCircleBucketTile,
@@ -43,6 +44,150 @@ describe('bucket-circle-backend', () => {
         expect(handle?.collections).toBeDefined();
         expect(handle?.collections.length).toBeGreaterThan(0);
         expect(handle?.byteLength).toBeGreaterThan(0);
+      });
+
+      it('应该按 filter 和数据驱动样式分别渲染同一 family 的要素', async () => {
+        const { BufferPoint, BufferPointMaterial } = await import('cesium');
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
+
+        const bucketTile = createMockCircleBucketTile({
+          featureCount: 2,
+          layerId: 'poi-base',
+        });
+        const bucket = bucketTile.buckets[0]!;
+        bucket.layerIds = ['poi-base', 'poi-highlight'];
+        bucket.featureIndex.entries[0]!.properties = {
+          color: '#112233',
+          kind: 'base',
+          radius: 3,
+        };
+        bucket.featureIndex.entries[1]!.properties = {
+          color: '#445566',
+          kind: 'highlight',
+          radius: 7,
+        };
+
+        const style = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'filter': ['==', ['get', 'kind'], 'base'],
+              'id': 'poi-base',
+              'paint': {
+                'circle-color': ['get', 'color'],
+                'circle-radius': ['get', 'radius'],
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'circle' as const,
+            },
+            {
+              'filter': ['==', ['get', 'kind'], 'highlight'],
+              'id': 'poi-highlight',
+              'paint': {
+                'circle-color': ['get', 'color'],
+                'circle-radius': ['get', 'radius'],
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'circle' as const,
+            },
+          ],
+        } as StyleSpecification;
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toHaveLength(2);
+
+        const baseCollection = handle!.collections.find(collection => collection.layerId === 'poi-base');
+        const highlightCollection = handle!.collections.find(collection => collection.layerId === 'poi-highlight');
+        expect(baseCollection).toBeDefined();
+        expect(highlightCollection).toBeDefined();
+        expect(baseCollection?.collection.primitiveCount).toBe(1);
+        expect(highlightCollection?.collection.primitiveCount).toBe(1);
+
+        const point = new BufferPoint();
+        const material = new BufferPointMaterial();
+
+        baseCollection!.collection.get(0, point);
+        const baseMaterial = point.getMaterial(material) as unknown as {
+          color: {
+            alpha: number;
+            blue: number;
+            green: number;
+            red: number;
+          };
+          size: number;
+        };
+        expect(baseMaterial.color.red).toBeCloseTo(0x11 / 255, 4);
+        expect(baseMaterial.color.green).toBeCloseTo(0x22 / 255, 4);
+        expect(baseMaterial.color.blue).toBeCloseTo(0x33 / 255, 4);
+        expect(baseMaterial.size).toBe(6);
+
+        highlightCollection!.collection.get(0, point);
+        const highlightMaterial = point.getMaterial(material) as unknown as {
+          color: {
+            alpha: number;
+            blue: number;
+            green: number;
+            red: number;
+          };
+          size: number;
+        };
+        expect(highlightMaterial.color.red).toBeCloseTo(0x44 / 255, 4);
+        expect(highlightMaterial.color.green).toBeCloseTo(0x55 / 255, 4);
+        expect(highlightMaterial.color.blue).toBeCloseTo(0x66 / 255, 4);
+        expect(highlightMaterial.size).toBe(14);
+      });
+
+      it('应该为同一circle bucket的多个layerId分别创建collection', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
+
+        const bucketTile = createMockCircleBucketTile({ layerId: 'poi-base' });
+        bucketTile.buckets[0]!.layerIds = ['poi-base', 'poi-highlight'];
+        const style: StyleSpecification = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'id': 'poi-base',
+              'type': 'circle' as const,
+              'source': 'source',
+              'source-layer': 'layer',
+              'paint': {
+                'circle-color': '#0000ff',
+              },
+            },
+            {
+              'id': 'poi-highlight',
+              'type': 'circle' as const,
+              'source': 'source',
+              'source-layer': 'layer',
+              'paint': {
+                'circle-color': '#ff00ff',
+              },
+            },
+          ],
+        };
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toHaveLength(2);
+        expect(handle?.collections.map(collection => collection.layerId)).toEqual([
+          'poi-base',
+          'poi-highlight',
+        ]);
       });
 
       it('应该处理bucket中的多个要素', async () => {

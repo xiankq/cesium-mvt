@@ -29,6 +29,7 @@ import { Color as CesiumColor } from 'cesium';
 export interface ExpressionContext {
   geometryType?: string;
   id?: number | string;
+  featureState?: Record<string, unknown>;
   properties: Record<string, unknown>;
   zoom?: number;
 }
@@ -78,6 +79,8 @@ export function evaluateExpression(
       return context.properties;
     case 'zoom':
       return context.zoom;
+    case 'feature-state':
+      return evaluateFeatureState(args, context);
 
     case '+':
       return evaluateAdd(args, context);
@@ -242,6 +245,15 @@ function getStringArg(value: unknown): string {
 function evaluateGet(args: unknown[], context: ExpressionContext): unknown {
   const propertyName = getStringArg(args[0]);
   return context.properties[propertyName];
+}
+
+function evaluateFeatureState(args: unknown[], context: ExpressionContext): unknown {
+  if (args.length === 0) {
+    return undefined;
+  }
+
+  const propertyName = getStringArg(evaluateExpression(args[0], context));
+  return context.featureState?.[propertyName];
 }
 
 /**

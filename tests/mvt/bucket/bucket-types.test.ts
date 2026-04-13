@@ -19,7 +19,7 @@ describe('bucket-types', () => {
 
       const byteLength = calculateBucketByteLength(stats);
 
-      expect(byteLength).toBe(100 * 3 * 8 + 50 * 3 * 4 + 5 * 4 + 100 * 4);
+      expect(byteLength).toBe(100 * 3 * 8 + 50 * 3 * 4 + 5 * 4 + 100 * 4 + 10 * 4 * 3);
     });
 
     it('should calculate byte length for line bucket stats', () => {
@@ -52,8 +52,12 @@ describe('bucket-types', () => {
 
   describe('calculateFeatureIndexByteLength', () => {
     it('should calculate byte length for feature index', () => {
-      const entryCount = 10;
-      const byteLength = calculateFeatureIndexByteLength(entryCount);
+      const entries = Array.from({ length: 10 }, (_, index) => ({
+        id: index,
+        properties: {},
+        type: 'line' as const,
+      }));
+      const byteLength = calculateFeatureIndexByteLength(entries);
 
       expect(byteLength).toBe(10 * 200);
     });

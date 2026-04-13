@@ -1,8 +1,11 @@
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { TileProjectionData } from '../geometry/tile-projection';
 import type { GeometryBatch, RenderTile } from '../render/render-tile';
 import type { ParsedTile } from '../source/vector-tile';
 import type { ParsedTileResult } from './bucket-types';
 import { getSourceLayer, parseVectorTile } from '../source/vector-tile';
+import { createFeatureFilter } from '../style/feature-filter';
+import { isSupportedGeometryLayer } from '../style/layer-family';
 import { CircleBucketBuilder } from './circle-bucket-builder';
 import { FillBucketBuilder } from './fill-bucket-builder';
 import { LineBucketBuilder } from './line-bucket-builder';
@@ -25,6 +28,7 @@ import { LineBucketBuilder } from './line-bucket-builder';
  */
 export interface CompileBucketTileOptions {
   renderTile: RenderTile;
+  style: StyleSpecification;
   tile: ParsedTile;
   tileProjection: TileProjectionData;
 }
@@ -34,6 +38,7 @@ export interface CompileBucketTileOptions {
  */
 export interface CompileBucketTileFromDataOptions {
   renderTile: RenderTile;
+  style: StyleSpecification;
   tileData: ArrayBuffer;
   tileProjection: TileProjectionData;
 }
@@ -49,6 +54,7 @@ export function compileBucketTileFromData(
 ): ParsedTileResult {
   return compileBucketTile({
     renderTile: options.renderTile,
+    style: options.style,
     tile: parseVectorTile(options.tileData),
     tileProjection: options.tileProjection,
   });
@@ -65,16 +71,24 @@ export function compileBucketTileFromData(
 export function compileBucketTile(
   options: CompileBucketTileOptions,
 ): ParsedTileResult {
-  const { renderTile, tile, tileProjection } = options;
+  const { renderTile, style, tile, tileProjection } = options;
 
   const zoom = parseZoomFromTileKey(renderTile.key);
+  const layersById = new Map(style.layers.map(layer => [layer.id, layer]));
 
   const buckets: ParsedTileResult['buckets'] = [];
   let totalByteLength = 0;
 
   for (const batch of renderTile.geometryBatches) {
-    const bucket = compileGeometryBatch(batch, tile, tileProjection, renderTile.key, zoom);
-    if (bucket) {
+    const batchBuckets = compileGeometryBatch(
+      batch,
+      tile,
+      tileProjection,
+      renderTile.key,
+      zoom,
+      layersById,
+    );
+    for (const bucket of batchBuckets) {
       buckets.push(bucket);
       totalByteLength += bucket.stats.byteLength;
     }
@@ -106,27 +120,80 @@ function compileGeometryBatch(
   tileProjection: TileProjectionData,
   tileKey: string,
   zoom: number,
-) {
+  layersById: ReadonlyMap<string, StyleSpecification['layers'][number]>,
+): ParsedTileResult['buckets'] {
   if (!batch.sourceLayer) {
-    return undefined;
+    return [];
   }
 
   const sourceLayer = getSourceLayer(tile, batch.sourceLayer);
   if (!sourceLayer) {
-    return undefined;
+    return [];
   }
 
-  const builder = createBucketBuilder(batch, sourceLayer.extent, tileProjection, tileKey, zoom);
-  if (!builder) {
-    return undefined;
+  const layerEntries = batch.layerIds.flatMap((layerId) => {
+    const layer = layersById.get(layerId);
+    if (!layer || !isSupportedGeometryLayer(layer) || layer.type !== batch.type) {
+      return [];
+    }
+
+    const builder = createBucketBuilder(
+      batch,
+      sourceLayer.extent,
+      tileProjection,
+      tileKey,
+      zoom,
+      layer.id,
+    );
+    if (!builder) {
+      return [];
+    }
+
+    return [{
+      builder,
+      filter: createFeatureFilter(layer.filter),
+      shouldFrontloadFilter: !containsFeatureStateExpression(layer.filter),
+    }];
+  });
+
+  if (layerEntries.length === 0) {
+    return [];
   }
 
+  const buckets: ParsedTileResult['buckets'] = [];
   for (let index = 0; index < sourceLayer.length; index += 1) {
     const feature = sourceLayer.feature(index);
-    builder.addFeature(feature, index);
+    const featureType = getFeatureType(feature.type);
+    if (!featureType || !matchesBatchType(batch.type, featureType)) {
+      continue;
+    }
+
+    const context = {
+      geometryType: featureType,
+      id: feature.id,
+      properties: feature.properties as Record<string, unknown>,
+      zoom,
+    };
+
+    for (const entry of layerEntries) {
+      if (entry.shouldFrontloadFilter && !entry.filter(context)) {
+        continue;
+      }
+
+      entry.builder.addFeature(feature, index);
+    }
   }
 
-  return builder.build();
+  for (const entry of layerEntries) {
+    const bucket = entry.builder.build();
+    if (bucket.stats.featureCount === 0) {
+      continue;
+    }
+
+    buckets.push(bucket);
+  }
+
+  return buckets;
 }
 
 /**
@@ -147,11 +214,12 @@ function createBucketBuilder(
   tileProjection: TileProjectionData,
   tileKey: string,
   zoom: number,
+  layerId: string,
 ) {
   const options = {
     extent,
     familyId: batch.familyId,
-    layerIds: batch.layerIds,
+    layerIds: [layerId],
     sourceLayer: batch.sourceLayer,
     tileProjection,
     tileKey,
@@ -168,6 +236,45 @@ function createBucketBuilder(
     default:
       return undefined;
   }
+}
+
+function getFeatureType(type: 0 | 1 | 2 | 3) {
+  switch (type) {
+    case 1:
+      return 'point';
+    case 2:
+      return 'line';
+    case 3:
+      return 'polygon';
+    default:
+      return undefined;
+  }
+}
+
+function matchesBatchType(
+  batchType: GeometryBatch['type'],
+  featureType: ReturnType<typeof getFeatureType>,
+) {
+  return (batchType === 'circle' && featureType === 'point')
+    || (batchType === 'line' && featureType === 'line')
+    || (batchType === 'fill' && featureType === 'polygon');
+}
+
+function containsFeatureStateExpression(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    if (value[0] === 'feature-state') {
+      return true;
+    }
+
+    return value.some(entry => containsFeatureStateExpression(entry));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>)
+      .some(entry => containsFeatureStateExpression(entry));
+  }
+
+  return false;
 }
 
 /**

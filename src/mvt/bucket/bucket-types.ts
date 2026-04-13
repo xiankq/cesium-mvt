@@ -79,6 +79,9 @@ export interface FillBucketData {
   triangles: Uint32Array;
   holes: Uint32Array;
   featureIds: Float32Array;
+  polygonHoleCounts?: Uint32Array;
+  polygonTriangleCounts?: Uint32Array;
+  polygonVertexCounts?: Uint32Array;
 }
 
 /**
@@ -168,7 +171,8 @@ export function calculateBucketByteLength(stats: GeometryBucketStats): number {
       return stats.vertexCount * 3 * 8
         + stats.triangleCount * 3 * 4
         + stats.holeCount * 4
-        + stats.vertexCount * 4;
+        + stats.vertexCount * 4
+        + stats.polygonCount * 4 * 3;
     case 'line':
       return stats.totalVertexCount * 3 * 8
         + stats.polylineCount * 4
@@ -188,11 +192,21 @@ export function calculateBucketByteLength(stats: GeometryBucketStats): number {
  *   - properties: Record<string, unknown> (变长，平均约150 bytes)
  *   - type: 'point' | 'line' | 'polygon' (约10 bytes)
  * - 总计约170 bytes，预留30 bytes用于序列化开销
- * - 最终估算值：200 bytes per entry
+ * - 最终估值：200 bytes per entry
  *
- * @param entryCount - 条目数量
+ * 这里按真实存在的条目数计算，而不是按数组长度计算，
+ * 这样 sparse featureIndex 也不会被错误放大。
+ *
+ * @param entries - FeatureIndex 条目数组
  * @returns 字节长度估算值
  */
-export function calculateFeatureIndexByteLength(entryCount: number): number {
+export function calculateFeatureIndexByteLength(
+  entries: ReadonlyArray<FeatureIndexEntry | undefined>,
+): number {
+  const entryCount = entries.reduce(
+    (count, entry) => count + (entry ? 1 : 0),
+    0,
+  );
+
   return entryCount * 200;
 }

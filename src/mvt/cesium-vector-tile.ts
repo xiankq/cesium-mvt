@@ -1,4 +1,5 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
+import type { FeatureStateTarget } from './style/feature-state-store';
 import type { StyleSet } from './style/style-loader';
 import { BoundingSphere, Event, PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
 import { CesiumVectorTileCoordinator } from './cesium-vector-tile-coordinator';
@@ -132,6 +133,17 @@ export class CesiumVectorTile extends PrimitiveCollection {
     }
 
     this.coordinator.updateStyle(style);
+  }
+
+  setFeatureState(
+    target: FeatureStateTarget,
+    state: Record<string, unknown>,
+  ): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.coordinator.setFeatureState(target, state);
   }
 
   getStyle(): StyleSpecification | undefined {

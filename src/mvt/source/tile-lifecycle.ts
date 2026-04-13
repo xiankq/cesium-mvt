@@ -1,5 +1,6 @@
 import type { TileCoordinate } from './tile-request';
 import type { SourceConstraints } from './tile-visibility';
+import { shouldRenderTile, shouldRequestTile } from './tile-visibility';
 
 export interface TileLifecycleOptions {
   coordinate: TileCoordinate;
@@ -24,6 +25,13 @@ export function computeTileLifecycle(
 
   const { maxZoom, minZoom } = sourceConstraints;
 
+  if (!isVisible) {
+    if (isCached) {
+      return 'hide';
+    }
+    return 'skip';
+  }
+
   if (minZoom !== undefined && coordinate.level < minZoom) {
     return 'skip';
   }
@@ -32,20 +40,26 @@ export function computeTileLifecycle(
     return 'skip';
   }
 
-  if (!isVisible) {
-    if (isCached) {
-      return 'hide';
-    }
-    return 'skip';
-  }
-
   if (isCached) {
-    return 'show';
+    return shouldRenderTile({
+      coordinate,
+      hasData: true,
+      sourceConstraints,
+    })
+      ? 'show'
+      : 'skip';
   }
 
   if (isPending) {
     return 'wait';
   }
 
-  return 'request';
+  return shouldRequestTile({
+    coordinate,
+    isCached,
+    isPending,
+    sourceConstraints,
+  })
+    ? 'request'
+    : 'skip';
 }

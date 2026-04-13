@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createMockStyle } from '../../helpers/style-helpers';
 
 describe('bucket-tile-dispatcher', () => {
   describe('createBucketTileDispatcher', () => {
@@ -72,6 +73,153 @@ describe('bucket-tile-dispatcher', () => {
       const result = await compilePromise;
       expect(result).toBeDefined();
       expect(result.key).toBe(job.renderTile.key);
+    });
+
+    it('should use multiple workers when the pool has capacity', async () => {
+      const { createBucketTileDispatcher } = await import('@/mvt/bucket');
+
+      const worker1 = createMockWorker();
+      const worker2 = createMockWorker();
+      const dispatcher = createBucketTileDispatcher({
+        workerFactory: createSequentialWorkerFactory([worker1, worker2]),
+      });
+
+      const firstJob = createMockJob({
+        renderTile: {
+          ...createMockJobBase().renderTile,
+          key: 'source/0/0/0',
+        },
+      });
+      const secondJob = createMockJob({
+        renderTile: {
+          ...createMockJobBase().renderTile,
+          key: 'source/0/0/1',
+        },
+      });
+
+      const firstPromise = dispatcher.compile(firstJob);
+      const secondPromise = dispatcher.compile(secondJob);
+
+      expect(worker1.postMessage).toHaveBeenCalledTimes(1);
+      expect(worker2.postMessage).toHaveBeenCalledTimes(1);
+
+      const firstMessage = worker1.postMessage.mock.calls[0][0];
+      const secondMessage = worker2.postMessage.mock.calls[0][0];
+
+      worker1.simulateMessage({
+        bucketTile: {
+          buckets: [],
+          byteLength: 0,
+          epoch: 1,
+          key: firstJob.renderTile.key,
+        },
+        id: firstMessage.id,
+        type: 'bucket-tile-result',
+      });
+      worker2.simulateMessage({
+        bucketTile: {
+          buckets: [],
+          byteLength: 0,
+          epoch: 1,
+          key: secondJob.renderTile.key,
+        },
+        id: secondMessage.id,
+        type: 'bucket-tile-result',
+      });
+
+      await expect(firstPromise).resolves.toMatchObject({
+        key: firstJob.renderTile.key,
+      });
+      await expect(secondPromise).resolves.toMatchObject({
+        key: secondJob.renderTile.key,
+      });
+
+      dispatcher.destroy();
+    });
+
+    it('should queue excess jobs until a worker becomes available', async () => {
+      const { createBucketTileDispatcher } = await import('@/mvt/bucket');
+
+      const worker1 = createMockWorker();
+      const worker2 = createMockWorker();
+      const dispatcher = createBucketTileDispatcher({
+        workerFactory: createSequentialWorkerFactory([worker1, worker2]),
+      });
+
+      const firstJob = createMockJob({
+        renderTile: {
+          ...createMockJobBase().renderTile,
+          key: 'source/0/0/0',
+        },
+      });
+      const secondJob = createMockJob({
+        renderTile: {
+          ...createMockJobBase().renderTile,
+          key: 'source/0/0/1',
+        },
+      });
+      const thirdJob = createMockJob({
+        renderTile: {
+          ...createMockJobBase().renderTile,
+          key: 'source/0/0/2',
+        },
+      });
+
+      const firstPromise = dispatcher.compile(firstJob);
+      const secondPromise = dispatcher.compile(secondJob);
+      const thirdPromise = dispatcher.compile(thirdJob);
+
+      expect(worker1.postMessage).toHaveBeenCalledTimes(1);
+      expect(worker2.postMessage).toHaveBeenCalledTimes(1);
+
+      const firstMessage = worker1.postMessage.mock.calls[0][0];
+      worker1.simulateMessage({
+        bucketTile: {
+          buckets: [],
+          byteLength: 0,
+          epoch: 1,
+          key: firstJob.renderTile.key,
+        },
+        id: firstMessage.id,
+        type: 'bucket-tile-result',
+      });
+
+      expect(worker1.postMessage).toHaveBeenCalledTimes(2);
+
+      const secondMessage = worker2.postMessage.mock.calls[0][0];
+      const thirdMessage = worker1.postMessage.mock.calls[1][0];
+      worker2.simulateMessage({
+        bucketTile: {
+          buckets: [],
+          byteLength: 0,
+          epoch: 1,
+          key: secondJob.renderTile.key,
+        },
+        id: secondMessage.id,
+        type: 'bucket-tile-result',
+      });
+      worker1.simulateMessage({
+        bucketTile: {
+          buckets: [],
+          byteLength: 0,
+          epoch: 1,
+          key: thirdJob.renderTile.key,
+        },
+        id: thirdMessage.id,
+        type: 'bucket-tile-result',
+      });
+
+      await expect(firstPromise).resolves.toMatchObject({
+        key: firstJob.renderTile.key,
+      });
+      await expect(secondPromise).resolves.toMatchObject({
+        key: secondJob.renderTile.key,
+      });
+      await expect(thirdPromise).resolves.toMatchObject({
+        key: thirdJob.renderTile.key,
+      });
+
+      dispatcher.destroy();
     });
 
     it('should pass native mercator tile bounds to worker', async () => {
@@ -149,6 +297,30 @@ describe('bucket-tile-dispatcher', () => {
       await expect(dispatcher.compile(job)).rejects.toThrow('destroyed');
     });
 
+    it('should terminate the active worker when an in-flight compile is aborted', async () => {
+      const { createBucketTileDispatcher } = await import('@/mvt/bucket');
+
+      const worker = createMockWorker();
+      const dispatcher = createBucketTileDispatcher({
+        workerFactory: createSequentialWorkerFactory([worker]),
+      });
+
+      const controller = new AbortController();
+      const job = { ...createMockJob(), signal: controller.signal };
+      const compilePromise = dispatcher.compile(job);
+
+      expect(worker.postMessage).toHaveBeenCalledTimes(1);
+
+      controller.abort();
+
+      await expect(compilePromise).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+      expect(worker.terminate).toHaveBeenCalledTimes(1);
+
+      dispatcher.destroy();
+    });
+
     it('should handle worker error', async () => {
       const { createBucketTileDispatcher } = await import('@/mvt/bucket');
 
@@ -215,6 +387,18 @@ function createMockWorker() {
   };
 }
 
+function createSequentialWorkerFactory(
+  workers: Array<ReturnType<typeof createMockWorker>>,
+) {
+  let index = 0;
+
+  return () => {
+    const worker = workers[index];
+    index += 1;
+    return worker;
+  };
+}
+
 function createMockJob(overrides: Partial<ReturnType<typeof createMockJobBase>> = {}) {
   return {
     ...createMockJobBase(),
@@ -231,6 +415,7 @@ function createMockJobBase() {
       batches: [],
       geometryBatches: [],
     },
+    style: createMockStyle('fill'),
     tileData: new ArrayBuffer(0),
     tilingScheme: {
       tileXYToNativeRectangle: () => ({

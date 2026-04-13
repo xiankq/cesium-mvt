@@ -1,6 +1,7 @@
 import type { GeoJSONSourceSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { FeatureCollection, GeoJsonObject } from 'geojson';
-import { describe, expect, it, vi } from 'vitest';
+import type { FeatureCollection, GeoJsonObject, Point } from 'geojson';
+import { GeoJSONVT } from '@maplibre/geojson-vt';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeojsonSourceCache } from '@/mvt/source/geojson-source-cache';
 
 function createGeojsonSource(
@@ -16,7 +17,132 @@ function createGeojsonSource(
   };
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('geojson-source-cache', () => {
+  it('keeps the cached tile buffer intact after the returned copy is transferred', async () => {
+    const data: FeatureCollection = {
+      features: [
+        {
+          geometry: {
+            coordinates: [0, 0],
+            type: 'Point',
+          } as Point,
+          properties: {
+            name: 'poi',
+          },
+          type: 'Feature',
+        },
+      ],
+      type: 'FeatureCollection',
+    };
+    const loadData = vi.fn(async () => data);
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      source: createGeojsonSource(),
+      sourceId: 'places',
+    });
+
+    const firstResult = await sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+    structuredClone(firstResult, { transfer: [firstResult] });
+
+    const secondResult = await sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+
+    expect(secondResult.byteLength).toBeGreaterThan(0);
+    expect(loadData).toHaveBeenCalledTimes(1);
+  });
+
+  it('caches an empty GeoJSON tile instead of reloading it', async () => {
+    const loadData = vi.fn(async () => ({
+      features: [],
+      type: 'FeatureCollection',
+    } satisfies FeatureCollection));
+    const getTileSpy = vi.spyOn(GeoJSONVT.prototype as any, 'getTile');
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      source: createGeojsonSource(),
+      sourceId: 'places',
+    });
+
+    const firstResult = await sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+    const secondResult = await sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+
+    expect(firstResult.byteLength).toBe(0);
+    expect(secondResult.byteLength).toBe(0);
+    expect(loadData).toHaveBeenCalledTimes(1);
+    expect(getTileSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('evicts the least recently used ready tile when the cache budget is exceeded', async () => {
+    const data: FeatureCollection = {
+      features: [
+        {
+          geometry: {
+            coordinates: [0, 0],
+            type: 'Point',
+          } as Point,
+          properties: {
+            name: 'poi',
+          },
+          type: 'Feature',
+        },
+      ],
+      type: 'FeatureCollection',
+    };
+    const loadData = vi.fn(async () => data);
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      maxBytes: 1,
+      source: createGeojsonSource(),
+      sourceId: 'places',
+    } as any);
+
+    const firstResult = await sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+    expect(firstResult.byteLength).toBeGreaterThan(0);
+
+    const secondResult = await sourceCache.requestTile({
+      level: 2,
+      x: 2,
+      y: 3,
+    });
+    expect(secondResult.byteLength).toBeGreaterThan(0);
+
+    expect(sourceCache.getEntry('places/2/1/3')).toBeUndefined();
+    expect(sourceCache.getEntry('places/2/2/3')).toMatchObject({
+      state: 'ready',
+    });
+
+    const thirdResult = await sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+    expect(thirdResult.byteLength).toBeGreaterThan(0);
+    expect(loadData).toHaveBeenCalledTimes(1);
+  });
+
   it('aborts an in-flight tile request and allows the tile to be requested again', async () => {
     const abortedError = Object.assign(new Error('aborted'), {
       name: 'AbortError',
@@ -61,5 +187,101 @@ describe('geojson-source-cache', () => {
       y: 3,
     })).resolves.toBeInstanceOf(ArrayBuffer);
     expect(loadData).toHaveBeenCalledTimes(2);
+  });
+
+  it('会把在途 geojson 请求的 priority 作为静态值传给调度器', async () => {
+    let resolveGeojson: (value: FeatureCollection) => void = () => {};
+    const dataPromise = new Promise<FeatureCollection>((resolve) => {
+      resolveGeojson = resolve;
+    });
+    let capturedArgs: unknown[] = [];
+    const loadData = vi.fn((...args: unknown[]) => {
+      capturedArgs = args;
+      return dataPromise;
+    });
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      source: createGeojsonSource(),
+      sourceId: 'places',
+    });
+
+    const firstPromise = sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    }, 8);
+
+    await Promise.resolve();
+
+    expect(loadData).toHaveBeenCalledTimes(1);
+    expect(capturedArgs.length).toBe(3);
+    expect(capturedArgs[2]).toBe(8);
+
+    const secondPromise = sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    }, 2);
+
+    expect(loadData).toHaveBeenCalledTimes(1);
+    expect(capturedArgs.length).toBe(3);
+    expect(capturedArgs[2]).toBe(8);
+
+    resolveGeojson({
+      features: [],
+      type: 'FeatureCollection',
+    });
+
+    await expect(firstPromise).resolves.toBeInstanceOf(ArrayBuffer);
+    await expect(secondPromise).resolves.toBeInstanceOf(ArrayBuffer);
+  });
+
+  it('backs off failed tile requests before retrying', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-13T00:00:00Z'));
+
+    const networkError = new Error('network failed');
+    const loadData = vi.fn()
+      .mockRejectedValueOnce(networkError)
+      .mockResolvedValueOnce({
+        features: [],
+        type: 'FeatureCollection',
+      } satisfies FeatureCollection);
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      source: createGeojsonSource(),
+      sourceId: 'places',
+    });
+
+    await expect(sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    })).rejects.toThrow('network failed');
+
+    expect(sourceCache.getNextRetryAt()).toBe(Date.parse('2026-04-13T00:00:01Z'));
+
+    await expect(sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    })).rejects.toMatchObject({
+      name: 'RequestThrottledError',
+    });
+
+    expect(loadData).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    })).resolves.toBeInstanceOf(ArrayBuffer);
+
+    expect(loadData).toHaveBeenCalledTimes(2);
+    expect(sourceCache.getNextRetryAt()).toBeUndefined();
+
+    vi.useRealTimers();
   });
 });

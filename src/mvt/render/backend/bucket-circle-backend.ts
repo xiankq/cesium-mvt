@@ -8,9 +8,16 @@ import type {
   CircleBucketStats,
   ParsedTileResult,
 } from '../../bucket/bucket-types';
+import type { FeatureStateResolver } from '../../style/feature-state-store';
 import { BufferPoint, BufferPointCollection, Cartesian3 } from 'cesium';
+import { createFeatureFilter } from '../../style/feature-filter';
 import { isValidTypedArray } from '../../utils/validation';
+import { parseRenderTileCoordinateFromKey } from '../render-tile';
 import { getCircleMaterial } from './material-cache';
+import {
+  createPrimitiveStyleContext,
+  getFeatureIndexEntry,
+} from './primitive-style';
 
 export interface BucketCircleCollectionHandle {
   byteLength: number;
@@ -27,11 +34,13 @@ export interface BucketCircleTileHandle {
 
 export interface CreateBucketCircleTileHandleOptions {
   bucketTile: ParsedTileResult;
+  featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
 }
 
 export function createBucketCircleTileHandle({
   bucketTile,
+  featureStateResolver,
   style,
 }: CreateBucketCircleTileHandleOptions): BucketCircleTileHandle | undefined {
   const circleBuckets = bucketTile.buckets.filter(isCircleBucket);
@@ -39,6 +48,7 @@ export function createBucketCircleTileHandle({
     return undefined;
   }
 
+  const { level: zoom, sourceId } = parseRenderTileCoordinateFromKey(bucketTile.key);
   const layersById = new Map(
     style.layers.filter(isCircleLayer).map(layer => [layer.id, layer]),
   );
@@ -46,13 +56,19 @@ export function createBucketCircleTileHandle({
   const collections: BucketCircleCollectionHandle[] = [];
 
   for (const bucket of circleBuckets) {
-    const collectionHandle = createCircleCollection(
-      bucket,
-      layersById,
-      style,
-    );
-    if (collectionHandle) {
-      collections.push(collectionHandle);
+    for (const layerId of bucket.layerIds) {
+      const collectionHandle = createCircleCollection(
+        bucket,
+        layerId,
+        layersById,
+        featureStateResolver,
+        style,
+        sourceId,
+        zoom,
+      );
+      if (collectionHandle) {
+        collections.push(collectionHandle);
+      }
     }
   }
 
@@ -74,8 +90,12 @@ export function createBucketCircleTileHandle({
 
 function createCircleCollection(
   bucket: Bucket,
+  layerId: string,
   layersById: Map<string, CircleLayerSpecification>,
+  featureStateResolver: FeatureStateResolver | undefined,
   style: StyleSpecification,
+  sourceId: string,
+  zoom: number,
 ): BucketCircleCollectionHandle | undefined {
   const data = bucket.data as CircleBucketData;
   const stats = bucket.stats as CircleBucketStats;
@@ -88,12 +108,12 @@ function createCircleCollection(
     return undefined;
   }
 
-  const layerId = bucket.layerIds[0];
   const layer = layersById.get(layerId);
   if (!layer) {
     return undefined;
   }
 
+  const filter = createFeatureFilter(layer.filter);
   const primitiveCountMax = Math.min(stats.pointCount || 0, 10000000);
 
   if (primitiveCountMax === 0) {
@@ -105,18 +125,38 @@ function createCircleCollection(
   });
 
   const flyweight = new BufferPoint();
-  const material = getCircleMaterial(style, layer);
+  let pointCount = 0;
 
-  for (let i = 0; i < stats.pointCount; i++) {
-    const x = data.positions[i * 3];
-    const y = data.positions[i * 3 + 1];
-    const z = data.positions[i * 3 + 2];
+  for (let index = 0; index < stats.pointCount; index += 1) {
+    const x = data.positions[index * 3];
+    const y = data.positions[index * 3 + 1];
+    const z = data.positions[index * 3 + 2];
 
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
       continue;
     }
 
-    const featureId = data.featureIds[i] ?? 0;
+    const featureId = data.featureIds[index];
+    const featureIndex = getFeatureIndexEntry(
+      bucket.featureIndex.entries,
+      featureId,
+    );
+    const featureState = featureStateResolver?.({
+      id: featureIndex?.id,
+      sourceId,
+      sourceLayer: bucket.sourceLayer,
+    });
+    const context = createPrimitiveStyleContext(featureIndex, {
+      featureState,
+      geometryType: 'Point',
+      zoom,
+    });
+
+    if (!filter(context)) {
+      continue;
+    }
+
+    const material = getCircleMaterial(style, layer, context);
 
     collection.add(
       {
@@ -125,14 +165,15 @@ function createCircleCollection(
       },
       flyweight,
     );
-    flyweight.featureId = featureId;
+    flyweight.featureId = featureIndex?.id ?? 0;
+    pointCount += 1;
   }
 
   return {
     byteLength: data.positions.byteLength + data.featureIds.byteLength,
     collection,
     layerId,
-    pointCount: stats.pointCount,
+    pointCount,
   };
 }
 

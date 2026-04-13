@@ -7,6 +7,13 @@ import type { TileCoordinate } from './tile-request';
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { createAbortError, deepClone, isAbortError } from '../utils/common';
+import { TileBudget } from '../utils/tile-budget';
+import {
+  createThrottleError,
+  isThrottleError,
+
+  scheduleJsonRequest,
+} from './request-scheduler';
 import { createTileKey } from './tile-request';
 
 // GeoJSON source 会先转成内存中的“向量瓦片形态”，这样下游渲染链路可以保持单轨实现。
@@ -14,26 +21,36 @@ export const GEOJSON_SOURCE_LAYER = '_geojson';
 
 type SourceEntryState = 'failed' | 'idle' | 'ready' | 'requesting';
 
+const INITIAL_RETRY_DELAY_MS = 1000;
+const MAX_RETRY_DELAY_MS = 30_000;
+
 interface SourceEntryRecord {
   abortController?: AbortController;
   error?: unknown;
+  failureCount: number;
   key: string;
   promise?: Promise<ArrayBuffer>;
   state: SourceEntryState;
   value?: ArrayBuffer;
+  nextRetryAt?: number;
 }
 
 interface GeojsonSourceCacheOptions {
   loadData?: (
     source: GeoJSONSourceSpecification,
     signal: AbortSignal,
+    priority?: number,
   ) => Promise<GeoJsonObject>;
+  maxBytes?: number;
+  readyTileBudget?: TileBudget;
   source: SourceSpecification;
   sourceId: string;
 }
 
 const EMPTY_TILE_DATA = new ArrayBuffer(0);
+const DEFAULT_SOURCE_CACHE_SIZE = 64 * 1024 * 1024;
 type GeojsonTileIndexInput = ConstructorParameters<typeof GeoJSONVT>[0];
+type GeojsonTileIndexOptions = ConstructorParameters<typeof GeoJSONVT>[1];
 type GeojsonVtLayers = Parameters<typeof fromGeojsonVt>[0];
 
 export class GeojsonSourceCache {
@@ -41,9 +58,11 @@ export class GeojsonSourceCache {
 
   private destroyed = false;
   private readonly entries = new Map<string, SourceEntryRecord>();
+  private readonly readyTileBudget: TileBudget;
   private readonly loadData: (
     source: GeoJSONSourceSpecification,
     signal: AbortSignal,
+    priority?: number,
   ) => Promise<GeoJsonObject>;
 
   private source: GeoJSONSourceSpecification;
@@ -58,12 +77,19 @@ export class GeojsonSourceCache {
     }
 
     this.loadData = options.loadData ?? loadGeojsonData;
+    this.readyTileBudget = options.readyTileBudget
+      ?? new TileBudget({
+        maxBytes: options.maxBytes ?? DEFAULT_SOURCE_CACHE_SIZE,
+      });
     this.source = options.source;
     this.sourceId = options.sourceId;
     this.sourceSignature = JSON.stringify(options.source);
   }
 
-  async requestTile(coordinate: TileCoordinate) {
+  async requestTile(
+    coordinate: TileCoordinate,
+    priority = 0,
+  ) {
     const key = createTileKey(
       this.sourceId,
       coordinate.level,
@@ -72,18 +98,26 @@ export class GeojsonSourceCache {
     );
     const existingEntry = this.entries.get(key);
     if (existingEntry?.state === 'ready' && existingEntry.value !== undefined) {
-      return existingEntry.value;
+      this.readyTileBudget.touch(key);
+      return cloneValue(existingEntry.value);
     }
     if (existingEntry?.promise) {
-      return existingEntry.promise;
+      return existingEntry.promise.then(cloneValue);
     }
 
     const entry = existingEntry ?? this.createEntry(key);
+    if (this.isRetryCoolingDown(entry)) {
+      return Promise.reject(createThrottleError());
+    }
+
     const abortController = new AbortController();
     entry.abortController = abortController;
     entry.error = undefined;
     entry.state = 'requesting';
-    entry.promise = this.waitForTileIndex(abortController.signal)
+    entry.promise = this.waitForTileIndex(
+      abortController.signal,
+      priority,
+    )
       .then((tileIndex) => {
         if (abortController.signal.aborted) {
           throw createAbortError();
@@ -96,23 +130,37 @@ export class GeojsonSourceCache {
           throw createAbortError();
         }
 
+        const cachedValue = cloneValue(value);
         entry.abortController = undefined;
         entry.promise = undefined;
         entry.state = 'ready';
-        entry.value = value;
-        return value;
+        entry.value = cachedValue;
+        this.readyTileBudget.add(key, {
+          byteLength: cachedValue.byteLength,
+        }, (evictedKey) => {
+          this.entries.delete(evictedKey);
+        });
+        return cloneValue(cachedValue);
       })
       .catch((error) => {
         entry.abortController = undefined;
         entry.promise = undefined;
-        if (abortController.signal.aborted || isAbortError(error)) {
+        if (
+          abortController.signal.aborted
+          || isAbortError(error)
+          || isThrottleError(error)
+        ) {
           entry.error = undefined;
           entry.state = 'idle';
+          entry.failureCount = 0;
+          entry.nextRetryAt = undefined;
           throw error;
         }
 
         entry.error = error;
         entry.state = 'failed';
+        entry.failureCount += 1;
+        entry.nextRetryAt = Date.now() + calculateRetryDelay(entry.failureCount);
         throw error;
       });
 
@@ -146,6 +194,50 @@ export class GeojsonSourceCache {
     return this.destroyed;
   }
 
+  getEntry(key: string): SourceEntryRecord | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) {
+      return undefined;
+    }
+
+    return {
+      abortController: entry.abortController,
+      error: entry.error,
+      failureCount: entry.failureCount,
+      key: entry.key,
+      promise: entry.promise,
+      nextRetryAt: entry.nextRetryAt,
+      state: entry.state,
+      value: entry.value instanceof ArrayBuffer
+        ? cloneValue(entry.value)
+        : entry.value,
+    };
+  }
+
+  getMaxZoom(): number | undefined {
+    return getSourceMaxZoom(this.source);
+  }
+
+  getMinZoom(): number | undefined {
+    return getSourceMinZoom(this.source);
+  }
+
+  getNextRetryAt(): number | undefined {
+    let nextRetryAt: number | undefined;
+
+    for (const entry of this.entries.values()) {
+      if (entry.state !== 'failed' || entry.nextRetryAt === undefined) {
+        continue;
+      }
+
+      if (nextRetryAt === undefined || entry.nextRetryAt < nextRetryAt) {
+        nextRetryAt = entry.nextRetryAt;
+      }
+    }
+
+    return nextRetryAt;
+  }
+
   destroy() {
     if (this.destroyed) {
       return;
@@ -157,6 +249,7 @@ export class GeojsonSourceCache {
 
   private createEntry(key: string) {
     const entry: SourceEntryRecord = {
+      failureCount: 0,
       key,
       state: 'idle',
     };
@@ -164,20 +257,35 @@ export class GeojsonSourceCache {
     return entry;
   }
 
-  private async getTileIndex(): Promise<GeoJSONVT> {
+  private isRetryCoolingDown(entry: SourceEntryRecord): boolean {
+    return entry.state === 'failed'
+      && entry.nextRetryAt !== undefined
+      && Date.now() < entry.nextRetryAt;
+  }
+
+  private async getTileIndex(
+    priority: number,
+  ): Promise<GeoJSONVT> {
     if (this.tileIndexPromise) {
       return this.tileIndexPromise;
     }
 
     const abortController = new AbortController();
     this.tileIndexAbortController = abortController;
-    this.tileIndexPromise = this.loadData(this.source, abortController.signal)
+    this.tileIndexPromise = this.loadData(
+      this.source,
+      abortController.signal,
+      priority,
+    )
       .then((data) => {
         if (abortController.signal.aborted) {
           throw createAbortError();
         }
 
-        const tileIndex = new GeoJSONVT(cloneGeojson(data) as GeojsonTileIndexInput);
+        const tileIndex = new GeoJSONVT(
+          cloneGeojson(data) as GeojsonTileIndexInput,
+          createGeojsonTileIndexOptions(this.source),
+        );
         this.tileIndexAbortController = undefined;
         return tileIndex;
       })
@@ -190,7 +298,10 @@ export class GeojsonSourceCache {
     return this.tileIndexPromise;
   }
 
-  private waitForTileIndex(signal: AbortSignal): Promise<GeoJSONVT> {
+  private waitForTileIndex(
+    signal: AbortSignal,
+    priority: number,
+  ): Promise<GeoJSONVT> {
     if (signal.aborted) {
       return Promise.reject(createAbortError());
     }
@@ -204,7 +315,7 @@ export class GeojsonSourceCache {
       signal.addEventListener('abort', rejectAbort, {
         once: true,
       });
-      void this.getTileIndex().then((tileIndex) => {
+      void this.getTileIndex(priority).then((tileIndex) => {
         signal.removeEventListener('abort', rejectAbort);
         resolve(tileIndex);
       }).catch((error) => {
@@ -235,6 +346,9 @@ export class GeojsonSourceCache {
     this.tileIndexAbortController?.abort();
     this.tileIndexAbortController = undefined;
     this.tileIndexPromise = undefined;
+    for (const key of Array.from(this.entries.keys())) {
+      this.readyTileBudget.delete(key);
+    }
     for (const entry of this.entries.values()) {
       entry.abortController?.abort();
     }
@@ -262,22 +376,54 @@ function getTileData(tileIndex: GeoJSONVT, coordinate: TileCoordinate) {
   return tileBuffer;
 }
 
-async function loadGeojsonData(
+function loadGeojsonData(
   source: GeoJSONSourceSpecification,
   signal: AbortSignal,
+  priority?: number,
 ): Promise<GeoJsonObject> {
   if (typeof source.data !== 'string') {
-    return source.data as GeoJsonObject;
+    return Promise.resolve(source.data as GeoJsonObject);
   }
 
-  const response = await fetch(source.data, { signal });
-  if (!response.ok) {
-    throw new Error(`Failed to load geojson: ${source.data}`);
-  }
-
-  return await response.json() as GeoJsonObject;
+  return scheduleJsonRequest({
+    priority,
+    signal,
+    url: source.data,
+  }) as Promise<GeoJsonObject>;
 }
 
 function cloneGeojson(data: GeoJsonObject): GeoJsonObject {
   return deepClone(data);
+}
+
+function cloneValue(value: ArrayBuffer): ArrayBuffer {
+  return value.slice(0);
+}
+
+function calculateRetryDelay(failureCount: number): number {
+  const exponent = Math.max(0, failureCount - 1);
+  return Math.min(INITIAL_RETRY_DELAY_MS * 2 ** exponent, MAX_RETRY_DELAY_MS);
+}
+
+function createGeojsonTileIndexOptions(
+  source: GeoJSONSourceSpecification,
+): GeojsonTileIndexOptions | undefined {
+  const maxZoom = getSourceMaxZoom(source);
+  if (maxZoom === undefined) {
+    return undefined;
+  }
+
+  return {
+    maxZoom,
+  };
+}
+
+function getSourceMinZoom(source: SourceSpecification): number | undefined {
+  const minzoom = (source as { minzoom?: unknown }).minzoom;
+  return typeof minzoom === 'number' ? minzoom : undefined;
+}
+
+function getSourceMaxZoom(source: SourceSpecification): number | undefined {
+  const maxzoom = (source as { maxzoom?: unknown }).maxzoom;
+  return typeof maxzoom === 'number' ? maxzoom : undefined;
 }

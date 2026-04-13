@@ -6,6 +6,7 @@ import type {
   PrimitiveCollection,
 } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
+import type { FeatureStateResolver } from '../style/feature-state-store';
 import type { BucketCircleTileHandle } from './backend/bucket-circle-backend';
 import type { BucketFillTileHandle } from './backend/bucket-fill-backend';
 import type { BucketLineTileHandle } from './backend/bucket-line-backend';
@@ -34,23 +35,28 @@ export interface BucketRenderedTileHandle {
 
 export interface CreateBucketRenderedTileHandleOptions {
   bucketTile: ParsedTileResult;
+  featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
 }
 
 export function createBucketRenderedTileHandle({
   bucketTile,
+  featureStateResolver,
   style,
 }: CreateBucketRenderedTileHandleOptions): BucketRenderedTileHandle {
   const circles = createBucketCircleTileHandle({
     bucketTile,
+    featureStateResolver,
     style,
   });
   const lines = createBucketLineTileHandle({
     bucketTile,
+    featureStateResolver,
     style,
   });
   const fills = createBucketFillTileHandle({
     bucketTile,
+    featureStateResolver,
     style,
   });
 

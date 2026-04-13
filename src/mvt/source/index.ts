@@ -2,6 +2,7 @@ export {
   configureRequestScheduler,
   createTileRequest,
   getRequestSchedulerStats,
+  scheduleJsonRequest,
   scheduleTileRequest,
 } from './request-scheduler';
 export type { RequestSchedulerOptions, TileRequestOptions } from './request-scheduler';

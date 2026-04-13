@@ -1,6 +1,7 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { PrimitiveCollection } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
+import type { FeatureStateResolver } from '../style/feature-state-store';
 import type { LayerFamily } from '../style/layer-family';
 import type { BucketRenderedTileHandle } from './bucket-rendered-tile';
 import type { RenderEntry } from './render-order';
@@ -12,6 +13,7 @@ import {
   setBucketRenderedTileVisibility,
 } from './bucket-rendered-tile';
 import { createRenderOrder } from './render-order';
+import { parseRenderTileCoordinateFromKey } from './render-tile';
 
 export interface RenderManagerOptions {
   root: PrimitiveCollection;
@@ -22,6 +24,7 @@ export class RenderManager {
   private readonly renderedTileHandles = new Map<string, BucketRenderedTileHandle>();
   private renderOrder: RenderEntry[] = [];
   private layerFamilies: LayerFamily[] = [];
+  private featureStateResolver?: FeatureStateResolver;
   private style?: StyleSpecification;
 
   constructor(options: RenderManagerOptions) {
@@ -46,6 +49,10 @@ export class RenderManager {
     return this.style;
   }
 
+  setFeatureStateResolver(resolver?: FeatureStateResolver): void {
+    this.featureStateResolver = resolver;
+  }
+
   mount(key: string, bucketTile: ParsedTileResult, style: StyleSpecification): BucketRenderedTileHandle {
     const existingHandle = this.renderedTileHandles.get(key);
     if (existingHandle) {
@@ -54,12 +61,60 @@ export class RenderManager {
 
     const handle = createBucketRenderedTileHandle({
       bucketTile,
+      featureStateResolver: this.featureStateResolver,
       style,
     });
 
     mountBucketRenderedTileHandle(this.root, handle);
     this.renderedTileHandles.set(key, handle);
     return handle;
+  }
+
+  refresh(
+    key: string,
+    bucketTile: ParsedTileResult,
+    style: StyleSpecification,
+  ): BucketRenderedTileHandle {
+    const existingHandle = this.renderedTileHandles.get(key);
+    if (!existingHandle) {
+      return this.mount(key, bucketTile, style);
+    }
+
+    const wasVisible = existingHandle.visible;
+    const nextHandle = createBucketRenderedTileHandle({
+      bucketTile,
+      featureStateResolver: this.featureStateResolver,
+      style,
+    });
+
+    destroyBucketRenderedTileHandle(this.root, existingHandle);
+    mountBucketRenderedTileHandle(this.root, nextHandle);
+    if (!wasVisible) {
+      setBucketRenderedTileVisibility(nextHandle, false);
+    }
+
+    this.renderedTileHandles.set(key, nextHandle);
+    return nextHandle;
+  }
+
+  refreshSource(
+    sourceId: string,
+    getBucketTile: (key: string) => ParsedTileResult | undefined,
+    style: StyleSpecification,
+  ): void {
+    for (const key of this.getAllKeys()) {
+      const renderTileCoordinate = parseRenderTileCoordinateFromKey(key);
+      if (renderTileCoordinate.sourceId !== sourceId) {
+        continue;
+      }
+
+      const bucketTile = getBucketTile(key);
+      if (!bucketTile) {
+        continue;
+      }
+
+      this.refresh(key, bucketTile, style);
+    }
   }
 
   setEmpty(key: string): BucketRenderedTileHandle {

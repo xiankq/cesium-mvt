@@ -8,9 +8,16 @@ import type {
   FillBucketStats,
   ParsedTileResult,
 } from '../../bucket/bucket-types';
+import type { FeatureStateResolver } from '../../style/feature-state-store';
 import { BufferPolygon, BufferPolygonCollection } from 'cesium';
+import { createFeatureFilter } from '../../style/feature-filter';
 import { isValidTypedArray, validatePositions } from '../../utils/validation';
+import { parseRenderTileCoordinateFromKey } from '../render-tile';
 import { getFillMaterial } from './material-cache';
+import {
+  createPrimitiveStyleContext,
+  getFeatureIndexEntry,
+} from './primitive-style';
 
 export interface BucketFillCollectionHandle {
   byteLength: number;
@@ -27,11 +34,20 @@ export interface BucketFillTileHandle {
 
 export interface CreateBucketFillTileHandleOptions {
   bucketTile: ParsedTileResult;
+  featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
+}
+
+interface PolygonSlice {
+  featureId: number | undefined;
+  holes: Uint32Array;
+  positions: Float64Array;
+  triangles: Uint32Array;
 }
 
 export function createBucketFillTileHandle({
   bucketTile,
+  featureStateResolver,
   style,
 }: CreateBucketFillTileHandleOptions): BucketFillTileHandle | undefined {
   const fillBuckets = bucketTile.buckets.filter(isFillBucket);
@@ -39,6 +55,7 @@ export function createBucketFillTileHandle({
     return undefined;
   }
 
+  const { level: zoom, sourceId } = parseRenderTileCoordinateFromKey(bucketTile.key);
   const layersById = new Map(
     style.layers.filter(isFillLayer).map(layer => [layer.id, layer]),
   );
@@ -60,47 +77,66 @@ export function createBucketFillTileHandle({
       continue;
     }
 
-    // 遍历 bucket 的所有 layerId，为每个 layer 创建独立的 collection
-    // 这符合 MapLibre 规范：每个 layer 应有独立的样式和渲染
+    // 每个 layer 仍然保留自己的 filter 和 paint 语义，避免 family 只剩下几何分组。
     for (const layerId of bucket.layerIds) {
       const layer = layersById.get(layerId);
       if (!layer) {
         continue;
       }
 
-      const vertexCountMax = Math.min(stats.vertexCount, 10000000);
-      const triangleCountMax = Math.min(stats.triangleCount, 10000000);
-      const holeCountMax = Math.min(stats.holeCount, 10000000);
-      const primitiveCountMax = Math.min(stats.polygonCount || 1, 10000000);
-
-      if (vertexCountMax === 0) {
-        continue;
-      }
-
+      const filter = createFeatureFilter(layer.filter);
       const collection = new BufferPolygonCollection({
-        holeCountMax,
-        primitiveCountMax,
-        triangleCountMax,
-        vertexCountMax,
+        holeCountMax: Math.min(stats.holeCount || 0, 10000000),
+        primitiveCountMax: Math.min(stats.polygonCount || 1, 10000000),
+        triangleCountMax: Math.min(stats.triangleCount || 0, 10000000),
+        vertexCountMax: Math.min(stats.vertexCount || 0, 10000000),
       });
       const flyweight = new BufferPolygon();
-      const material = getFillMaterial(style, layer);
+      let polygonCount = 0;
 
-      collection.add(
-        {
-          holes: data.holes,
-          material,
-          positions: data.positions,
-          triangles: data.triangles,
-        },
-        flyweight,
-      );
+      for (const polygon of iterateFillPolygons(data)) {
+        const featureIndex = getFeatureIndexEntry(
+          bucket.featureIndex.entries,
+          polygon.featureId,
+        );
+        const featureState = featureStateResolver?.({
+          id: featureIndex?.id,
+          sourceId,
+          sourceLayer: bucket.sourceLayer,
+        });
+        const context = createPrimitiveStyleContext(featureIndex, {
+          featureState,
+          geometryType: 'Polygon',
+          zoom,
+        });
+
+        if (!filter(context)) {
+          continue;
+        }
+
+        const material = getFillMaterial(style, layer, context);
+        collection.add(
+          {
+            holes: polygon.holes,
+            material,
+            positions: polygon.positions,
+            triangles: polygon.triangles,
+          },
+          flyweight,
+        );
+        flyweight.featureId = featureIndex?.id ?? 0;
+        polygonCount += 1;
+      }
+
+      if (polygonCount === 0) {
+        continue;
+      }
 
       collections.push({
         byteLength: collection.byteLength,
         collection,
         layerId,
-        polygonCount: stats.polygonCount || 1,
+        polygonCount,
       });
     }
   }
@@ -132,7 +168,130 @@ function validateFillBucketData(data: FillBucketData): boolean {
   if (!isValidTypedArray(data.featureIds, Float32Array)) {
     return false;
   }
+
+  if (
+    data.polygonVertexCounts
+    || data.polygonTriangleCounts
+    || data.polygonHoleCounts
+  ) {
+    if (
+      !data.polygonVertexCounts
+      || !data.polygonTriangleCounts
+      || !data.polygonHoleCounts
+    ) {
+      return false;
+    }
+
+    if (
+      data.polygonVertexCounts.length !== data.polygonTriangleCounts.length
+      || data.polygonVertexCounts.length !== data.polygonHoleCounts.length
+    ) {
+      return false;
+    }
+  }
+
   return true;
+}
+
+function* iterateFillPolygons(data: FillBucketData): Generator<PolygonSlice> {
+  if (
+    data.polygonVertexCounts
+    && data.polygonTriangleCounts
+    && data.polygonHoleCounts
+  ) {
+    let vertexOffset = 0;
+    let triangleOffset = 0;
+    let holeOffset = 0;
+
+    for (let index = 0; index < data.polygonVertexCounts.length; index += 1) {
+      const vertexCount = data.polygonVertexCounts[index]!;
+      const triangleCount = data.polygonTriangleCounts[index]!;
+      const holeCount = data.polygonHoleCounts[index]!;
+      const featureId = data.featureIds[vertexOffset];
+
+      yield {
+        featureId,
+        holes: data.holes.subarray(holeOffset, holeOffset + holeCount),
+        positions: data.positions.subarray(
+          vertexOffset * 3,
+          (vertexOffset + vertexCount) * 3,
+        ),
+        triangles: rebaseTriangles(
+          data.triangles.subarray(
+            triangleOffset * 3,
+            (triangleOffset + triangleCount) * 3,
+          ),
+          vertexOffset,
+        ),
+      };
+
+      vertexOffset += vertexCount;
+      triangleOffset += triangleCount;
+      holeOffset += holeCount;
+    }
+
+    return;
+  }
+
+  let vertexOffset = 0;
+  let triangleOffset = 0;
+  let holeOffset = 0;
+
+  while (vertexOffset < data.featureIds.length) {
+    const featureId = data.featureIds[vertexOffset];
+    let nextVertexOffset = vertexOffset + 1;
+    while (
+      nextVertexOffset < data.featureIds.length
+      && data.featureIds[nextVertexOffset] === featureId
+    ) {
+      nextVertexOffset += 1;
+    }
+
+    let nextTriangleOffset = triangleOffset;
+    while (nextTriangleOffset * 3 < data.triangles.length) {
+      const triangleStart = nextTriangleOffset * 3;
+      const triangleIndex = data.triangles[triangleStart];
+      if (triangleIndex === undefined || triangleIndex >= nextVertexOffset) {
+        break;
+      }
+      nextTriangleOffset += 1;
+    }
+
+    const vertexCount = nextVertexOffset - vertexOffset;
+    const triangleCount = nextTriangleOffset - triangleOffset;
+    const holeCount = Math.max(
+      0,
+      Math.round((triangleCount - vertexCount + 2) / 2),
+    );
+
+    yield {
+      featureId,
+      holes: data.holes.subarray(holeOffset, holeOffset + holeCount),
+      positions: data.positions.subarray(
+        vertexOffset * 3,
+        nextVertexOffset * 3,
+      ),
+      triangles: rebaseTriangles(
+        data.triangles.subarray(
+          triangleOffset * 3,
+          nextTriangleOffset * 3,
+        ),
+        vertexOffset,
+      ),
+    };
+
+    vertexOffset = nextVertexOffset;
+    triangleOffset = nextTriangleOffset;
+    holeOffset += holeCount;
+  }
+}
+
+function rebaseTriangles(triangles: Uint32Array, baseIndex: number): Uint32Array {
+  const rebasedTriangles = new Uint32Array(triangles.length);
+  for (let index = 0; index < triangles.length; index += 1) {
+    rebasedTriangles[index] = triangles[index]! - baseIndex;
+  }
+  return rebasedTriangles;
 }
 
 function isFillBucket(

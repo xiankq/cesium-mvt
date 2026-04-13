@@ -1,4 +1,5 @@
 import { Request, RequestScheduler, RequestType, Resource } from 'cesium';
+import { createAbortError } from '../utils/common';
 
 /**
  * 请求调度器选项
@@ -38,6 +39,23 @@ export interface TileRequestOptions {
    * 服务器标识
    */
   serverKey?: string;
+
+  /**
+   * 请求中断信号
+   */
+  signal?: AbortSignal;
+}
+
+interface RequestOptionsBase {
+  cancelFunction?: () => void;
+  priority?: number;
+  serverKey?: string;
+  signal?: AbortSignal;
+  url: string;
+}
+
+interface RequestSchedulerRuntime {
+  getServerKey: (url: string) => string;
 }
 
 /**
@@ -46,18 +64,29 @@ export interface TileRequestOptions {
  * 使用 Cesium 的 Request 进行请求调度
  */
 export function createTileRequest(options: TileRequestOptions): Request {
-  const {
-    priority = 0,
-    cancelFunction,
-    serverKey,
-  } = options;
+  return createRequest(options, RequestType.TILES3D);
+}
 
-  return new Request({
-    cancelFunction,
-    priority,
-    throttle: true,
-    throttleByServer: !!serverKey,
-    type: RequestType.TILES3D,
+/**
+ * 调度 JSON 请求
+ *
+ * 使用 Cesium 的 Resource 和 RequestScheduler 进行请求调度
+ */
+export function scheduleJsonRequest(options: TileRequestOptions): Promise<any> {
+  if (options.signal?.aborted) {
+    return Promise.reject(createAbortError());
+  }
+
+  const request = createRequest(options, RequestType.OTHER);
+  const resource = new Resource({
+    request,
+    url: options.url,
+  });
+
+  return scheduleResourceRequest({
+    request,
+    signal: options.signal,
+    start: () => resource.fetchJson(),
   });
 }
 
@@ -70,22 +99,21 @@ export function createTileRequest(options: TileRequestOptions): Request {
  * @returns 请求 Promise
  */
 export function scheduleTileRequest(options: TileRequestOptions): Promise<ArrayBuffer> {
-  const { url } = options;
-
-  const request = createTileRequest(options);
-
-  const resource = new Resource({
-    request,
-    url,
-  });
-
-  const result = resource.fetchArrayBuffer();
-
-  if (!result) {
-    return Promise.reject(new Error('Request was throttled'));
+  if (options.signal?.aborted) {
+    return Promise.reject(createAbortError());
   }
 
-  return result;
+  const request = createTileRequest(options);
+  const resource = new Resource({
+    request,
+    url: options.url,
+  });
+
+  return scheduleResourceRequest({
+    request,
+    signal: options.signal,
+    start: () => resource.fetchArrayBuffer(),
+  });
 }
 
 /**
@@ -110,4 +138,81 @@ export function getRequestSchedulerStats() {
     maximumRequestsPerServer: RequestScheduler.maximumRequestsPerServer,
     throttleRequests: RequestScheduler.throttleRequests,
   };
+}
+
+export function isThrottleError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'RequestThrottledError';
+}
+
+function createRequest(
+  options: RequestOptionsBase,
+  type: RequestType,
+): Request {
+  const scheduler = RequestScheduler as unknown as RequestSchedulerRuntime;
+  const resolvedServerKey = options.serverKey ?? scheduler.getServerKey(options.url);
+  const request = new Request({
+    cancelFunction: options.cancelFunction,
+    priority: options.priority ?? 0,
+    serverKey: resolvedServerKey,
+    throttle: true,
+    throttleByServer: resolvedServerKey !== undefined,
+    type,
+    url: options.url,
+  });
+  return request;
+}
+
+function scheduleResourceRequest<T>(options: {
+  request: Request;
+  signal?: AbortSignal;
+  start: () => Promise<T> | undefined;
+}): Promise<T> {
+  const cleanup = bindAbortSignal(options.request, options.signal);
+  let promise: Promise<T> | undefined;
+
+  try {
+    promise = options.start();
+  }
+  catch (error) {
+    cleanup?.();
+    return Promise.reject(error);
+  }
+
+  if (!promise) {
+    cleanup?.();
+    return Promise.reject(createThrottleError());
+  }
+
+  return promise.finally(() => {
+    cleanup?.();
+  });
+}
+
+function bindAbortSignal(
+  request: Request,
+  signal?: AbortSignal,
+): (() => void) | undefined {
+  if (!signal) {
+    return undefined;
+  }
+
+  const scheduledRequest = request as Request & { cancelled?: boolean };
+  const onAbort = () => {
+    scheduledRequest.cancelled = true;
+    scheduledRequest.cancelFunction?.();
+  };
+
+  signal.addEventListener('abort', onAbort, {
+    once: true,
+  });
+
+  return () => {
+    signal.removeEventListener('abort', onAbort);
+  };
+}
+
+export function createThrottleError(): Error {
+  return Object.assign(new Error('request throttled'), {
+    name: 'RequestThrottledError',
+  });
 }

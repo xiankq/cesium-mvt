@@ -1,3 +1,4 @@
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { WebMercatorTilingScheme } from 'cesium';
 import type { TileProjectionData } from '../geometry/tile-projection';
 import type { RenderTile } from '../render/render-tile';
@@ -6,9 +7,8 @@ import type { ParsedTileResult } from './bucket-types';
 import {
   extractWorkerResponse,
   InlineDispatcher,
-  WorkerDispatcher,
-
 } from '../utils/worker-dispatcher';
+import { WorkerPoolDispatcher } from '../utils/worker-pool-dispatcher';
 import { compileBucketTileFromData } from './bucket-tile-compiler';
 
 /**
@@ -23,6 +23,7 @@ import { compileBucketTileFromData } from './bucket-tile-compiler';
 
 export interface CompileBucketTileJob {
   renderTile: RenderTile;
+  style: StyleSpecification;
   signal?: AbortSignal;
   tileData: ArrayBuffer;
   tilingScheme: WebMercatorTilingScheme;
@@ -43,19 +44,13 @@ export interface BucketTileErrorResponse {
 export interface BucketTileCompileMessage {
   id: number;
   renderTile: RenderTile;
+  style: StyleSpecification;
   tileData: ArrayBuffer;
   tileProjection: TileProjectionData;
   type: 'compile-bucket-tile';
 }
 
-export interface BucketTileCancelMessage {
-  id: number;
-  type: 'cancel-bucket-tile';
-}
-
-export type BucketTileWorkerMessage
-  = | BucketTileCancelMessage
-    | BucketTileCompileMessage;
+export type BucketTileWorkerMessage = BucketTileCompileMessage;
 export type BucketTileWorkerResponse
   = | BucketTileErrorResponse
     | BucketTileResultResponse;
@@ -79,34 +74,19 @@ export function createBucketTileDispatcher(
   options: BucketTileDispatcherOptions = {},
 ): BucketTileDispatcher {
   const workerFactory = options.workerFactory ?? createDefaultWorker;
-  const worker = workerFactory();
-
-  if (!worker) {
-    return new InlineDispatcher({
-      execute: (job: CompileBucketTileJob) => {
-        const tileProjection = extractTileProjection(job.renderTile.key, job.tilingScheme);
-        return compileBucketTileFromData({
-          renderTile: job.renderTile,
-          tileData: job.tileData,
-          tileProjection,
-        });
-      },
-    });
-  }
-
-  const dispatcher = new WorkerDispatcher<
+  const dispatcher = new WorkerPoolDispatcher<
     CompileBucketTileJob,
     ParsedTileResult,
     BucketTileWorkerMessage,
     Transferable
   >({
-    createCancelMessage: id => ({ id, type: 'cancel-bucket-tile' }),
     createJobMessage: (id, job) => {
       const tileProjection = extractTileProjection(job.renderTile.key, job.tilingScheme);
       return {
         message: {
           id,
           renderTile: job.renderTile,
+          style: job.style,
           tileData: job.tileData,
           tileProjection,
           type: 'compile-bucket-tile',
@@ -125,8 +105,22 @@ export function createBucketTileDispatcher(
       }
       return null;
     },
-    worker,
+    workerFactory,
   });
+
+  if (!dispatcher.hasWorkers()) {
+    return new InlineDispatcher({
+      execute: (job: CompileBucketTileJob) => {
+        const tileProjection = extractTileProjection(job.renderTile.key, job.tilingScheme);
+        return compileBucketTileFromData({
+          renderTile: job.renderTile,
+          style: job.style,
+          tileData: job.tileData,
+          tileProjection,
+        });
+      },
+    });
+  }
 
   return {
     compile: (job: CompileBucketTileJob) => dispatcher.dispatch(job, job.signal),

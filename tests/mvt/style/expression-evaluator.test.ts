@@ -99,6 +99,15 @@ describe('expression-evaluator', () => {
       const result = evaluateExpression(expression, context);
       expect(result).toEqual({ name: 'Beijing' });
     });
+
+    it('访问 feature-state', () => {
+      const expression = ['feature-state', 'hover'];
+      const context = createContext({
+        featureState: { hover: true },
+      });
+      const result = evaluateExpression(expression, context);
+      expect(result).toBe(true);
+    });
   });
 
   describe('数学运算表达式', () => {

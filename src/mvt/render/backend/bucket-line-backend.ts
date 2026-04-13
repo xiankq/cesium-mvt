@@ -8,9 +8,16 @@ import type {
   LineBucketStats,
   ParsedTileResult,
 } from '../../bucket/bucket-types';
+import type { FeatureStateResolver } from '../../style/feature-state-store';
 import { BufferPolyline, BufferPolylineCollection } from 'cesium';
+import { createFeatureFilter } from '../../style/feature-filter';
 import { validatePositions } from '../../utils/validation';
+import { parseRenderTileCoordinateFromKey } from '../render-tile';
 import { getLineMaterial } from './material-cache';
+import {
+  createPrimitiveStyleContext,
+  getFeatureIndexEntry,
+} from './primitive-style';
 
 export interface BucketLineCollectionHandle {
   byteLength: number;
@@ -27,11 +34,13 @@ export interface BucketLineTileHandle {
 
 export interface CreateBucketLineTileHandleOptions {
   bucketTile: ParsedTileResult;
+  featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
 }
 
 export function createBucketLineTileHandle({
   bucketTile,
+  featureStateResolver,
   style,
 }: CreateBucketLineTileHandleOptions): BucketLineTileHandle | undefined {
   const lineBuckets = bucketTile.buckets.filter(isLineBucket);
@@ -39,6 +48,7 @@ export function createBucketLineTileHandle({
     return undefined;
   }
 
+  const { level: zoom, sourceId } = parseRenderTileCoordinateFromKey(bucketTile.key);
   const layersById = new Map(
     style.layers.filter(isLineLayer).map(layer => [layer.id, layer]),
   );
@@ -46,13 +56,19 @@ export function createBucketLineTileHandle({
   const collections: BucketLineCollectionHandle[] = [];
 
   for (const bucket of lineBuckets) {
-    const collectionHandle = createLineCollection(
-      bucket,
-      layersById,
-      style,
-    );
-    if (collectionHandle) {
-      collections.push(collectionHandle);
+    for (const layerId of bucket.layerIds) {
+      const collectionHandle = createLineCollection(
+        bucket,
+        layerId,
+        layersById,
+        featureStateResolver,
+        style,
+        sourceId,
+        zoom,
+      );
+      if (collectionHandle) {
+        collections.push(collectionHandle);
+      }
     }
   }
 
@@ -74,8 +90,12 @@ export function createBucketLineTileHandle({
 
 function createLineCollection(
   bucket: Bucket,
+  layerId: string,
   layersById: Map<string, LineLayerSpecification>,
+  featureStateResolver: FeatureStateResolver | undefined,
   style: StyleSpecification,
+  sourceId: string,
+  zoom: number,
 ): BucketLineCollectionHandle | undefined {
   const data = bucket.data as LineBucketData;
   const stats = bucket.stats as LineBucketStats;
@@ -88,12 +108,12 @@ function createLineCollection(
     return undefined;
   }
 
-  const layerId = bucket.layerIds[0];
   const layer = layersById.get(layerId);
   if (!layer) {
     return undefined;
   }
 
+  const filter = createFeatureFilter(layer.filter);
   const primitiveCountMax = Math.min(stats.polylineCount || 0, 10000000);
   const vertexCountMax = Math.min(stats.totalVertexCount || 0, 10000000);
 
@@ -106,15 +126,35 @@ function createLineCollection(
     vertexCountMax,
   });
 
-  const material = getLineMaterial(style, layer);
   const flyweight = new BufferPolyline();
-
   const vertexCounts = Array.from(data.vertexCounts);
   let vertexOffset = 0;
+  let polylineCount = 0;
 
-  for (let i = 0; i < vertexCounts.length; i++) {
-    const vertexCount = vertexCounts[i];
+  for (let index = 0; index < vertexCounts.length; index += 1) {
+    const vertexCount = vertexCounts[index]!;
     if (vertexCount < 2) {
+      vertexOffset += vertexCount;
+      continue;
+    }
+
+    const featureId = data.featureIds[vertexOffset];
+    const featureIndex = getFeatureIndexEntry(
+      bucket.featureIndex.entries,
+      featureId,
+    );
+    const featureState = featureStateResolver?.({
+      id: featureIndex?.id,
+      sourceId,
+      sourceLayer: bucket.sourceLayer,
+    });
+    const context = createPrimitiveStyleContext(featureIndex, {
+      featureState,
+      geometryType: 'LineString',
+      zoom,
+    });
+
+    if (!filter(context)) {
       vertexOffset += vertexCount;
       continue;
     }
@@ -129,7 +169,7 @@ function createLineCollection(
       continue;
     }
 
-    const featureId = data.featureIds[vertexOffset] ?? 0;
+    const material = getLineMaterial(style, layer, context);
 
     collection.add(
       {
@@ -138,19 +178,20 @@ function createLineCollection(
       },
       flyweight,
     );
-    flyweight.featureId = featureId;
+    flyweight.featureId = featureIndex?.id ?? 0;
 
     vertexOffset += vertexCount;
+    polylineCount += 1;
   }
 
   return {
     byteLength:
-            data.positions.byteLength
-            + data.vertexCounts.byteLength
-            + data.featureIds.byteLength,
+      data.positions.byteLength
+      + data.vertexCounts.byteLength
+      + data.featureIds.byteLength,
     collection,
     layerId,
-    polylineCount: stats.polylineCount,
+    polylineCount,
   };
 }
 

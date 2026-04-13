@@ -90,11 +90,11 @@ export class LineBucketBuilder {
       return;
     }
 
-    this.featureIndexEntries.push({
+    this.featureIndexEntries[localId] = {
       id: feature.id,
       properties: { ...feature.properties },
       type: 'line',
-    });
+    };
 
     this.positions.push(...tempPositions);
     this.vertexCounts.push(...tempVertexCounts);
@@ -142,7 +142,7 @@ export class LineBucketBuilder {
 
   build(): Bucket {
     const byteLength = calculateBucketByteLength(this._stats);
-    const featureIndexByteLength = calculateFeatureIndexByteLength(this.featureIndexEntries.length);
+    const featureIndexByteLength = calculateFeatureIndexByteLength(this.featureIndexEntries);
 
     this._stats.byteLength = byteLength;
 

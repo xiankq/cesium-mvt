@@ -30,6 +30,9 @@ export class FillBucketBuilder {
   private triangles: number[] = [];
   private holes: number[] = [];
   private featureIds: number[] = [];
+  private polygonHoleCounts: number[] = [];
+  private polygonTriangleCounts: number[] = [];
+  private polygonVertexCounts: number[] = [];
 
   private _stats: FillBucketStats = {
     type: 'fill',
@@ -61,11 +64,11 @@ export class FillBucketBuilder {
       return;
     }
 
-    this.featureIndexEntries.push({
+    this.featureIndexEntries[localId] = {
       id: feature.id,
       properties: { ...feature.properties },
       type: 'polygon',
-    });
+    };
 
     const geometry = feature.loadGeometry();
     const classifiedRings = classifyRings(geometry);
@@ -138,6 +141,9 @@ export class FillBucketBuilder {
     }
 
     this.holes.push(...flatHoles);
+    this.polygonHoleCounts.push(flatHoles.length);
+    this.polygonTriangleCounts.push(subdividedTriangles.length / 3);
+    this.polygonVertexCounts.push(subdividedPositions.length);
 
     this._stats.featureCount += 1;
     this._stats.polygonCount += 1;
@@ -162,14 +168,17 @@ export class FillBucketBuilder {
 
   build(): Bucket {
     const byteLength = calculateBucketByteLength(this._stats);
-    const featureIndexByteLength = calculateFeatureIndexByteLength(this.featureIndexEntries.length);
+    const featureIndexByteLength = calculateFeatureIndexByteLength(this.featureIndexEntries);
 
     this._stats.byteLength = byteLength;
 
     const data: FillBucketData = {
+      holes: new Uint32Array(this.holes),
+      polygonHoleCounts: new Uint32Array(this.polygonHoleCounts),
+      polygonTriangleCounts: new Uint32Array(this.polygonTriangleCounts),
+      polygonVertexCounts: new Uint32Array(this.polygonVertexCounts),
       positions: new Float64Array(this.positions),
       triangles: new Uint32Array(this.triangles),
-      holes: new Uint32Array(this.holes),
       featureIds: new Float32Array(this.featureIds),
     };
 

@@ -85,6 +85,31 @@ describe('cesiumVectorTile', () => {
     vectorTile.destroy();
   });
 
+  it('可以通过 setFeatureState 方法写入 feature-state', () => {
+    const vectorTile = new CesiumVectorTile();
+    const coordinator = {
+      setFeatureState: vi.fn(),
+      destroy: vi.fn(),
+    };
+    (vectorTile as any).coordinator = coordinator;
+
+    vectorTile.setFeatureState({
+      id: 1,
+      sourceId: 'places',
+    }, {
+      selected: true,
+    });
+
+    expect(coordinator.setFeatureState).toHaveBeenCalledWith({
+      id: 1,
+      sourceId: 'places',
+    }, {
+      selected: true,
+    });
+
+    vectorTile.destroy();
+  });
+
   it('销毁时清理所有资源', () => {
     const vectorTile = new CesiumVectorTile();
 

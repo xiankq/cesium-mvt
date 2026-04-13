@@ -1,3 +1,4 @@
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
 import {
   createMockEmptyBucketTile,
@@ -45,6 +46,150 @@ describe('bucket-line-backend', () => {
         expect(handle?.collections).toBeDefined();
         expect(handle?.collections.length).toBeGreaterThan(0);
         expect(handle?.byteLength).toBeGreaterThan(0);
+      });
+
+      it('应该按 filter 和数据驱动样式分别渲染同一 family 的要素', async () => {
+        const { BufferPolyline, BufferPolylineMaterial } = await import('cesium');
+        const { createBucketLineTileHandle }
+          = await import('@/mvt/render/backend/bucket-line-backend');
+
+        const bucketTile = createMockLineBucketTile({
+          featureCount: 2,
+          layerId: 'road-base',
+        });
+        const bucket = bucketTile.buckets[0]!;
+        bucket.layerIds = ['road-base', 'road-casing'];
+        bucket.featureIndex.entries[0]!.properties = {
+          color: '#112233',
+          kind: 'base',
+          width: 2,
+        };
+        bucket.featureIndex.entries[1]!.properties = {
+          color: '#445566',
+          kind: 'casing',
+          width: 4,
+        };
+
+        const style = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'filter': ['==', ['get', 'kind'], 'base'],
+              'id': 'road-base',
+              'paint': {
+                'line-color': ['get', 'color'],
+                'line-width': ['get', 'width'],
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'line' as const,
+            },
+            {
+              'filter': ['==', ['get', 'kind'], 'casing'],
+              'id': 'road-casing',
+              'paint': {
+                'line-color': ['get', 'color'],
+                'line-width': ['get', 'width'],
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'line' as const,
+            },
+          ],
+        } as StyleSpecification;
+
+        const handle = createBucketLineTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toHaveLength(2);
+
+        const baseCollection = handle!.collections.find(collection => collection.layerId === 'road-base');
+        const casingCollection = handle!.collections.find(collection => collection.layerId === 'road-casing');
+        expect(baseCollection).toBeDefined();
+        expect(casingCollection).toBeDefined();
+        expect(baseCollection?.collection.primitiveCount).toBe(1);
+        expect(casingCollection?.collection.primitiveCount).toBe(1);
+
+        const polyline = new BufferPolyline();
+        const material = new BufferPolylineMaterial();
+
+        baseCollection!.collection.get(0, polyline);
+        const baseMaterial = polyline.getMaterial(material) as unknown as {
+          color: {
+            alpha: number;
+            blue: number;
+            green: number;
+            red: number;
+          };
+          width: number;
+        };
+        expect(baseMaterial.color.red).toBeCloseTo(0x11 / 255, 4);
+        expect(baseMaterial.color.green).toBeCloseTo(0x22 / 255, 4);
+        expect(baseMaterial.color.blue).toBeCloseTo(0x33 / 255, 4);
+        expect(baseMaterial.width).toBe(2);
+
+        casingCollection!.collection.get(0, polyline);
+        const casingMaterial = polyline.getMaterial(material) as unknown as {
+          color: {
+            alpha: number;
+            blue: number;
+            green: number;
+            red: number;
+          };
+          width: number;
+        };
+        expect(casingMaterial.color.red).toBeCloseTo(0x44 / 255, 4);
+        expect(casingMaterial.color.green).toBeCloseTo(0x55 / 255, 4);
+        expect(casingMaterial.color.blue).toBeCloseTo(0x66 / 255, 4);
+        expect(casingMaterial.width).toBe(4);
+      });
+
+      it('应该为同一line bucket的多个layerId分别创建collection', async () => {
+        const { createBucketLineTileHandle }
+          = await import('@/mvt/render/backend/bucket-line-backend');
+
+        const bucketTile = createMockLineBucketTile({ layerId: 'road-base' });
+        bucketTile.buckets[0]!.layerIds = ['road-base', 'road-casing'];
+        const style: StyleSpecification = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'id': 'road-base',
+              'type': 'line' as const,
+              'source': 'source',
+              'source-layer': 'layer',
+              'paint': {
+                'line-color': '#00ff00',
+              },
+            },
+            {
+              'id': 'road-casing',
+              'type': 'line' as const,
+              'source': 'source',
+              'source-layer': 'layer',
+              'paint': {
+                'line-color': '#ff0000',
+              },
+            },
+          ],
+        };
+
+        const handle = createBucketLineTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toHaveLength(2);
+        expect(handle?.collections.map(collection => collection.layerId)).toEqual([
+          'road-base',
+          'road-casing',
+        ]);
       });
 
       it('应该处理bucket中的多个要素', async () => {

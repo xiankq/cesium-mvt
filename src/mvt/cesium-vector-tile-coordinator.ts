@@ -1,14 +1,27 @@
 import type { SourceSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
 import type { TileAvailability } from './source/tile-selection';
+import type { FeatureStateTarget } from './style/feature-state-store';
+import { RequestScheduler } from 'cesium';
 import { RenderManager } from './render';
 import { compileRenderTile } from './render/render-tile';
 import {
+  computeTileLifecycle,
   SourceManager,
   TileCacheManager,
   TileScheduler,
 } from './source';
+import { isThrottleError } from './source/request-scheduler';
+import { FeatureStateStore } from './style/feature-state-store';
 import { StyleManager } from './style/style-manager';
+import { isAbortError } from './utils/common';
+import { TileBudget } from './utils/tile-budget';
+
+const DEFAULT_SHARED_CACHE_SIZE = 320 * 1024 * 1024;
+
+interface RequestSchedulerRuntime {
+  update: () => void;
+}
 
 export interface CesiumVectorTileCoordinatorOptions {
   maximumLevel?: number;
@@ -32,7 +45,9 @@ export class CesiumVectorTileCoordinator {
   private readonly renderManager: RenderManager;
   private readonly sourceManager: SourceManager;
   private readonly styleManager: StyleManager;
+  private readonly featureStateManager: FeatureStateStore;
   private readonly tilingScheme: WebMercatorTilingScheme;
+  private readonly requestedTileKeys = new Set<string>();
 
   isDestroyed(): boolean {
     return this.destroyed;
@@ -49,12 +64,23 @@ export class CesiumVectorTileCoordinator {
       tilingScheme: options.tilingScheme,
     });
 
-    this.cacheManager = new TileCacheManager();
+    const sharedTileBudget = new TileBudget({
+      maxBytes: DEFAULT_SHARED_CACHE_SIZE,
+    });
+    this.cacheManager = new TileCacheManager({
+      readyTileBudget: sharedTileBudget,
+    });
     this.renderManager = new RenderManager({ root: options.root });
     this.cacheManager.setOnEvict((key: string) => {
       this.renderManager.remove(key);
     });
-    this.sourceManager = new SourceManager();
+    this.featureStateManager = new FeatureStateStore();
+    this.renderManager.setFeatureStateResolver(
+      target => this.featureStateManager.getFeatureState(target),
+    );
+    this.sourceManager = new SourceManager({
+      readyTileBudget: sharedTileBudget,
+    });
     this.styleManager = new StyleManager();
   }
 
@@ -63,17 +89,27 @@ export class CesiumVectorTileCoordinator {
       return;
     }
 
-    const tileSelection = this.scheduler.schedule(
-      frameState.camera,
-      frameState.viewportWidth,
-    );
+    try {
+      const nextRetryAt = this.sourceManager.getNextRetryAt(this.requestedTileKeys);
+      if (nextRetryAt !== undefined && Date.now() >= nextRetryAt) {
+        this.scheduler.invalidate();
+      }
 
-    if (!tileSelection || !this.scheduler.shouldUpdate(tileSelection)) {
-      return;
+      const tileSelection = this.scheduler.schedule(
+        frameState.camera,
+        frameState.viewportWidth,
+      );
+
+      if (!tileSelection || !this.scheduler.shouldUpdate(tileSelection)) {
+        return;
+      }
+
+      this.scheduler.commit(tileSelection);
+      this.processTileSelection(tileSelection.coordinates);
     }
-
-    this.scheduler.commit(tileSelection);
-    this.processTileSelection(tileSelection.coordinates);
+    finally {
+      (RequestScheduler as unknown as RequestSchedulerRuntime).update();
+    }
   }
 
   updateStyle(style: StyleSpecification): void {
@@ -81,9 +117,15 @@ export class CesiumVectorTileCoordinator {
       return;
     }
 
+    const hadStyle = this.styleManager.hasStyle();
     this.sourceManager.abortAll();
+    this.requestedTileKeys.clear();
     this.cacheManager.clear(true); // 样式更新时需要通知渲染层清理旧瓦片
     this.renderManager.clear();
+
+    if (hadStyle) {
+      this.featureStateManager.clear();
+    }
 
     this.styleManager.updateStyle({ style });
     this.sourceManager.reconcileSources(style.sources as Record<string, SourceSpecification>);
@@ -95,6 +137,31 @@ export class CesiumVectorTileCoordinator {
     return this.styleManager.getStyle();
   }
 
+  setFeatureState(
+    target: FeatureStateTarget,
+    state: Record<string, unknown>,
+  ): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    const changed = this.featureStateManager.setFeatureState(target, state);
+    if (!changed) {
+      return;
+    }
+
+    const style = this.styleManager.getStyle();
+    if (!style) {
+      return;
+    }
+
+    this.renderManager.refreshSource(
+      target.sourceId,
+      key => this.cacheManager.get(key),
+      style,
+    );
+  }
+
   destroy(): void {
     if (this.destroyed) {
       return;
@@ -104,6 +171,8 @@ export class CesiumVectorTileCoordinator {
     this.sourceManager.destroy();
     this.cacheManager.destroy();
     this.renderManager.destroy();
+    this.featureStateManager.clear();
+    this.requestedTileKeys.clear();
   }
 
   private processTileSelection(coordinates: any[]): void {
@@ -113,6 +182,8 @@ export class CesiumVectorTileCoordinator {
 
     const availableSourceIds = this.sourceManager.getSourceIds();
     const visibleKeys = new Set<string>();
+    const nextRequestedKeys = new Set<string>();
+    let nextPriority = 0;
 
     for (const sourceId of availableSourceIds) {
       const constraints = this.sourceManager.getSourceConstraints(sourceId);
@@ -137,8 +208,34 @@ export class CesiumVectorTileCoordinator {
       }
 
       for (const coord of sourceSelection.requestCoordinates) {
-        this.requestTile(sourceId, coord.level, coord.x, coord.y);
+        const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
+        const lifecycle = computeTileLifecycle({
+          coordinate: coord,
+          isCached: this.cacheManager.has(key),
+          isPending: this.cacheManager.hasPending(key),
+          isVisible: true,
+          sourceConstraints: constraints,
+        });
+
+        if (lifecycle === 'show') {
+          this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
+          continue;
+        }
+
+        nextRequestedKeys.add(key);
+        void this.requestTile(sourceId, coord.level, coord.x, coord.y, nextPriority);
+        nextPriority++;
       }
+    }
+
+    for (const key of this.requestedTileKeys) {
+      if (!nextRequestedKeys.has(key)) {
+        this.sourceManager.abort(key);
+      }
+    }
+    this.requestedTileKeys.clear();
+    for (const key of nextRequestedKeys) {
+      this.requestedTileKeys.add(key);
     }
 
     this.hideInvisibleTiles(visibleKeys);
@@ -185,6 +282,7 @@ export class CesiumVectorTileCoordinator {
     level: number,
     x: number,
     y: number,
+    priority = 0,
   ): Promise<void> {
     const key = this.resolveRenderTileKey(sourceId, level, x, y);
 
@@ -198,10 +296,6 @@ export class CesiumVectorTileCoordinator {
       if (style) {
         this.renderManager.mount(key, tile, style);
       }
-      return;
-    }
-
-    if (this.cacheManager.hasPending(key)) {
       return;
     }
 
@@ -226,7 +320,9 @@ export class CesiumVectorTileCoordinator {
       key,
       this.tilingScheme,
       renderTile,
+      style,
       () => {},
+      priority,
     );
     this.cacheManager.setPending(key, requestPromise);
 
@@ -242,13 +338,14 @@ export class CesiumVectorTileCoordinator {
       this.cacheManager.set(key, tile);
     }
     catch (error) {
+      if (isAbortError(error) || isThrottleError(error)) {
+        return;
+      }
+
       console.error(`[Coordinator] Failed to request tile ${key}:`, error);
-      // 样式已变更时不创建 empty handle，避免孤儿资源残留
       if (this.styleManager.getStyleEpoch() !== renderTile.epoch) {
         return;
       }
-      // 标记为 empty，避免每帧重复请求
-      this.renderManager.setEmpty(key);
     }
     finally {
       this.cacheManager.deletePending(key);
