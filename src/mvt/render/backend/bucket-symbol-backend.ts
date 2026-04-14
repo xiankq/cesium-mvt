@@ -13,6 +13,7 @@ import type {
 import { WebMercatorTilingScheme } from 'cesium';
 import { parseRenderTileCoordinateFromKey } from '../render-tile';
 import { createSymbolCollections } from './bucket-symbol-collection-builder';
+import { createSymbolPlacementGrid } from './symbol-placement-grid';
 
 export { resolveSymbolRenderDecision } from './symbol-render-utils';
 
@@ -42,6 +43,7 @@ export function createBucketSymbolTileHandle({
 
   const collections: BucketSymbolCollectionHandle[] = [];
   const placements: BucketSymbolPlacementHandle[] = [];
+  const placementGrid = createSymbolPlacementGrid();
 
   for (const bucket of symbolBuckets) {
     for (const layerId of bucket.layerIds) {
@@ -56,6 +58,7 @@ export function createBucketSymbolTileHandle({
         coordinate,
         tileWidth,
         tileRectangle,
+        placementGrid,
       );
       if (symbolCollections.collections.length > 0) {
         collections.push(...symbolCollections.collections);

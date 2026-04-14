@@ -9,6 +9,7 @@ export interface SymbolPlacementGridPlacement {
     halfWidth: number;
     overlapMode: 'always' | 'cooperative' | 'never';
   };
+  groupKey?: string;
   lineAngle?: number;
   layerId?: string;
   textAnchor?: string;
@@ -24,7 +25,7 @@ export interface SymbolPlacementGrid {
 const SYMBOL_PLACEMENT_GRID_DIMENSION = 32;
 
 export function createSymbolPlacementGrid(): SymbolPlacementGrid {
-  const placementsByKey = new Map<string, Map<string, SymbolPlacementGridPlacement[]>>();
+  const placementsByCell = new Map<string, SymbolPlacementGridPlacement[]>();
 
   return {
     insert(placement: SymbolPlacementGridPlacement): void {
@@ -33,14 +34,13 @@ export function createSymbolPlacementGrid(): SymbolPlacementGrid {
         return;
       }
 
-      const keyIndex = getOrCreateKeyIndex(placementsByKey, placement.key);
       for (const cellKey of getCoveredCellKeys(placement)) {
-        const cellPlacements = keyIndex.get(cellKey);
+        const cellPlacements = placementsByCell.get(cellKey);
         if (cellPlacements) {
           cellPlacements.push(placement);
         }
         else {
-          keyIndex.set(cellKey, [placement]);
+          placementsByCell.set(cellKey, [placement]);
         }
       }
     },
@@ -50,14 +50,9 @@ export function createSymbolPlacementGrid(): SymbolPlacementGrid {
         return [];
       }
 
-      const keyIndex = placementsByKey.get(placement.key);
-      if (!keyIndex) {
-        return [];
-      }
-
       const candidates = new Set<SymbolPlacementGridPlacement>();
       for (const cellKey of getCoveredCellKeys(placement)) {
-        const cellPlacements = keyIndex.get(cellKey);
+        const cellPlacements = placementsByCell.get(cellKey);
         if (!cellPlacements) {
           continue;
         }
@@ -129,20 +124,6 @@ function getPlacementBounds(
     minX: centerX - collision.halfWidth,
     minY: centerY - collision.halfHeight,
   };
-}
-
-function getOrCreateKeyIndex(
-  placementsByKey: Map<string, Map<string, SymbolPlacementGridPlacement[]>>,
-  key: string,
-): Map<string, SymbolPlacementGridPlacement[]> {
-  const keyIndex = placementsByKey.get(key);
-  if (keyIndex) {
-    return keyIndex;
-  }
-
-  const nextKeyIndex = new Map<string, SymbolPlacementGridPlacement[]>();
-  placementsByKey.set(key, nextKeyIndex);
-  return nextKeyIndex;
 }
 
 function clampCellIndex(index: number, maxCellIndex: number): number {

@@ -8,7 +8,10 @@ import type { SymbolLayerStyle } from '../../style/layer-style-resolver';
 import type {
   BucketSymbolCollectionHandle,
   BucketSymbolPlacementHandle,
+  BucketSymbolPlacementPartHandle,
+  BucketSymbolRenderableHandle,
 } from './bucket-symbol-types';
+import type { SymbolPlacementGrid, SymbolPlacementGridPlacement } from './symbol-placement-grid';
 import type { TileCoordinate, TileNativeRectangle } from './symbol-placement-utils';
 import {
   BillboardCollection,
@@ -27,7 +30,6 @@ import {
   createPrimitiveStyleContext,
   getFeatureIndexEntry,
 } from './primitive-style';
-import { createSymbolPlacementGrid } from './symbol-placement-grid';
 import {
   createSymbolPlacementKey,
   resolveIconPlacement,
@@ -39,7 +41,6 @@ import {
   resolveTranslatedSymbolPosition,
 } from './symbol-placement-utils';
 import {
-  combineSymbolCollisions,
   convertHorizontalOrigin,
   convertVerticalOrigin,
   layoutFormattedSymbolContent,
@@ -74,6 +75,7 @@ export function createSymbolCollections(
   tileCoordinate: TileCoordinate,
   tileWidth: number,
   tileRectangle: TileNativeRectangle,
+  placementGrid: SymbolPlacementGrid,
 ): {
   collections: BucketSymbolCollectionHandle[];
   placements: BucketSymbolPlacementHandle[];
@@ -101,7 +103,6 @@ export function createSymbolCollections(
   const filter = createFeatureFilter(layer.filter);
   const placements: SymbolPlacement[] = [];
   const bucketPlacements: BucketSymbolPlacementHandle[] = [];
-  const placementGrid = createSymbolPlacementGrid();
 
   const pointCount = data.positions.length / 3;
 
@@ -135,14 +136,13 @@ export function createSymbolCollections(
     }
 
     const symbolStyle = resolveStyle(context);
+    const position = Cartesian3.fromElements(x, y, z);
     placements.push({
-      position: Cartesian3.fromElements(x, y, z),
+      position,
       lineAngle: data.lineAngles?.[index],
       sourceIndex: index,
       symbolStyle,
-      viewportLatitude: symbolStyle.zOrder === 'viewport-y'
-        ? getViewportLatitude(Cartesian3.fromElements(x, y, z))
-        : undefined,
+      viewportLatitude: getViewportLatitude(position),
     });
   }
 
@@ -249,31 +249,32 @@ export function createSymbolCollections(
       continue;
     }
     const { shouldRenderText, shouldRenderIcon } = renderDecision;
-
+    const collisionParts: BucketSymbolPlacementPartHandle[] = [];
     const bucketPlacement: BucketSymbolPlacementHandle = {
       ...basePlacement,
-      collision: combineSymbolCollisions(
-        basePlacement.anchorX,
-        basePlacement.anchorY,
-        shouldRenderText ? textPlacement : undefined,
-        shouldRenderIcon ? iconPlacement : undefined,
-      ),
+      collisionParts,
       lineAngle: placement.lineAngle,
+      renderables: [],
+      sortByViewportY: shouldSortByViewportY(symbolStyle),
+      sortKeyIsConstant: symbolStyle.sortKeyIsConstant,
+      sortKey: symbolStyle.sortKey,
       sourceIndex: placement.sourceIndex,
       sourceLayer: bucket.sourceLayer,
-      textAnchor: shouldRenderText
-        ? textPlacement?.textAnchor
-        : iconPlacement?.iconAnchor,
-      textOffset: shouldRenderText
-        ? textPlacement?.textOffset
-        : iconPlacement?.iconOffset,
+      viewportLatitude: placement.viewportLatitude,
       layerId,
-      renderables: [],
+      zOrder: symbolStyle.zOrder,
     };
-
-    let hasRenderableContent = false;
+    const placementGroupKey = createSymbolPlacementGroupKey(
+      sourceId,
+      tileCoordinate.level,
+      tileCoordinate.x,
+      tileCoordinate.y,
+      layerId,
+      placement.sourceIndex,
+    );
 
     if (shouldRenderIcon && fittedIconImage && iconPlacement) {
+      const renderables: BucketSymbolRenderableHandle[] = [];
       billboardCollection.add({
         color: resolveColor(
           symbolStyle.iconColor,
@@ -298,15 +299,31 @@ export function createSymbolCollections(
           iconPlacement.iconAnchor,
         ),
       });
-      bucketPlacement.renderables.push({
+      renderables.push({
         collection: billboardCollection,
         index: billboardCount,
       });
       billboardCount += 1;
-      hasRenderableContent = true;
+      appendPlacementPart(bucketPlacement, collisionParts, placementGrid, {
+        collision: iconPlacement.collision,
+        groupKey: placementGroupKey,
+        kind: 'icon',
+        renderables,
+        textAnchor: iconPlacement.iconAnchor,
+        textOffset: iconPlacement.iconOffset,
+      }, {
+        anchorX: basePlacement.anchorX,
+        anchorY: basePlacement.anchorY,
+        collision: iconPlacement.collision,
+        groupKey: placementGroupKey,
+        key: basePlacement.key,
+        layerId: basePlacement.layerId,
+        lineAngle: placement.lineAngle,
+      });
     }
 
     if (shouldRenderText && textPlacement) {
+      const renderables: BucketSymbolRenderableHandle[] = [];
       if (formattedLayout) {
         const groupOffset = resolveFormattedGroupPixelOffset(
           textPlacement.textAnchor,
@@ -334,12 +351,11 @@ export function createSymbolCollections(
               width: section.width,
               verticalOrigin: CesiumVerticalOrigin.TOP,
             });
-            bucketPlacement.renderables.push({
+            renderables.push({
               collection: billboardCollection,
               index: billboardCount,
             });
             billboardCount += 1;
-            hasRenderableContent = true;
             continue;
           }
 
@@ -366,12 +382,11 @@ export function createSymbolCollections(
             text: section.text,
             verticalOrigin: CesiumVerticalOrigin.TOP,
           });
-          bucketPlacement.renderables.push({
+          renderables.push({
             collection: labelCollection,
             index: labelCount,
           });
           labelCount += 1;
-          hasRenderableContent = true;
         }
       }
       else {
@@ -395,20 +410,33 @@ export function createSymbolCollections(
           text: renderedSymbolText,
           verticalOrigin: convertVerticalOrigin(textPlacement.textAnchor),
         });
-        bucketPlacement.renderables.push({
+        renderables.push({
           collection: labelCollection,
           index: labelCount,
         });
         labelCount += 1;
-        hasRenderableContent = true;
       }
+
+      appendPlacementPart(bucketPlacement, collisionParts, placementGrid, {
+        collision: textPlacement.collision,
+        groupKey: placementGroupKey,
+        kind: 'text',
+        renderables,
+        textAnchor: textPlacement.textAnchor,
+        textOffset: textPlacement.textOffset,
+      }, {
+        anchorX: basePlacement.anchorX,
+        anchorY: basePlacement.anchorY,
+        collision: textPlacement.collision,
+        groupKey: placementGroupKey,
+        key: basePlacement.key,
+        layerId: basePlacement.layerId,
+        lineAngle: placement.lineAngle,
+      });
     }
 
-    if (hasRenderableContent) {
+    if (bucketPlacement.renderables.length > 0) {
       bucketPlacements.push(bucketPlacement);
-      if (bucketPlacement.collision?.blocksOtherSymbols) {
-        placementGrid.insert(bucketPlacement);
-      }
     }
   }
 
@@ -444,11 +472,45 @@ export function createSymbolCollections(
   };
 }
 
+function appendPlacementPart(
+  bucketPlacement: BucketSymbolPlacementHandle,
+  collisionParts: BucketSymbolPlacementPartHandle[],
+  placementGrid: SymbolPlacementGrid,
+  part: BucketSymbolPlacementPartHandle,
+  gridPlacement: SymbolPlacementGridPlacement,
+): void {
+  if (part.renderables.length === 0) {
+    return;
+  }
+
+  collisionParts.push(part);
+  bucketPlacement.renderables.push(...part.renderables);
+
+  if (gridPlacement.collision?.blocksOtherSymbols) {
+    placementGrid.insert(gridPlacement);
+  }
+}
+
+function createSymbolPlacementGroupKey(
+  sourceId: string,
+  level: number,
+  tileX: number,
+  tileY: number,
+  layerId: string,
+  sourceIndex: number,
+): string {
+  return `${sourceId}/${level}/${tileX}/${tileY}|${layerId}|${sourceIndex}`;
+}
+
 export function compareSymbolPlacements(
   left: SymbolPlacement,
   right: SymbolPlacement,
 ): number {
-  if (left.symbolStyle.sortKey !== undefined || right.symbolStyle.sortKey !== undefined) {
+  if (
+    left.symbolStyle.zOrder !== 'viewport-y'
+    && right.symbolStyle.zOrder !== 'viewport-y'
+    && (left.symbolStyle.sortKey !== undefined || right.symbolStyle.sortKey !== undefined)
+  ) {
     const leftSortKey = left.symbolStyle.sortKey ?? 0;
     const rightSortKey = right.symbolStyle.sortKey ?? 0;
     if (leftSortKey !== rightSortKey) {
@@ -456,9 +518,7 @@ export function compareSymbolPlacements(
     }
   }
 
-  const leftOrderMode = resolveSymbolOrderMode(left.symbolStyle);
-  const rightOrderMode = resolveSymbolOrderMode(right.symbolStyle);
-  if (leftOrderMode !== 'source' || rightOrderMode !== 'source') {
+  if (shouldSortByViewportY(left.symbolStyle) && shouldSortByViewportY(right.symbolStyle)) {
     const leftLatitude = left.viewportLatitude ?? getViewportLatitude(left.position);
     const rightLatitude = right.viewportLatitude ?? getViewportLatitude(right.position);
     if (leftLatitude !== rightLatitude) {
@@ -467,6 +527,33 @@ export function compareSymbolPlacements(
   }
 
   return left.sourceIndex - right.sourceIndex;
+}
+
+function shouldSortByViewportY(
+  symbolStyle: SymbolLayerStyle,
+): boolean {
+  if (symbolStyle.zOrder === 'viewport-y') {
+    return true;
+  }
+
+  if (symbolStyle.zOrder === 'auto') {
+    const sortKeyIsConstant = symbolStyle.sortKeyIsConstant ?? true;
+    if (sortKeyIsConstant) {
+      const canOverlap = symbolStyle.textOverlap === 'always'
+        || symbolStyle.textOverlap === 'cooperative'
+        || symbolStyle.textAllowOverlap
+        || symbolStyle.textIgnorePlacement
+        || symbolStyle.iconOverlap === 'always'
+        || symbolStyle.iconOverlap === 'cooperative'
+        || symbolStyle.iconAllowOverlap
+        || symbolStyle.iconIgnorePlacement;
+      if (canOverlap) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function resolveFormattedGroupPixelOffset(
@@ -480,10 +567,4 @@ function resolveFormattedGroupPixelOffset(
     (offset?.[0] ?? 0) + anchorOffset.x - (width / 2),
     (offset?.[1] ?? 0) + anchorOffset.y - (height / 2),
   );
-}
-
-function resolveSymbolOrderMode(
-  symbolStyle: SymbolLayerStyle,
-): 'source' | 'viewport-y' {
-  return symbolStyle.zOrder === 'source' ? 'source' : 'viewport-y';
 }

@@ -377,7 +377,26 @@ describe('layer-style-resolver', () => {
       const result = resolver(createFeatureContext({ name: 'museum', priority: 7 }));
 
       expect((result as { sortKey?: number }).sortKey).toBe(7);
+      expect((result as { sortKeyIsConstant?: boolean }).sortKeyIsConstant).toBe(false);
       expect((result as { zOrder?: string }).zOrder).toBe('viewport-y');
+    });
+
+    it('解析静态 symbol-sort-key 时应该保留常量语义', () => {
+      const layer: SymbolLayerSpecification = {
+        id: 'test',
+        layout: {
+          'symbol-sort-key': 0,
+          'text-field': ['get', 'name'],
+        },
+        source: 'test',
+        type: 'symbol',
+      };
+
+      const resolver = createSymbolLayerStyleResolver(layer);
+      const result = resolver(createFeatureContext({ name: 'museum' }));
+
+      expect((result as { sortKey?: number }).sortKey).toBe(0);
+      expect((result as { sortKeyIsConstant?: boolean }).sortKeyIsConstant).toBe(true);
     });
 
     it('解析 text-optional 和 icon-optional', () => {

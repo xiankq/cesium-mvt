@@ -26,6 +26,7 @@ export interface StylePropertyContext {
 
 export interface StylePropertyEvaluator<T = unknown> {
   (context: StylePropertyContext): T;
+  isConstant?: boolean;
 }
 
 function colorToHex(color: Color): string {
@@ -192,8 +193,7 @@ export function createNumberPropertyEvaluator(
   defaultValue?: number,
 ): StylePropertyEvaluator<number> {
   const expression = normalizePropertyExpression(value as any, NUMBER_SPEC);
-
-  return (context: StylePropertyContext): number => {
+  const evaluator: StylePropertyEvaluator<number> = (context: StylePropertyContext): number => {
     const evaluated = evaluateStyleExpression(expression, context);
 
     if (typeof evaluated === 'number') {
@@ -202,6 +202,8 @@ export function createNumberPropertyEvaluator(
 
     return defaultValue ?? 0;
   };
+  evaluator.isConstant = expression.kind === 'constant';
+  return evaluator;
 }
 
 export function createNumberArrayPropertyEvaluator(

@@ -10,6 +10,7 @@ import { CesiumVectorTileCoordinator } from './cesium-vector-tile-coordinator';
 import { loadStyleSet } from './style/style-loader';
 
 export interface CesiumVectorTileOptions {
+  crossSourceCollisions?: boolean;
   maximumLevel?: number;
   minimumLevel?: number;
   rectangle?: Rectangle;
@@ -54,6 +55,7 @@ export class CesiumVectorTile extends PrimitiveCollection {
     const tilingScheme = options.tilingScheme ?? new WebMercatorTilingScheme();
 
     this.coordinator = new CesiumVectorTileCoordinator({
+      crossSourceCollisions: options.crossSourceCollisions,
       maximumLevel: options.maximumLevel,
       minimumLevel: options.minimumLevel ?? 0,
       rectangle: this._rectangle,

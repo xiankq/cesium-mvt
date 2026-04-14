@@ -44,8 +44,8 @@ export function createSymbolPlacementKey(
     : symbolText.key;
   const identity = symbolIdentity || resolveStyleImageName(symbolStyle.iconImage) || '';
 
-  // MapLibre 的 cross-tile 去重核心是“文本 + 锚点”，图标只在没有文本时作为兜底身份。
-  // 这样同名 label 不会因为 icon 差异被拆成两个独立符号。
+  // 这个 key 只作为稳定身份和排序辅助，不参与碰撞判定；
+  // 碰撞是否隐藏由空间盒子和 placement index 决定。
   return `${sourceId}|${layerId}|${identity}`;
 }
 

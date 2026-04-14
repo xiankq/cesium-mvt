@@ -15,6 +15,17 @@ describe('cesiumVectorTile', () => {
     vectorTile.destroy();
   });
 
+  it('可以通过 crossSourceCollisions 选项关闭跨 source 碰撞', () => {
+    const vectorTile = new CesiumVectorTile({
+      crossSourceCollisions: false,
+    });
+
+    const renderManager = (vectorTile as any).coordinator.renderManager;
+    expect(renderManager.crossSourceCollisions).toBe(false);
+
+    vectorTile.destroy();
+  });
+
   it('可以通过 fromUrl 静态方法创建实例', async () => {
     vi.stubGlobal(
       'fetch',

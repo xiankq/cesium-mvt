@@ -1,3 +1,5 @@
+import { isSymbolOverlapAllowed } from './symbol-placement-utils';
+
 export interface SymbolPlacementIndexCollision {
   blocksOtherSymbols: boolean;
   centerOffsetX: number;
@@ -11,8 +13,10 @@ export interface SymbolPlacementIndexPlacement {
   anchorX: number;
   anchorY: number;
   collision?: SymbolPlacementIndexCollision;
+  groupKey?: string;
   key: string;
   level: number;
+  tileKey: string;
 }
 
 export interface SymbolPlacementIndex {
@@ -20,7 +24,7 @@ export interface SymbolPlacementIndex {
   insert: (placement: SymbolPlacementIndexPlacement) => void;
 }
 
-const SYMBOL_MATCH_TOLERANCE = 1;
+const SYMBOL_MATCH_GRID_SIZE = 4;
 const SYMBOL_MATCH_MAX_RADIUS = 4;
 
 interface PlacementIndexLevel {
@@ -28,8 +32,13 @@ interface PlacementIndexLevel {
   collisionCells: Map<string, SymbolPlacementIndexPlacement[]>;
 }
 
-export function createSymbolPlacementIndex(): SymbolPlacementIndex {
+export function createSymbolPlacementIndex(options: {
+  tileWidth?: number;
+} = {}): SymbolPlacementIndex {
+  const tileWidth = options.tileWidth ?? 256;
   const placementsByKey = new Map<string, Map<number, PlacementIndexLevel>>();
+  const placementsByLevel = new Map<number, PlacementIndexLevel>();
+  const claimedKeyMatches = new Set<SymbolPlacementIndexPlacement>();
 
   return {
     hasMatch(placement: SymbolPlacementIndexPlacement): boolean {
@@ -38,11 +47,20 @@ export function createSymbolPlacementIndex(): SymbolPlacementIndex {
       }
 
       const keyIndex = placementsByKey.get(placement.key);
-      if (!keyIndex) {
-        return false;
+      if (keyIndex) {
+        const candidate = findUnclaimedKeyMatch(
+          keyIndex,
+          placement,
+          tileWidth,
+          claimedKeyMatches,
+        );
+        if (candidate) {
+          claimedKeyMatches.add(candidate);
+          return true;
+        }
       }
 
-      for (const [candidateLevel, levelIndex] of keyIndex) {
+      for (const [candidateLevel, levelIndex] of placementsByLevel) {
         const candidates = collectCandidates(levelIndex, placement, candidateLevel);
         for (const candidate of candidates) {
           if (isMatchingSymbolPlacement(candidate, placement)) {
@@ -60,29 +78,41 @@ export function createSymbolPlacementIndex(): SymbolPlacementIndex {
       }
 
       const keyIndex = getOrCreateKeyIndex(placementsByKey, placement.key);
-      const levelIndex = getOrCreateLevelIndex(keyIndex, placement.level);
+      insertPlacementIntoLevelIndex(
+        getOrCreateLevelIndex(keyIndex, placement.level),
+        placement,
+      );
 
-      for (const cellKey of getAnchorCellKeys(placement)) {
-        const cellPlacements = levelIndex.anchorCells.get(cellKey);
-        if (cellPlacements) {
-          cellPlacements.push(placement);
-        }
-        else {
-          levelIndex.anchorCells.set(cellKey, [placement]);
-        }
-      }
-
-      for (const cellKey of getCollisionCellKeys(placement)) {
-        const cellPlacements = levelIndex.collisionCells.get(cellKey);
-        if (cellPlacements) {
-          cellPlacements.push(placement);
-        }
-        else {
-          levelIndex.collisionCells.set(cellKey, [placement]);
-        }
-      }
+      const levelIndex = getOrCreateLevelIndex(placementsByLevel, placement.level);
+      insertPlacementIntoLevelIndex(levelIndex, placement);
     },
   };
+}
+
+function findUnclaimedKeyMatch(
+  keyIndex: Map<number, PlacementIndexLevel>,
+  placement: SymbolPlacementIndexPlacement,
+  tileWidth: number,
+  claimedKeyMatches: Set<SymbolPlacementIndexPlacement>,
+): SymbolPlacementIndexPlacement | undefined {
+  for (const [candidateLevel, levelIndex] of keyIndex) {
+    const candidates = collectCandidates(levelIndex, placement, candidateLevel);
+    for (const candidate of candidates) {
+      if (candidate.tileKey === placement.tileKey) {
+        continue;
+      }
+
+      if (claimedKeyMatches.has(candidate)) {
+        continue;
+      }
+
+      if (isKeyMatchedSymbolPlacement(candidate, placement, tileWidth)) {
+        return candidate;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function collectCandidates(
@@ -206,6 +236,21 @@ function getPlacementCenter(
   };
 }
 
+function getPlacementGridPoint(
+  placement: SymbolPlacementIndexPlacement,
+  referenceLevel: number,
+  tileWidth: number,
+): {
+  x: number;
+  y: number;
+} {
+  const scale = (2 ** referenceLevel) * tileWidth / SYMBOL_MATCH_GRID_SIZE;
+  return {
+    x: Math.floor(placement.anchorX * scale),
+    y: Math.floor(placement.anchorY * scale),
+  };
+}
+
 function getPlacementScale(level: number): number {
   return 2 ** level;
 }
@@ -215,12 +260,12 @@ function getPlacementTolerance(
   placementLevel: number,
 ): number {
   if (candidateLevel < placementLevel) {
-    return SYMBOL_MATCH_TOLERANCE;
+    return 1;
   }
 
   return Math.min(
     SYMBOL_MATCH_MAX_RADIUS,
-    SYMBOL_MATCH_TOLERANCE * 2 ** (candidateLevel - placementLevel),
+    2 ** (candidateLevel - placementLevel),
   );
 }
 
@@ -250,37 +295,72 @@ function isMatchingSymbolPlacement(
   candidate: SymbolPlacementIndexPlacement,
   placement: SymbolPlacementIndexPlacement,
 ): boolean {
-  if (candidate.collision && placement.collision) {
-    return hasMatchingCollision(candidate, placement);
+  if (!candidate.collision?.blocksOtherSymbols || !placement.collision) {
+    return false;
+  }
+
+  if (candidate.groupKey && placement.groupKey && candidate.groupKey === placement.groupKey) {
+    return false;
+  }
+
+  if (isSymbolOverlapAllowed(placement.collision.overlapMode, candidate.collision.overlapMode)) {
+    return false;
   }
 
   if (hasMatchingCollision(candidate, placement)) {
     return true;
   }
 
-  const scale = getPlacementScale(candidate.level);
-  const tolerance = getPlacementTolerance(candidate.level, placement.level);
-  return Math.abs(candidate.anchorX * scale - placement.anchorX * scale) <= tolerance
-    && Math.abs(candidate.anchorY * scale - placement.anchorY * scale) <= tolerance;
+  return false;
 }
 
-function hasMatchingCollision(
+function isKeyMatchedSymbolPlacement(
   candidate: SymbolPlacementIndexPlacement,
   placement: SymbolPlacementIndexPlacement,
+  tileWidth: number,
 ): boolean {
-  if (!candidate.collision?.blocksOtherSymbols || !placement.collision) {
+  if (!candidate.collision || !placement.collision) {
     return false;
   }
 
-  const candidateCenterX = candidate.anchorX + candidate.collision.centerOffsetX;
-  const candidateCenterY = candidate.anchorY + candidate.collision.centerOffsetY;
-  const placementCenterX = placement.anchorX + placement.collision.centerOffsetX;
-  const placementCenterY = placement.anchorY + placement.collision.centerOffsetY;
+  if (candidate.groupKey && placement.groupKey && candidate.groupKey === placement.groupKey) {
+    return false;
+  }
 
-  const deltaX = Math.abs(candidateCenterX - placementCenterX);
-  const deltaY = Math.abs(candidateCenterY - placementCenterY);
-  return deltaX <= candidate.collision.halfWidth + placement.collision.halfWidth
-    && deltaY <= candidate.collision.halfHeight + placement.collision.halfHeight;
+  if (isSymbolOverlapAllowed(placement.collision.overlapMode, candidate.collision.overlapMode)) {
+    return false;
+  }
+
+  const candidatePoint = getPlacementGridPoint(candidate, placement.level, tileWidth);
+  const placementPoint = getPlacementGridPoint(placement, placement.level, tileWidth);
+  const tolerance = getPlacementTolerance(candidate.level, placement.level);
+  return Math.abs(candidatePoint.x - placementPoint.x) <= tolerance
+    && Math.abs(candidatePoint.y - placementPoint.y) <= tolerance;
+}
+
+function insertPlacementIntoLevelIndex(
+  levelIndex: PlacementIndexLevel,
+  placement: SymbolPlacementIndexPlacement,
+): void {
+  for (const cellKey of getAnchorCellKeys(placement)) {
+    const cellPlacements = levelIndex.anchorCells.get(cellKey);
+    if (cellPlacements) {
+      cellPlacements.push(placement);
+    }
+    else {
+      levelIndex.anchorCells.set(cellKey, [placement]);
+    }
+  }
+
+  for (const cellKey of getCollisionCellKeys(placement)) {
+    const cellPlacements = levelIndex.collisionCells.get(cellKey);
+    if (cellPlacements) {
+      cellPlacements.push(placement);
+    }
+    else {
+      levelIndex.collisionCells.set(cellKey, [placement]);
+    }
+  }
 }
 
 function getOrCreateKeyIndex(
@@ -297,11 +377,32 @@ function getOrCreateKeyIndex(
   return nextKeyIndex;
 }
 
+function hasMatchingCollision(
+  candidate: SymbolPlacementIndexPlacement,
+  placement: SymbolPlacementIndexPlacement,
+): boolean {
+  const candidateCollision = candidate.collision;
+  const placementCollision = placement.collision;
+  if (!candidateCollision || !placementCollision) {
+    return false;
+  }
+
+  const candidateCenterX = candidate.anchorX + candidateCollision.centerOffsetX;
+  const candidateCenterY = candidate.anchorY + candidateCollision.centerOffsetY;
+  const placementCenterX = placement.anchorX + placementCollision.centerOffsetX;
+  const placementCenterY = placement.anchorY + placementCollision.centerOffsetY;
+
+  const deltaX = Math.abs(candidateCenterX - placementCenterX);
+  const deltaY = Math.abs(candidateCenterY - placementCenterY);
+  return deltaX <= candidateCollision.halfWidth + placementCollision.halfWidth
+    && deltaY <= candidateCollision.halfHeight + placementCollision.halfHeight;
+}
+
 function getOrCreateLevelIndex(
-  keyIndex: Map<number, PlacementIndexLevel>,
+  placementsByLevel: Map<number, PlacementIndexLevel>,
   level: number,
 ): PlacementIndexLevel {
-  const levelIndex = keyIndex.get(level);
+  const levelIndex = placementsByLevel.get(level);
   if (levelIndex) {
     return levelIndex;
   }
@@ -310,7 +411,7 @@ function getOrCreateLevelIndex(
     anchorCells: new Map<string, SymbolPlacementIndexPlacement[]>(),
     collisionCells: new Map<string, SymbolPlacementIndexPlacement[]>(),
   };
-  keyIndex.set(level, nextLevelIndex);
+  placementsByLevel.set(level, nextLevelIndex);
   return nextLevelIndex;
 }
 

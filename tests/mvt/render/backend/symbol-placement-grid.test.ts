@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSymbolPlacementGrid } from '@/mvt/render/backend/symbol-placement-grid';
 
 describe('symbol-placement-grid', () => {
-  it('应该只返回同 key 的相邻 placement', () => {
+  it('应该只返回空间相邻的 placement', () => {
     const grid = createSymbolPlacementGrid();
     const nearAccepted = createPlacement('source|layer|Museum', 0.12, 0.12);
     const farAccepted = createPlacement('source|layer|Museum', 0.9, 0.9);
@@ -14,8 +14,9 @@ describe('symbol-placement-grid', () => {
 
     const candidates = grid.query(createPlacement('source|layer|Museum', 0.13, 0.13));
 
-    expect(candidates).toHaveLength(1);
-    expect(candidates[0]).toBe(nearAccepted);
+    expect(candidates).toHaveLength(2);
+    expect(candidates).toContain(nearAccepted);
+    expect(candidates).toContain(differentKeyAccepted);
   });
 
   it('应该去重跨多个 cell 的 placement', () => {

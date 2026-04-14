@@ -128,8 +128,8 @@ export function createSymbolPlacementCollision(
       ?? (symbolStyle.iconAllowOverlap ? 'always' : 'never'));
 
   const blocksOtherSymbols = content.text
-    ? !(symbolStyle.textIgnorePlacement || overlapMode === 'always')
-    : !(symbolStyle.iconIgnorePlacement || overlapMode === 'always');
+    ? !symbolStyle.textIgnorePlacement
+    : !symbolStyle.iconIgnorePlacement;
 
   const measured = measureSymbolContentBox(symbolStyle, content, iconImage, formattedLayout);
   const width = measured.width;
@@ -161,17 +161,40 @@ export function shouldSkipSymbolPlacement(
 
   const candidates = placementGrid.query(placement);
   for (const accepted of candidates) {
+    if (accepted.groupKey && placement.groupKey && accepted.groupKey === placement.groupKey) {
+      continue;
+    }
+
     const acceptedCollision = accepted.collision;
     if (!acceptedCollision?.blocksOtherSymbols) {
       continue;
     }
 
-    if (hasCollisionOverlap(accepted, placement)) {
+    const overlaps = hasCollisionOverlap(accepted, placement);
+    if (
+      overlaps
+      && !isSymbolOverlapAllowed(collision.overlapMode, acceptedCollision.overlapMode)
+    ) {
       return true;
     }
   }
 
   return false;
+}
+
+export function isSymbolOverlapAllowed(
+  overlapModeA: SymbolCollision['overlapMode'],
+  overlapModeB: SymbolCollision['overlapMode'],
+): boolean {
+  if (overlapModeA === 'always') {
+    return true;
+  }
+
+  if (overlapModeA === 'never' || overlapModeB === 'never') {
+    return false;
+  }
+
+  return true;
 }
 
 export function shouldSkipTextAngle(

@@ -174,6 +174,28 @@ describe('bucket-symbol-backend', () => {
     expect(labelCollection.get(1).text).toBe('South');
   });
 
+  it('应该让同 tile 的不同 symbol layer 共享碰撞隐藏', () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const bucketTile = createCrossLayerSymbolBucketTile();
+    const style = createCrossLayerSymbolStyle();
+
+    const handle = createBucketSymbolTileHandle({
+      bucketTile,
+      style,
+    });
+
+    expect(handle).toBeDefined();
+
+    const labelCollections = handle!.collections
+      .filter(entry => entry.collection instanceof LabelCollection)
+      .map(entry => entry.collection as LabelCollection);
+
+    expect(handle?.placements).toHaveLength(1);
+    expect(labelCollections).toHaveLength(1);
+    expect(labelCollections[0]?.get(0).show).toBe(true);
+  });
+
   it('应该在 auto symbol-z-order 下按视口 y 排序同层符号', () => {
     vi.stubGlobal('document', createDocumentStub());
 
@@ -644,8 +666,8 @@ function createDocumentStub() {
   };
 }
 
-function createSymbolBucketTile(name = 'Museum') {
-  const builder = new SymbolBucketBuilder(createBucketOptions());
+function createSymbolBucketTile(name = 'Museum', layerId = 'poi-layer') {
+  const builder = new SymbolBucketBuilder(createBucketOptions(layerId));
   builder.addFeature({
     id: 7,
     loadGeometry: () => [[{ x: 512, y: 512 }]],
@@ -661,6 +683,38 @@ function createSymbolBucketTile(name = 'Museum') {
   return {
     buckets: [bucket],
     byteLength: bucket.stats.byteLength,
+    epoch: 1,
+    key: 'source/0/0/0',
+  };
+}
+
+function createCrossLayerSymbolBucketTile() {
+  const firstBuilder = new SymbolBucketBuilder(createBucketOptions('poi-layer-a'));
+  firstBuilder.addFeature({
+    id: 7,
+    loadGeometry: () => [[{ x: 1536, y: 1536 }]],
+    properties: {
+      name: 'Museum',
+    },
+    type: 1,
+  } as any, 0);
+
+  const secondBuilder = new SymbolBucketBuilder(createBucketOptions('poi-layer-b'));
+  secondBuilder.addFeature({
+    id: 8,
+    loadGeometry: () => [[{ x: 1536, y: 1536 }]],
+    properties: {
+      name: 'School',
+    },
+    type: 1,
+  } as any, 0);
+
+  const firstBucket = firstBuilder.build();
+  const secondBucket = secondBuilder.build();
+
+  return {
+    buckets: [firstBucket, secondBucket],
+    byteLength: firstBucket.stats.byteLength + secondBucket.stats.byteLength,
     epoch: 1,
     key: 'source/0/0/0',
   };
@@ -778,14 +832,44 @@ function createSortedSymbolBucketTile() {
   };
 }
 
-function createBucketOptions(symbolPlacement?: 'point' | 'line' | 'line-center') {
+function createCrossLayerSymbolStyle(): StyleSpecification {
+  return {
+    version: 8,
+    sources: {},
+    layers: [
+      {
+        'id': 'poi-layer-a',
+        'type': 'symbol',
+        'source': 'source',
+        'source-layer': 'layer',
+        'layout': {
+          'text-field': ['get', 'name'],
+        },
+      },
+      {
+        'id': 'poi-layer-b',
+        'type': 'symbol',
+        'source': 'source',
+        'source-layer': 'layer',
+        'layout': {
+          'text-field': ['get', 'name'],
+        },
+      },
+    ],
+  };
+}
+
+function createBucketOptions(
+  layerId = 'poi-layer',
+  symbolPlacement?: 'point' | 'line' | 'line-center',
+) {
   const tilingScheme = new WebMercatorTilingScheme();
   const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
 
   return {
     extent: 4096,
     familyId: 'source/layer/symbol/0',
-    layerIds: ['poi-layer'],
+    layerIds: [layerId],
     sourceLayer: 'layer',
     symbolPlacement,
     tileKey: 'source/0/0/0',

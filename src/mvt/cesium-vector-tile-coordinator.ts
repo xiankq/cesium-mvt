@@ -27,6 +27,7 @@ interface RequestSchedulerRuntime {
 }
 
 export interface CesiumVectorTileCoordinatorOptions {
+  crossSourceCollisions?: boolean;
   maximumLevel?: number;
   minimumLevel: number;
   rectangle: Rectangle;
@@ -75,6 +76,7 @@ export class CesiumVectorTileCoordinator {
       readyTileBudget: sharedTileBudget,
     });
     this.renderManager = new RenderManager({
+      crossSourceCollisions: options.crossSourceCollisions,
       root: options.root,
       tileWidth: options.tileWidth,
     });

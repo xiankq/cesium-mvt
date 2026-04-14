@@ -53,6 +53,7 @@ export interface FillExtrusionLayerStyle {
 
 export interface SymbolLayerStyle {
   sortKey?: number;
+  sortKeyIsConstant?: boolean;
   zOrder: 'auto' | 'source' | 'viewport-y';
   symbolPlacement?: 'point' | 'line' | 'line-center';
   symbolSpacing?: number;
@@ -468,6 +469,7 @@ export function createSymbolLayerStyleResolver(
     if (sortKey !== undefined) {
       style.sortKey = sortKey;
     }
+    style.sortKeyIsConstant = sortKeyEvaluator?.isConstant ?? true;
 
     style.zOrder = zOrderEvaluator(context) as SymbolLayerStyle['zOrder'];
 

@@ -15,13 +15,25 @@ export interface BucketSymbolCollectionHandle {
 export interface BucketSymbolPlacementHandle {
   anchorX: number;
   anchorY: number;
-  collision?: SymbolCollision;
   key: string;
   layerId: string;
   lineAngle?: number;
+  collisionParts: BucketSymbolPlacementPartHandle[];
   renderables: BucketSymbolRenderableHandle[];
+  sortKey?: number;
+  sortKeyIsConstant?: boolean;
+  sortByViewportY?: boolean;
+  viewportLatitude?: number;
   sourceIndex: number;
   sourceLayer?: string;
+  zOrder: SymbolLayerStyle['zOrder'];
+}
+
+export interface BucketSymbolPlacementPartHandle {
+  collision?: SymbolCollision;
+  groupKey: string;
+  kind: 'icon' | 'text';
+  renderables: BucketSymbolRenderableHandle[];
   textAnchor?: SymbolLayerStyle['textAnchor'];
   textOffset?: [number, number];
 }
