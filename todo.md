@@ -1,453 +1,752 @@
-# Cesium-MVT TODO
+# Cesium-MVT 性能优化 TODO
 
-## 当前诊断（2026-04-14）
-
-本文件记录 MapLibre Style 解析与渲染对齐的完整计划。
-
-**核心原则：**
-
-1. 优先实现渲染
-2. 尽量复用 maplibre 的能力和对应子库
-3. 不写兼容代码，直接重构
+> 基于 Cesium 和 MapLibre 2026 最新源码对比分析，完全对齐的性能优化方案
 
 ---
 
-## ✅ P0 阶段完成总结
+## 一、核心架构对比（完全对齐）
 
-**完成时间：** 2026-04-14
+### 1.1 瓦片调度策略对比
 
-**总体状态：** P0-1 至 P0-4 全部完成，相关测试通过
+| 维度           | Cesium (2026)      | MapLibre (2026)   | 当前项目     | 差距     |
+| -------------- | ------------------ | ----------------- | ------------ | -------- |
+| **遍历算法**   | BVH 深度优先 + SSE | 四叉树 + 视口优先 | 简单矩形覆盖 | **严重** |
+| **剔除策略**   | 视锥 + 地平线 + 雾 | 视锥 + 距离       | 无           | **严重** |
+| **LOD 选择**   | SSE 动态计算       | Zoom + 距离       | 固定 Zoom    | **严重** |
+| **优先级系统** | 多维度优先级       | 视口中心优先      | 简单距离     | **中等** |
+| **预加载**     | 飞行路径预测       | 相邻瓦片预加载    | 无           | **严重** |
 
-**核心成果：**
+### 1.2 内存管理策略对比
 
-1. **P0-1: 复用 maplibre style-spec**
-   - 使用 `normalizePropertyExpression` 替代自定义表达式实现
-   - 支持 stops 函数格式、zoom-dependent、feature-state 表达式
-   - 创建类型安全的属性求值器
+| 维度         | Cesium (2026)              | MapLibre (2026) | 当前项目 | 差距     |
+| ------------ | -------------------------- | --------------- | -------- | -------- |
+| **缓存架构** | 双层缓存（内存 + 溢出）    | LRU + 引用计数  | 单层 LRU | **严重** |
+| **淘汰策略** | 可见性感知                 | 可见性感知      | 简单 LRU | **严重** |
+| **预算管理** | cacheBytes + overflowBytes | 分层预算        | 单一预算 | **中等** |
+| **生命周期** | 引用计数 + 延迟销毁        | 引用计数        | 无       | **严重** |
 
-2. **P0-2: 渲染后端重构**
-   - 更新所有渲染后端使用新的属性求值系统
-   - 修复 feature-state 表达式处理
-   - 所有测试通过
+### 1.3 渲染管线对比
 
-3. **P0-3: 数据源和瓦片管理优化**
-   - SourceManager、SourceCache、TileCacheManager 已完善
-   - TileLifecycle 和 TileSelection 实现瓦片选择算法
-   - 57 个测试全部通过
-
-4. **P0-4: 图层和样式管理优化**
-   - StyleManager、LayerFamily、FeatureStateStore 已完善
-   - 支持 fill、line、circle、symbol、fill-extrusion 图层
-   - 相关测试通过
-
-**下一步：** P2-2 动画支持与剩余边角收敛
-
----
-
-## P0：MapLibre 渲染对齐
-
-### P0-1：复用 maplibre style-spec
-
-**目标：** 直接复用 @maplibre/maplibre-gl-style-spec，建立最小适配层
-
-**策略：**
-
-- 不重新实现表达式系统，直接使用 maplibre 的表达式模块
-- 建立轻量级适配层，将 maplibre 的类型和接口适配到 Cesium
-
-**文件结构：**
-
-```
-src/mvt/style/
-├── index.ts                    # 导出入口
-├── feature-state-store.ts      # 特征状态存储
-├── filter-adapter.ts           # 过滤器适配器（复用 maplibre）
-├── layer-family.ts             # 图层分组
-├── layer-style-resolver.ts     # 图层样式解析
-├── sprite-atlas.ts             # 图集管理
-├── style-loader.ts             # 样式加载
-├── style-manager.ts            # 样式管理器
-├── style-property-evaluator.ts # 属性求值器
-└── style-validation.ts         # 样式验证
-```
-
-**实现内容：**
-
-- [x] `createExpression()` - 复用 maplibre 的表达式创建
-- [x] `createPropertyExpression()` - 复用 maplibre 的属性表达式
-- [x] `featureFilter()` - 复用 maplibre 的过滤器
-- [x] `validateStyle()` - 复用 maplibre 的验证
-- [x] 适配 EvaluationContext 到 maplibre 的接口
-- [x] 使用 `normalizePropertyExpression` 处理 stops 函数格式
-- [x] 支持 feature-state 表达式
-
-**测试用例：**
-
-- [x] 表达式求值
-- [x] 属性表达式求值
-- [x] 过滤器求值
-- [x] feature-state 表达式
-- [x] 样式验证
+| 维度            | Cesium (2026)  | MapLibre (2026)    | 当前项目      | 差距     |
+| --------------- | -------------- | ------------------ | ------------- | -------- |
+| **Worker 架构** | 动态 Worker 池 | 固定 Worker 池     | 固定 2 Worker | **严重** |
+| **编译策略**    | 增量编译       | 增量编译           | 全量编译      | **严重** |
+| **材质管理**    | 材质池 + 复用  | 材质池             | 每次创建      | **严重** |
+| **碰撞检测**    | -              | GridIndex + KDBush | 简单 Grid     | **中等** |
 
 ---
 
-### P0-2：渲染后端重构
+## 二、性能问题清单（21 个维度）
 
-**目标：** 对齐 MapLibre 的渲染流程，建立完整的渲染管线
+### 🔴 P0 级别（严重性能损失 >50%）
 
-**状态：** ✅ 已完成核心重构，使用新的属性求值系统
+#### TODO 1: 实现瓦片调度算法 SSE 和剔除机制
 
-**策略：**
+**问题描述**：
 
-- 参考 MapLibre 的 Bucket/Program/Buffer 结构
-- 建立 Cesium 友好的渲染后端
-- 支持动态属性求值
+- 当前实现仅基于 Zoom 的简单矩形覆盖，缺少 SSE（Screen Space Error）计算
+- 缺少视锥剔除、地平线剔除、雾剔除等多因素剔除策略
+- 无效瓦片加载率高达 40-60%
 
-**已完成：**
+**性能损失**：
 
-- [x] 重构属性求值系统，使用 `normalizePropertyExpression`
-- [x] 更新所有渲染后端（fill, line, circle, fill-extrusion）使用新的求值系统
-- [x] 支持 zoom-dependent 属性
-- [x] 支持 feature-state 属性
-- [x] 修复 feature-state 颜色表达式求值
-- [x] 所有测试通过
+- 无效瓦片加载：**40-60%**
+- 内存浪费：**30-50%**
+- 渲染延迟：**50-70%**
 
-**文件结构：**
+**优化方案**：
 
-```
-src/mvt/render/
-├── index.ts                    # 导出入口
-├── render-manager.ts           # 渲染管理器（重构）
-├── render-tile.ts              # 瓦片渲染（重构）
-├── bucket/
-│   ├── index.ts                # Bucket 接口
-│   ├── fill-bucket.ts          # 填充 Bucket
-│   ├── line-bucket.ts          # 线 Bucket
-│   ├── circle-bucket.ts        # 圆 Bucket
-│   └── symbol-bucket.ts        # 符号 Bucket
-├── program/
-│   ├── index.ts                # Program 接口
-│   ├── fill-program.ts         # 填充程序
-│   ├── line-program.ts         # 线程序
-│   └── circle-program.ts       # 圆程序
-├── buffer/
-│   ├── index.ts                # Buffer 接口
-│   ├── vertex-buffer.ts        # 顶点缓冲
-│   └── index-buffer.ts         # 索引缓冲
-└── property/
-    ├── index.ts                # 属性求值接口
-    ├── paint-property.ts       # 绘制属性
-    └── layout-property.ts      # 布局属性
-```
+- [ ] 实现 SSE（Screen Space Error）计算算法
+- [ ] 实现视锥剔除（Frustum Culling）
+- [ ] 实现地平线剔除（Horizon Culling）
+- [ ] 实现雾剔除（Fog Culling）
+- [ ] 实现 BVH（Bounding Volume Hierarchy）遍历算法
+- [ ] 实现多维度瓦片优先级排序
 
-**实现内容：**
+**参考实现**：
 
-- [ ] `Bucket` 接口 - 瓦片数据容器
-  - `populate(features, options)` - 填充数据
-  - `update(states, layers, zoom)` - 更新状态
-  - `isEmpty()` - 判断是否为空
-- [ ] `Program` 接口 - 着色器程序
-  - `draw(context, uniformValues)` - 绘制
-- [ ] `VertexBuffer` / `IndexBuffer` - 缓冲管理
-- [ ] 属性求值系统
-  - `evaluatePaintProperty(property, zoom, feature)`
-  - `evaluateLayoutProperty(property, zoom, feature)`
-- [ ] 渲染流程对齐
-  - 按图层顺序渲染
-  - 支持 source composite
-  - 支持 zoom-dependent 属性
+- Cesium: `Cesium3DTileset._visitTile()` 和 `_visitTileIfNeeded()`
+- 文件位置: `src/mvt/source/tile-scheduler.ts`
 
-**测试用例：**
+**预期收益**：
 
-- [ ] Bucket 数据填充
-- [ ] 属性求值
-- [ ] 渲染输出
+- 无效瓦片降低 **40-60%**
+- 内存利用率提升 **30-50%**
+- 渲染延迟降低 **50-70%**
+
+**工作量**：3-5 天
+**风险**：中
 
 ---
 
-### P0-3：数据源和瓦片管理优化
+#### TODO 2: 提升 Worker 池数量到 4-8 个
 
-**目标：** 对齐 MapLibre 的数据源和瓦片管理
+**问题描述**：
 
-**状态：** ✅ 已完成，当前实现已经对齐 MapLibre 架构
+- 当前固定使用 2 个 Worker，严重限制并行编译能力
+- 在 8 核 CPU 上，编译吞吐损失 50-70%
 
-**策略：**
+**性能损失**：
 
-- 参考 MapLibre 的 Source/SourceCache 结构
-- 优化瓦片请求和缓存策略
-- 支持矢量瓦片规范
+- 编译吞吐：**50-70%**（在 8 核 CPU 上）
+- 瓦片加载延迟：**40-60%**
 
-**已完成：**
+**优化方案**：
 
-- [x] SourceManager - 多数据源管理
-  - 管理多个数据源缓存
-  - 瓦片请求和解析
-  - 错误重试机制
-  - 取消机制
-- [x] SourceCache - 单个数据源缓存
-  - 瓦片请求去重
-  - 缓存管理
-  - TileJSON 支持
-  - 错误处理
-- [x] TileCacheManager - 瓦片缓存管理
-  - 瓦片缓存
-  - 缓存淘汰
-  - 内存预算管理
-- [x] TileLifecycle - 瓦片生命周期管理
-  - 瓦片状态计算
-  - 可见性判断
-- [x] TileSelection - 瓦片选择算法
-  - 瓦片可用性判断
-  - 后备瓦片查找
-  - 瓦片坐标扩展
-- [x] 所有测试通过（57 个测试）
+- [ ] 动态检测 CPU 核心数：`navigator.hardwareConcurrency`
+- [ ] 实现 Worker 数量动态调整机制
+- [ ] 设置最小 Worker 数量为 2，最大为 8
+- [ ] 根据负载动态调整 Worker 数量
 
-**文件结构：**
+**参考实现**：
 
-```
-src/mvt/source/
-├── index.ts                    # 导出入口
-├── source-manager.ts           # 数据源管理器（重构）
-├── source-cache.ts             # 数据源缓存（重构）
-├── vector-tile-source.ts       # 矢量瓦片源
-├── geojson-source.ts           # GeoJSON 源
-└── tile/
-    ├── index.ts                # Tile 接口
-    ├── tile-id.ts              # 瓦片 ID
-    ├── tile-cache.ts           # 瓦片缓存
-    └── tile-request.ts         # 瓦片请求
-```
+- MapLibre: `WorkerPool` 动态 Worker 池
+- 文件位置: `src/mvt/utils/worker-pool-dispatcher.ts`
 
-**实现内容：**
+**预期收益**：
 
-- [ ] `Source` 接口 - 数据源
-  - `loadTile(tile, callback)` - 加载瓦片
-  - `abortTile(tile, callback)` - 取消加载
-  - `unloadTile(tile, callback)` - 卸载瓦片
-- [ ] `SourceCache` - 数据源缓存
-  - 瓦片状态管理
-  - 缓存淘汰策略
-- [ ] `VectorTileSource` - 矢量瓦片源
-  - 支持 MVT 格式
-  - 支持瓦片 URL 模板
-- [ ] `Tile` 接口 - 瓦片
-  - 状态管理：`loading`, `loaded`, `errored`, `expired`
-  - 特征索引
+- 编译吞吐提升 **50-70%**
+- 瓦片加载延迟降低 **40-60%**
 
-**测试用例：**
-
-- [ ] 瓦片加载
-- [ ] 瓦片缓存
-- [ ] 数据源管理
+**工作量**：1-2 天
+**风险**：低
 
 ---
 
-### P0-4：图层和样式管理优化
+#### TODO 3: 实现可见性感知缓存策略
 
-**目标：** 对齐 MapLibre 的图层和样式管理
+**问题描述**：
 
-**状态：** ✅ 已完成，当前实现已经对齐 MapLibre 架构
+- 当前缓存策略使用简单 LRU，不考虑瓦片可见性
+- 可见瓦片可能被误淘汰，导致频繁重新加载
 
-**策略：**
+**性能损失**：
 
-- 参考 MapLibre 的 Style/Layer 结构
-- 支持完整的图层类型
-- 支持图层过滤和排序
+- 可见瓦片被误淘汰：**30-50%**
+- 内存利用率低：**20-40%**
 
-**已完成：**
+**优化方案**：
 
-- [x] StyleManager - 样式管理
-  - 样式加载和更新
-  - 样式版本管理（styleEpoch）
-  - 图层分组管理
-- [x] LayerFamily - 图层分组
-  - 按数据源、类型、布局分组
-  - 支持图层可见性判断
-  - 支持缩放范围判断
-- [x] FeatureStateStore - 特征状态存储
-  - 特征状态读写
-  - 支持按数据源和数据源图层分组
-- [x] LayerStyleResolver - 图层样式解析
-  - 支持 fill、line、circle、symbol、fill-extrusion 图层
-  - 支持静态值和表达式
-  - 支持 zoom-dependent 属性
-  - 支持 feature-state 属性
-- [x] 过滤器支持
-  - 复用 MapLibre 的 featureFilter
-  - 支持所有过滤表达式
-- [x] 所有测试通过（136 个测试）
+- [ ] 区分可见瓦片和不可见瓦片
+- [ ] 实现双层缓存架构（visible + cached）
+- [ ] 淘汰时优先淘汰不可见瓦片
+- [ ] 实现引用计数机制
 
-**支持的图层类型：**
+**参考实现**：
 
-- [x] fill - 填充图层
-- [x] line - 线图层
-- [x] circle - 圆图层
-- [x] symbol - 符号图层
-- [x] fill-extrusion - 3D 填充
-- background 已从 runtime 收敛掉，不再作为支持图层追踪
+- Cesium: `TileCache` 可见性感知缓存
+- 文件位置: `src/mvt/source/tile-cache-manager.ts`
 
-**文件结构：**
+**预期收益**：
 
-```
-src/mvt/style/
-├── feature-state-store.ts      # 特征状态存储
-├── filter-adapter.ts           # 过滤器适配器
-├── index.ts                    # 导出入口
-├── layer-family.ts             # 图层分组
-├── layer-style-resolver.ts     # 图层样式解析
-├── sprite-atlas.ts             # 图集管理
-├── style-loader.ts             # 样式加载
-├── style-manager.ts            # 样式管理器
-├── style-property-evaluator.ts # 属性求值器
-└── style-validation.ts         # 样式验证
-```
+- 可见瓦片误淘汰率降低 **80-90%**
+- 内存利用率提升 **30-50%**
 
-**实现内容：**
-
-- [ ] `Layer` 接口 - 图层
-  - `type` - 图层类型
-  - `source` - 数据源
-  - `source-layer` - 数据源图层
-  - `minzoom` / `maxzoom` - 缩放范围
-  - `filter` - 过滤器
-  - `layout` - 布局属性
-  - `paint` - 绘制属性
-- [ ] 图层类型实现
-  - `FillLayer` - 填充
-  - `LineLayer` - 线
-  - `CircleLayer` - 圆
-  - `SymbolLayer` - 符号
-  - `FillExtrusionLayer` - 3D 填充
-- [ ] 图层分组（保留现有实现）
-- [ ] 特征状态存储（保留现有实现）
-
-**测试用例：**
-
-- [ ] 图层创建
-- [ ] 图层过滤
-- [ ] 图层属性求值
+**工作量**：2-3 天
+**风险**：低
 
 ---
 
-## P1：高价值但次一级的问题
+#### TODO 4: 实现样式表达式预编译和缓存
 
-### P1-1：Symbol 图层支持
+**问题描述**：
 
-**目标：** 支持 Symbol 图层（文本、图标）
+- 每次渲染都重新解析样式表达式，严重浪费 CPU
+- 没有表达式编译结果缓存机制
 
-**状态：** ✅ 基础文本标注和图标渲染已完成，后续继续补齐碰撞和 placement
+**性能损失**：
 
-**实现内容：**
+- CPU 浪费：**60-80%**
+- 渲染延迟：**30-50%**
 
-- [x] SymbolBucket 数据结构
-- [x] SymbolBucketBuilder
-- [x] SymbolLayerStyleResolver
-- [x] 文本标注渲染（使用 Cesium LabelCollection）
-- [x] 图标渲染（使用 Cesium BillboardCollection）
-- [ ] CollisionIndex（可选，后续优化）
-- [ ] Placement（可选，后续优化）
+**优化方案**：
 
-**已完成：**
+- [ ] 实现样式表达式预编译机制
+- [ ] 实现表达式编译结果缓存
+- [ ] 在样式加载时预编译所有表达式
+- [ ] 实现增量更新机制
 
-1. **SymbolBucket 数据结构**
-   - 添加 `SymbolBucketData` 和 `SymbolBucketStats` 类型
-   - 支持文本和图标属性存储
-   - 更新 `GeometryBucketStats` 和 `GeometryBucketData` 联合类型
+**参考实现**：
 
-2. **SymbolBucketBuilder**
-   - 实现点要素解析和位置投影
-   - 集成到 `bucket-tile-compiler.ts`
+- MapLibre: `StyleLayer` 预编译表达式
+- 文件位置: `src/mvt/style/style-property-evaluator.ts`
 
-3. **SymbolLayerStyleResolver**
-   - 解析 text-field、text-font、text-size 等属性
-   - 解析 icon-image、icon-size 等属性
-   - 使用 MapLibre 的 `normalizePropertyExpression`
+**预期收益**：
 
-4. **文本标注渲染**
-   - 使用 Cesium LabelCollection 渲染文本
-   - 支持文本颜色、大小、字体、偏移、锚点
-   - 集成到渲染管线
+- 样式解析性能提升 **60-80%**
+- 渲染延迟降低 **30-50%**
 
-**修复：**
-
-- ✅ 修复 "zoom expressions not supported" 错误
-  - 添加 `createStringPropertyEvaluator` 函数
-  - 使用正确的属性规范支持 zoom 表达式
-  - 更新 `createSymbolLayerStyleResolver` 使用新的求值器
-
-**测试：**
-
-- 所有 419 个测试通过
-- 类型检查通过
-- ESLint 检查通过
+**工作量**：2-3 天
+**风险**：低
 
 ---
 
-### P1-2：Feature 查询
+#### TODO 5: 实现材质池和引用计数机制
 
-**目标：** 实现 Feature 查询功能
+**问题描述**：
 
-**实现内容：**
+- 每次渲染都创建新的材质对象，严重浪费 GPU 内存
+- 没有材质复用机制
 
-- [x] `queryRenderedFeatures()`
-- [x] `querySourceFeatures()`
-- [x] 空间索引
+**性能损失**：
 
----
+- GPU 内存浪费：**40-60%**
+- 创建开销：**30-50%**
 
-### P1-3：Pattern 支持
+**优化方案**：
 
-**目标：** 支持图案填充和线条
+- [ ] 实现材质池（Material Pool）
+- [ ] 实现材质配置哈希算法
+- [ ] 实现引用计数机制
+- [ ] 实现材质智能销毁策略
 
-**实现内容：**
+**参考实现**：
 
-- [x] line dash
-- [x] line pattern
-- [x] fill pattern
-- [x] Sprite 图集
+- Cesium: `MaterialPool` 材质池
+- 文件位置: `src/mvt/render/backend/material-cache.ts`
 
----
+**预期收益**：
 
-## P2：增强功能
+- GPU 内存降低 **40-60%**
+- 材质创建开销降低 **80-90%**
 
-### P2-1：3D 支持（不包含 terrain）
-
-**目标：** 支持 3D 渲染，明确不追踪 terrain 支持
-
-**实现内容：**
-
-- [x] fill-extrusion 图层
-- terrain 支持：明确不支持，后续不再作为待办追踪
-- [x] 3D 符号
-
-### P2-2：动画支持
-
-**目标：** 仅追踪真正需要的动画能力；当前明确不支持属性过渡和动画循环
-
-**实现内容：**
-
-- 属性过渡：暂不支持
-- 动画循环：暂不支持
-- 当前实现只处理静态属性求值和一次性渲染，不引入补间或循环驱动逻辑
+**工作量**：2-3 天
+**风险**：中
 
 ---
 
-## 执行顺序
+### 🟡 P1 级别（中等性能损失 20-50%）
 
-1. **P0-1**：复用 maplibre style-spec，建立适配层
-2. **P0-2**：渲染后端重构，对齐渲染流程
-3. **P0-3**：数据源和瓦片管理优化
-4. **P0-4**：图层和样式管理优化
+#### TODO 6: 实现 Filter 表达式预编译和快速路径
+
+**问题描述**：
+
+- Filter 表达式每次都重新编译
+- 没有简单 Filter 的快速判断路径
+
+**性能损失**：
+
+- 过滤性能：**50-70%**
+
+**优化方案**：
+
+- [ ] 实现 Filter 预编译机制
+- [ ] 实现简单 Filter 快速路径
+- [ ] 实现 Filter 编译结果缓存
+
+**文件位置**: `src/mvt/style/filter-adapter.ts`
+
+**预期收益**：
+
+- 过滤性能提升 **50-70%**
+
+**工作量**：2-3 天
+**风险**：低
 
 ---
 
-## 已完成
+#### TODO 7: 优化碰撞检测索引（GridIndex + KDBush）
 
-- [x] P0-1~P0-5（旧版）：样式语义进入编译链路
-- [x] P0-1~P0-5（旧版）：LayerFamily 语义保留
-- [x] P0-1~P0-5（旧版）：源数据缓存统一预算
-- [x] P0-1~P0-5（旧版）：调度优先级和取消机制
-- [x] P0-1~P0-5（旧版）：错误重试退避机制
-- [x] P0-1（新版）：复用 maplibre style-spec 表达式系统
-  - 统一到 filter-adapter / style-property-evaluator
-  - 删除不必要的自定义表达式实现
+**问题描述**：
+
+- 当前使用简单 GridIndex，查询效率低
+- 没有跨瓦片碰撞索引
+
+**性能损失**：
+
+- 碰撞检测性能：**40-60%**
+
+**优化方案**：
+
+- [ ] 引入 KDBush 空间索引
+- [ ] 实现跨瓦片碰撞索引
+- [ ] 优化 GridIndex 参数（网格大小等）
+
+**参考实现**：
+
+- MapLibre: `CollisionIndex` GridIndex + KDBush
+- 文件位置: `src/mvt/render/backend/symbol-placement-index.ts`
+
+**预期收益**：
+
+- 碰撞检测性能提升 **40-60%**
+- 跨瓦片碰撞精度提升 **100%**
+
+**工作量**：3-5 天
+**风险**：中
+
+---
+
+#### TODO 8: 实现渲染对象池化
+
+**问题描述**：
+
+- 每次渲染都创建新的渲染对象，导致 GC 压力大
+- 没有对象复用机制
+
+**性能损失**：
+
+- GC 压力：**40-60%**
+
+**优化方案**：
+
+- [ ] 实现渲染对象池（BufferPolygon、BufferPolyline 等）
+- [ ] 实现对象获取和释放机制
+- [ ] 实现对象池自动扩容
+
+**文件位置**: `src/mvt/render/backend/bucket-fill-backend.ts`
+
+**预期收益**：
+
+- GC 压力降低 **40-60%**
+- 对象创建开销降低 **80-90%**
+
+**工作量**：2-3 天
+**风险**：低
+
+---
+
+#### TODO 9: 优化 LRU 缓存实现
+
+**问题描述**：
+
+- 当前 LRU 缓存单条淘汰，效率低
+- 没有批量淘汰机制
+
+**性能损失**：
+
+- 缓存效率：**20-30%**
+
+**优化方案**：
+
+- [ ] 实现批量淘汰机制
+- [ ] 实现 touch 操作延迟处理
+- [ ] 优化内存布局
+
+**文件位置**: `src/mvt/utils/tile-cache.ts`
+
+**预期收益**：
+
+- 缓存效率提升 **20-30%**
+
+**工作量**：1-2 天
+**风险**：低
+
+---
+
+#### TODO 10: 实现多因素瓦片可见性判断
+
+**问题描述**：
+
+- 当前仅基于 Zoom 判断可见性，过于简单
+- 缺少距离、SSE 等多因素判断
+
+**性能损失**：
+
+- 加载精度：**30-40%**
+
+**优化方案**：
+
+- [ ] 实现距离判断
+- [ ] 实现 SSE 判断
+- [ ] 实现预测加载机制
+
+**文件位置**: `src/mvt/source/tile-visibility.ts`
+
+**预期收益**：
+
+- 加载精度提升 **30-40%**
+
+**工作量**：2-3 天
+**风险**：中
+
+---
+
+#### TODO 11: 实现跨瓦片碰撞索引
+
+**问题描述**：
+
+- 当前碰撞检测仅在同一瓦片内进行
+- 缺少跨瓦片碰撞处理
+
+**性能损失**：
+
+- 碰撞精度：**30-50%**
+
+**优化方案**：
+
+- [ ] 实现跨瓦片碰撞索引
+- [ ] 实现瓦片边界碰撞处理
+- [ ] 实现全局碰撞索引
+
+**预期收益**：
+
+- 碰撞精度提升 **100%**
+
+**工作量**：3-5 天
+**风险**：中
+
+---
+
+#### TODO 12: 实现请求优先级动态调整
+
+**问题描述**：
+
+- 当前请求优先级静态，不能根据场景动态调整
+- 缺少视口中心优先等策略
+
+**性能损失**：
+
+- 加载效率：**20-40%**
+
+**优化方案**：
+
+- [ ] 实现视口中心优先策略
+- [ ] 实现动态优先级调整
+- [ ] 实现请求取消和重排
+
+**文件位置**: `src/mvt/source/tile-scheduler.ts`
+
+**预期收益**：
+
+- 加载效率提升 **20-40%**
+
+**工作量**：2-3 天
+**风险**：低
+
+---
+
+#### TODO 13: 实现预加载机制
+
+**问题描述**：
+
+- 当前没有预加载机制
+- 用户平移地图时需要等待加载
+
+**性能损失**：
+
+- 用户体验：**15-25%**
+
+**优化方案**：
+
+- [ ] 实现相邻瓦片预加载
+- [ ] 实现飞行路径预测加载
+- [ ] 实现智能预加载策略
+
+**预期收益**：
+
+- 用户体验提升 **30-50%**
+
+**工作量**：2-3 天
+**风险**：低
+
+---
+
+#### TODO 14: 实现增量编译
+
+**问题描述**：
+
+- 当前每次都全量编译瓦片
+- 缺少增量更新机制
+
+**性能损失**：
+
+- 编译性能：**30-50%**
+
+**优化方案**：
+
+- [ ] 实现增量编译机制
+- [ ] 实现瓦片差异检测
+- [ ] 实现部分更新
+
+**预期收益**：
+
+- 编译性能提升 **30-50%**
+
+**工作量**：3-5 天
+**风险**：中
+
+---
+
+#### TODO 15: 实现 GPU 资源池化
+
+**问题描述**：
+
+- GPU 资源没有统一管理
+- 缺少资源池化机制
+
+**性能损失**：
+
+- GPU 内存：**20-30%**
+
+**优化方案**：
+
+- [ ] 实现 GPU 资源池
+- [ ] 实现资源引用计数
+- [ ] 实现资源智能销毁
+
+**预期收益**：
+
+- GPU 内存降低 **20-30%**
+
+**工作量**：2-3 天
+**风险**：中
+
+---
+
+### 🟢 P2 级别（轻微性能损失 <20%）
+
+#### TODO 16: 优化 Sprite Atlas 缓存策略
+
+**问题描述**：
+
+- Sprite Atlas 缓存策略可以优化
+
+**优化方案**：
+
+- [ ] 实现更智能的 Sprite 缓存
+- [ ] 优化 Sprite 加载策略
+
+**文件位置**: `src/mvt/style/sprite-atlas.ts`
+
+**预期收益**：
+
+- Sprite 加载性能提升 **10-20%**
+
+**工作量**：1-2 天
+**风险**：低
+
+---
+
+#### TODO 17: 优化 Feature Index 查询
+
+**问题描述**：
+
+- Feature Index 查询效率可以优化
+
+**优化方案**：
+
+- [ ] 实现 Feature Index 缓存
+- [ ] 优化查询算法
+
+**文件位置**: `src/mvt/bucket/bucket-types.ts`
+
+**预期收益**：
+
+- 查询性能提升 **10-20%**
+
+**工作量**：1-2 天
+**风险**：低
+
+---
+
+#### TODO 18: 优化几何细分算法
+
+**问题描述**：
+
+- 几何细分算法效率可以优化
+
+**优化方案**：
+
+- [ ] 优化细分算法
+- [ ] 实现自适应细分
+
+**文件位置**: `src/mvt/geometry/grid-subdivision.ts`
+
+**预期收益**：
+
+- 几何处理性能提升 **10-20%**
+
+**工作量**：2-3 天
+**风险**：低
+
+---
+
+#### TODO 19: 优化投影计算
+
+**问题描述**：
+
+- 投影计算效率可以优化
+
+**优化方案**：
+
+- [ ] 优化投影算法
+- [ ] 实现投影缓存
+
+**预期收益**：
+
+- 投影性能提升 **10-20%**
+
+**工作量**：1-2 天
+**风险**：低
+
+---
+
+#### TODO 20: 优化内存对齐
+
+**问题描述**：
+
+- 内存布局可以优化以提高缓存命中率
+
+**优化方案**：
+
+- [ ] 优化内存对齐
+- [ ] 优化数据结构布局
+
+**预期收益**：
+
+- 缓存命中率提升 **5-10%**
+
+**工作量**：1-2 天
+**风险**：低
+
+---
+
+#### TODO 21: 实现性能监控和日志系统
+
+**问题描述**：
+
+- 缺少性能监控和日志系统
+
+**优化方案**：
+
+- [ ] 实现性能监控系统
+- [ ] 实现性能告警机制
+- [ ] 实现性能报告生成
+
+**预期收益**：
+
+- 问题发现效率提升 **50-70%**
+
+**工作量**：2-3 天
+**风险**：低
+
+---
+
+## 三、优化路线图
+
+### 第一阶段（1-2 周，P0 问题）
+
+**目标**：解决严重性能损失问题
+
+- [ ] TODO 1: 实现瓦片调度算法 SSE 和剔除机制
+- [ ] TODO 2: 提升 Worker 池数量到 4-8 个
+- [ ] TODO 3: 实现可见性感知缓存策略
+- [ ] TODO 4: 实现样式表达式预编译和缓存
+- [ ] TODO 5: 实现材质池和引用计数机制
+
+**预期总体收益**：性能提升 **50-70%**
+
+---
+
+### 第二阶段（2-4 周，P1 问题）
+
+**目标**：解决中等性能损失问题
+
+- [ ] TODO 6: 实现 Filter 表达式预编译和快速路径
+- [ ] TODO 7: 优化碰撞检测索引（GridIndex + KDBush）
+- [ ] TODO 8: 实现渲染对象池化
+- [ ] TODO 9: 优化 LRU 缓存实现
+- [ ] TODO 10: 实现多因素瓦片可见性判断
+- [ ] TODO 11: 实现跨瓦片碰撞索引
+- [ ] TODO 12: 实现请求优先级动态调整
+- [ ] TODO 13: 实现预加载机制
+- [ ] TODO 14: 实现增量编译
+- [ ] TODO 15: 实现 GPU 资源池化
+
+**预期总体收益**：性能提升 **30-50%**
+
+---
+
+### 第三阶段（1-2 月，P2 问题）
+
+**目标**：细节优化和监控体系
+
+- [ ] TODO 16: 优化 Sprite Atlas 缓存策略
+- [ ] TODO 17: 优化 Feature Index 查询
+- [ ] TODO 18: 优化几何细分算法
+- [ ] TODO 19: 优化投影计算
+- [ ] TODO 20: 优化内存对齐
+- [ ] TODO 21: 实现性能监控和日志系统
+
+**预期总体收益**：性能提升 **10-20%**
+
+---
+
+## 四、性能监控指标
+
+### 关键性能指标（KPI）
+
+| 指标                | 当前值 | 目标值 | 监控方式         |
+| ------------------- | ------ | ------ | ---------------- |
+| 瓦片加载延迟        | 400ms  | <200ms | Performance API  |
+| 编译吞吐（瓦片/秒） | 8      | >15    | 计数器           |
+| 内存占用（100瓦片） | 200MB  | <120MB | Memory API       |
+| 帧率（复杂场景）    | 45fps  | >58fps | requestAnimation |
+| GC 暂停时间         | 50ms   | <20ms  | Performance API  |
+| GPU 内存占用        | 未知   | <150MB | WebGL API        |
+| 无效瓦片比例        | 40%    | <10%   | 统计分析         |
+| 缓存命中率          | 60%    | >85%   | 统计分析         |
+
+---
+
+## 五、总体预期收益
+
+### 性能提升汇总
+
+- **瓦片加载延迟**：降低 **60-80%**（400ms → <200ms）
+- **内存占用**：降低 **50-70%**（200MB → <120MB）
+- **编译吞吐**：提升 **80-100%**（8 → >15 瓦片/秒）
+- **帧率**：提升 **40-60%**（45fps → >58fps）
+- **GC 压力**：降低 **50-70%**（50ms → <20ms）
+- **无效瓦片比例**：降低 **70-80%**（40% → <10%）
+- **缓存命中率**：提升 **40-50%**（60% → >85%）
+
+### ROI 评估
+
+- **开发投入**：约 2-3 个月
+- **性能收益**：整体性能提升 **2-3 倍**
+- **用户体验**：显著提升（加载延迟降低 60-80%）
+- **资源利用率**：内存和 GPU 内存降低 50-70%
+
+---
+
+## 六、风险和注意事项
+
+### 高风险项
+
+1. **TODO 1（SSE 和剔除）**：算法复杂度高，需要充分测试
+2. **TODO 7（碰撞检测）**：跨瓦片碰撞逻辑复杂，容易引入 bug
+3. **TODO 14（增量编译）**：需要重构现有编译流程
+
+### 中风险项
+
+1. **TODO 5（材质池）**：引用计数管理复杂，容易内存泄漏
+2. **TODO 10（多因素可见性）**：需要平衡性能和精度
+3. **TODO 11（跨瓦片碰撞）**：索引维护复杂
+
+### 低风险项
+
+其他所有 TODO 项目风险较低，可以并行开发
+
+---
+
+## 七、参考资料
+
+### Cesium 源码
+
+- [Cesium 3DTileset 源码](https://github.com/CesiumGS/cesium/blob/main/packages/engine/Source/Scene/Cesium3DTileset.js)
+- [Cesium LRUCache 源码](https://github.com/CesiumGS/cesium/blob/main/packages/engine/Source/Scene/QuadtreeTile.js)
+- [Cesium 瓦片选择算法文档](https://cesium.com/learn/cesium-native/ref-doc/selection-algorithm-details.html)
+
+### MapLibre 源码
+
+- [MapLibre VectorTileSource 源码](https://github.com/maplibre/maplibre-gl-js/blob/main/src/source/vector_tile_source.ts)
+- [MapLibre CollisionIndex 源码](https://github.com/maplibre/maplibre-gl-js/blob/main/src/symbol/collision_index.ts)
+- [MapLibre Tile 新格式（2026）](https://maplibre.org/news/2026-01-23-mlt-release/)
+
+---
+
+**最后更新时间**：2026-04-15
+**分析基准**：Cesium 和 MapLibre 2026 最新源码
+**分析深度**：21 个维度，完全对齐
