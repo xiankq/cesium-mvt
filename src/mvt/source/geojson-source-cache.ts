@@ -90,6 +90,10 @@ export class GeojsonSourceCache {
     coordinate: TileCoordinate,
     priority = 0,
   ): Promise<ArrayBuffer | undefined> {
+    if (this.destroyed) {
+      return undefined;
+    }
+
     const key = createTileKey(
       this.sourceId,
       coordinate.level,
@@ -119,14 +123,14 @@ export class GeojsonSourceCache {
       priority,
     )
       .then((tileIndex) => {
-        if (abortController.signal.aborted) {
+        if (this.destroyed) {
           throw createAbortError();
         }
 
         return getTileData(tileIndex, coordinate);
       })
       .then((value) => {
-        if (abortController.signal.aborted) {
+        if (this.destroyed || abortController.signal.aborted) {
           throw createAbortError();
         }
 
@@ -146,7 +150,8 @@ export class GeojsonSourceCache {
         entry.abortController = undefined;
         entry.promise = undefined;
         if (
-          abortController.signal.aborted
+          this.destroyed
+          || abortController.signal.aborted
           || isAbortError(error)
           || isThrottleError(error)
         ) {
@@ -212,6 +217,21 @@ export class GeojsonSourceCache {
         ? cloneValue(entry.value)
         : entry.value,
     };
+  }
+
+  peekEntryValue(key: string): ArrayBuffer | undefined {
+    const entry = this.entries.get(key);
+    if (!entry || !(entry.value instanceof ArrayBuffer)) {
+      return undefined;
+    }
+
+    return entry.value;
+  }
+
+  getLoadedTileKeys(): string[] {
+    return Array.from(this.entries.entries())
+      .filter(([, entry]) => entry.state === 'ready' && entry.value !== undefined)
+      .map(([key]) => key);
   }
 
   getMaxZoom(): number | undefined {

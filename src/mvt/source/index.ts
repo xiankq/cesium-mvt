@@ -7,6 +7,7 @@ export {
 } from './request-scheduler';
 export type { RequestSchedulerOptions, TileRequestOptions } from './request-scheduler';
 export { SourceManager } from './source-manager';
+export type { QuerySourceFeaturesOptions } from './source-query';
 export { TileCacheManager } from './tile-cache-manager';
 export {
   computeTileLifecycle,

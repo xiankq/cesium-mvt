@@ -9,11 +9,17 @@ import type {
   ParsedTileResult,
 } from '../../bucket/bucket-types';
 import type { FeatureStateResolver } from '../../style/feature-state-store';
-import { BufferPolyline, BufferPolylineCollection } from 'cesium';
-import { createFeatureFilter } from '../../style/feature-filter';
+import {
+  BufferPolyline,
+  BufferPolylineCollection,
+  Cartesian3,
+  PolylineCollection,
+} from 'cesium';
+import { createFeatureFilter } from '../../style/filter-adapter';
+import { createLineLayerStyleResolver } from '../../style/layer-style-resolver';
 import { validatePositions } from '../../utils/validation';
 import { parseRenderTileCoordinateFromKey } from '../render-tile';
-import { getLineMaterial } from './material-cache';
+import { getLineCollectionMaterial, getLineMaterial } from './material-cache';
 import {
   createPrimitiveStyleContext,
   getFeatureIndexEntry,
@@ -21,7 +27,7 @@ import {
 
 export interface BucketLineCollectionHandle {
   byteLength: number;
-  collection: BufferPolylineCollection;
+  collection: BufferPolylineCollection | PolylineCollection;
   layerId: string;
   polylineCount: number;
 }
@@ -114,19 +120,24 @@ function createLineCollection(
   }
 
   const filter = createFeatureFilter(layer.filter);
+  const resolveLineStyle = createLineLayerStyleResolver(layer);
+  const usesPolylineCollection = layer.paint?.['line-dasharray'] !== undefined
+    || layer.paint?.['line-pattern'] !== undefined;
   const primitiveCountMax = Math.min(stats.polylineCount || 0, 10000000);
   const vertexCountMax = Math.min(stats.totalVertexCount || 0, 10000000);
 
-  if (primitiveCountMax === 0 || vertexCountMax === 0) {
+  if (!usesPolylineCollection && (primitiveCountMax === 0 || vertexCountMax === 0)) {
     return undefined;
   }
 
-  const collection = new BufferPolylineCollection({
-    primitiveCountMax,
-    vertexCountMax,
-  });
+  const collection = usesPolylineCollection
+    ? new PolylineCollection()
+    : new BufferPolylineCollection({
+        primitiveCountMax,
+        vertexCountMax,
+      });
 
-  const flyweight = new BufferPolyline();
+  const flyweight = usesPolylineCollection ? undefined : new BufferPolyline();
   const vertexCounts = Array.from(data.vertexCounts);
   let vertexOffset = 0;
   let polylineCount = 0;
@@ -154,11 +165,12 @@ function createLineCollection(
       zoom,
     });
 
-    if (!filter(context)) {
+    if (context.feature && !filter({ zoom: context.zoom, feature: context.feature })) {
       vertexOffset += vertexCount;
       continue;
     }
 
+    const resolvedStyle = resolveLineStyle(context);
     const positions = extractPositions(
       data.positions,
       vertexOffset,
@@ -169,16 +181,29 @@ function createLineCollection(
       continue;
     }
 
-    const material = getLineMaterial(style, layer, context);
-
-    collection.add(
-      {
+    if (usesPolylineCollection) {
+      const cartesianPositions = extractCartesianPositions(positions);
+      const material = getLineCollectionMaterial(style, layer, context);
+      const polylineCollection = collection as PolylineCollection;
+      const polyline = polylineCollection.add({
         material,
-        positions,
-      },
-      flyweight,
-    );
-    flyweight.featureId = featureIndex?.id ?? 0;
+        positions: cartesianPositions,
+        width: resolvedStyle.width,
+      });
+      polyline.id = featureIndex?.id ?? 0;
+    }
+    else {
+      const material = getLineMaterial(style, layer, context);
+      const bufferedCollection = collection as BufferPolylineCollection;
+      bufferedCollection.add(
+        {
+          material,
+          positions,
+        },
+        flyweight!,
+      );
+      flyweight!.featureId = featureIndex?.id ?? 0;
+    }
 
     vertexOffset += vertexCount;
     polylineCount += 1;
@@ -219,6 +244,22 @@ function extractPositions(
     return new Float64Array(0);
   }
   return positions.slice(start, end);
+}
+
+function extractCartesianPositions(
+  positions: Float64Array,
+): Cartesian3[] {
+  const result: Cartesian3[] = [];
+
+  for (let index = 0; index < positions.length; index += 3) {
+    result.push(new Cartesian3(
+      positions[index]!,
+      positions[index + 1]!,
+      positions[index + 2]!,
+    ));
+  }
+
+  return result;
 }
 
 function isLineBucket(

@@ -1,7 +1,9 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
-import { PrimitiveCollection } from 'cesium';
+import { PrimitiveCollection, Resource } from 'cesium';
 import { describe, expect, it, vi } from 'vitest';
 import { CesiumVectorTile } from '@/mvt/cesium-vector-tile';
+
+const TEST_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nqkAAAAASUVORK5CYII=';
 
 describe('cesiumVectorTile', () => {
   it('可以通过构造函数创建实例', () => {
@@ -44,6 +46,45 @@ describe('cesiumVectorTile', () => {
     vectorTile.destroy();
   });
 
+  it('可以通过 Resource 作为 fromUrl 入参创建实例', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => {
+      throw new Error('unexpected fetch');
+    }));
+
+    const fetchJson = vi
+      .spyOn(Resource.prototype, 'fetchJson')
+      .mockResolvedValue({
+        layers: [
+          {
+            id: 'background',
+            paint: {
+              'background-color': '#123456',
+            },
+            type: 'background',
+          },
+        ],
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            url: '../tiles/planet.json',
+          },
+        },
+        version: 8,
+      } as StyleSpecification);
+
+    const resource = new Resource({
+      url: 'https://example.com/styles/basic/style.json',
+    });
+
+    const vectorTile = await CesiumVectorTile.fromUrl(resource);
+
+    expect(vectorTile).toBeDefined();
+    expect(vectorTile.isDestroyed()).toBe(false);
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+
+    vectorTile.destroy();
+  });
+
   it('可以被添加到 scene.primitives', () => {
     const primitives = new PrimitiveCollection();
     const vectorTile = new CesiumVectorTile();
@@ -56,7 +97,7 @@ describe('cesiumVectorTile', () => {
     expect(vectorTile.isDestroyed()).toBe(true);
   });
 
-  it('可以通过 updateStyle 方法更新样式', () => {
+  it('可以通过 updateStyle 方法更新样式', async () => {
     const vectorTile = new CesiumVectorTile();
 
     const style: StyleSpecification = {
@@ -79,8 +120,55 @@ describe('cesiumVectorTile', () => {
       ],
     };
 
-    vectorTile.updateStyle(style);
+    await vectorTile.updateStyle(style);
     expect(vectorTile.getStyle()).toBeDefined();
+
+    vectorTile.destroy();
+  });
+
+  it('updateStyle 应该加载 sprite atlas', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+
+        if (url.endsWith('/sprite.json')) {
+          return new Response(JSON.stringify({
+            stripe: {
+              height: 4,
+              pixelRatio: 1,
+              x: 0,
+              y: 0,
+              width: 8,
+            },
+          }));
+        }
+
+        if (url.endsWith('/sprite.png')) {
+          return new Response(base64ToBytes(TEST_PNG_BASE64).buffer as ArrayBuffer);
+        }
+
+        throw new Error(`unexpected fetch url: ${url}`);
+      }),
+    );
+
+    const vectorTile = new CesiumVectorTile();
+
+    await vectorTile.updateStyle({
+      version: 8,
+      sources: {},
+      sprite: 'https://example.com/styles/basic/sprite',
+      layers: [],
+    });
+
+    type StyleWithSpriteAtlas = StyleSpecification & {
+      spriteAtlas?: {
+        getImage: (name: string) => unknown;
+      };
+    };
+
+    const loadedStyle = vectorTile.getStyle() as StyleWithSpriteAtlas | undefined;
+    expect(loadedStyle?.spriteAtlas?.getImage('stripe')).toBeDefined();
 
     vectorTile.destroy();
   });
@@ -106,6 +194,67 @@ describe('cesiumVectorTile', () => {
     }, {
       selected: true,
     });
+
+    vectorTile.destroy();
+  });
+
+  it('可以通过 querySourceFeatures 方法委托给协调器', () => {
+    const vectorTile = new CesiumVectorTile();
+    const coordinator = {
+      destroy: vi.fn(),
+      querySourceFeatures: vi.fn(() => [{
+        geometry: {
+          coordinates: [0, 0],
+          type: 'Point',
+        },
+        properties: {
+          name: 'poi-a',
+        },
+        type: 'Feature',
+      }]),
+    };
+    (vectorTile as any).coordinator = coordinator;
+
+    const result = vectorTile.querySourceFeatures('places', {
+      sourceLayer: 'poi',
+    });
+
+    expect(coordinator.querySourceFeatures).toHaveBeenCalledWith('places', {
+      sourceLayer: 'poi',
+    });
+    expect(result).toHaveLength(1);
+
+    vectorTile.destroy();
+  });
+
+  it('可以通过 queryRenderedFeatures 方法委托给协调器', () => {
+    const vectorTile = new CesiumVectorTile();
+    const coordinator = {
+      destroy: vi.fn(),
+      queryRenderedFeatures: vi.fn(() => [{
+        geometry: {
+          coordinates: [0, 0],
+          type: 'Point',
+        },
+        layerId: 'poi',
+        properties: {
+          kind: 'cafe',
+        },
+        sourceId: 'places',
+        sourceLayer: 'poi',
+        type: 'Feature',
+      }]),
+    };
+    (vectorTile as any).coordinator = coordinator;
+
+    const result = vectorTile.queryRenderedFeatures({
+      filter: ['==', ['get', 'kind'], 'cafe'],
+    });
+
+    expect(coordinator.queryRenderedFeatures).toHaveBeenCalledWith({
+      filter: ['==', ['get', 'kind'], 'cafe'],
+    });
+    expect(result).toHaveLength(1);
 
     vectorTile.destroy();
   });
@@ -194,3 +343,7 @@ describe('cesiumVectorTile', () => {
     ).rejects.toThrow();
   });
 });
+
+function base64ToBytes(value: string): Uint8Array {
+  return Uint8Array.from(atob(value), character => character.charCodeAt(0));
+}

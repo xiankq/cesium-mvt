@@ -1,10 +1,12 @@
 import type {
   CircleLayerSpecification,
+  FillExtrusionLayerSpecification,
   FillLayerSpecification,
   LayerSpecification,
   LineLayerSpecification,
   SourceSpecification,
   StyleSpecification,
+  SymbolLayerSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import { GEOJSON_SOURCE_LAYER } from '../source/geojson-source-cache';
 
@@ -29,7 +31,9 @@ export function isLayerVisibleAtZoom(
 export type SupportedGeometryLayer
   = | CircleLayerSpecification
     | FillLayerSpecification
-    | LineLayerSpecification;
+    | FillExtrusionLayerSpecification
+    | LineLayerSpecification
+    | SymbolLayerSpecification;
 
 export type SupportedGeometryLayerType = SupportedGeometryLayer['type'];
 
@@ -85,8 +89,10 @@ export function isSupportedGeometryLayer(
   layer: LayerSpecification,
 ): layer is SupportedGeometryLayer {
   return layer.type === 'fill'
+    || layer.type === 'fill-extrusion'
     || layer.type === 'line'
-    || layer.type === 'circle';
+    || layer.type === 'circle'
+    || layer.type === 'symbol';
 }
 
 function createLayoutKey(layout: unknown) {

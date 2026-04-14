@@ -6,6 +6,8 @@ import type {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadStyleSet, normalizeStyle } from '@/mvt/style/style-loader';
 
+const TEST_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nqkAAAAASUVORK5CYII=';
+
 describe('style-loader', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -47,21 +49,47 @@ describe('style-loader', () => {
   it('loads a style url and extracts the background color', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify({
-        version: 8,
-        sources: {},
-        sprite: './sprite',
-        glyphs: './glyphs/{fontstack}/{range}.pbf',
-        layers: [
-          {
-            id: 'background',
-            type: 'background',
-            paint: {
-              'background-color': '#123456',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+
+        if (url.endsWith('/style.json')) {
+          return new Response(JSON.stringify({
+            version: 8,
+            sources: {},
+            sprite: './sprite',
+            glyphs: './glyphs/{fontstack}/{range}.pbf',
+            layers: [
+              {
+                id: 'background',
+                type: 'background',
+                paint: {
+                  'background-color': '#123456',
+                },
+              },
+            ],
+          }));
+        }
+
+        if (url.endsWith('/sprite.json')) {
+          return new Response(JSON.stringify({
+            stripe: {
+              height: 4,
+              pixelRatio: 1,
+              x: 0,
+              y: 0,
+              width: 8,
             },
-          },
-        ],
-      }))),
+          }));
+        }
+
+        if (url.endsWith('/sprite.png')) {
+          return new Response(
+            base64ToBytes(TEST_PNG_BASE64).buffer as ArrayBuffer,
+          );
+        }
+
+        throw new Error(`unexpected fetch url: ${url}`);
+      }),
     );
 
     const styleSet = await loadStyleSet({
@@ -72,4 +100,101 @@ describe('style-loader', () => {
     expect(styleSet.backgroundColor).toBe('#123456');
     expect(styleSet.style.sprite).toBe('https://example.com/styles/basic/sprite');
   });
+
+  it('loads sprite atlas images for pattern and icon lookup', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+
+        if (url.endsWith('/style.json')) {
+          return new Response(JSON.stringify({
+            version: 8,
+            sources: {},
+            sprite: './sprite',
+            layers: [],
+          }));
+        }
+
+        if (url.endsWith('/sprite.json')) {
+          return new Response(JSON.stringify({
+            stripe: {
+              height: 4,
+              pixelRatio: 1,
+              x: 0,
+              y: 0,
+              width: 8,
+            },
+          }));
+        }
+
+        if (url.endsWith('/sprite.png')) {
+          return new Response(
+            base64ToBytes(TEST_PNG_BASE64).buffer as ArrayBuffer,
+          );
+        }
+
+        throw new Error(`unexpected fetch url: ${url}`);
+      }),
+    );
+
+    const styleSet = await loadStyleSet({
+      style: 'https://example.com/styles/basic/style.json',
+    });
+
+    const spriteImage = styleSet.style.spriteAtlas?.getImage('stripe');
+
+    expect(spriteImage).toBeDefined();
+    expect(spriteImage?.image).toContain('data:image/svg+xml');
+    expect(spriteImage?.width).toBe(8);
+    expect(spriteImage?.height).toBe(4);
+  });
+
+  it('loads sprite atlas for inline style objects too', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+
+        if (url.endsWith('/sprite.json')) {
+          return new Response(JSON.stringify({
+            stripe: {
+              height: 4,
+              pixelRatio: 1,
+              x: 0,
+              y: 0,
+              width: 8,
+            },
+          }));
+        }
+
+        if (url.endsWith('/sprite.png')) {
+          return new Response(
+            base64ToBytes(TEST_PNG_BASE64).buffer as ArrayBuffer,
+          );
+        }
+
+        throw new Error(`unexpected fetch url: ${url}`);
+      }),
+    );
+
+    const styleSet = await loadStyleSet({
+      style: {
+        version: 8,
+        sources: {},
+        sprite: 'https://example.com/styles/basic/sprite',
+        layers: [],
+      },
+    });
+
+    const spriteImage = styleSet.style.spriteAtlas?.getImage('stripe');
+
+    expect(spriteImage).toBeDefined();
+    expect(spriteImage?.width).toBe(8);
+    expect(spriteImage?.height).toBe(4);
+  });
 });
+
+function base64ToBytes(value: string): Uint8Array {
+  return Uint8Array.from(atob(value), character => character.charCodeAt(0));
+}

@@ -1,5 +1,5 @@
 import type { GeoJSONSourceSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { FeatureCollection, GeoJsonObject, Point } from 'geojson';
+import type { FeatureCollection, Point } from 'geojson';
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeojsonSourceCache } from '@/mvt/source/geojson-source-cache';
@@ -60,6 +60,66 @@ describe('geojson-source-cache', () => {
 
     expect(secondResult.byteLength).toBeGreaterThan(0);
     expect(loadData).toHaveBeenCalledTimes(1);
+  });
+
+  it('销毁后不应该再启动新的 GeoJSON 请求', async () => {
+    const loadData = vi.fn(async () => ({
+      features: [],
+      type: 'FeatureCollection',
+    } satisfies FeatureCollection));
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      source: createGeojsonSource({
+        data: 'https://example.com/data.geojson',
+      }),
+      sourceId: 'places',
+    });
+
+    sourceCache.destroy();
+
+    await expect(sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    })).resolves.toBeUndefined();
+
+    expect(loadData).not.toHaveBeenCalled();
+  });
+
+  it('销毁期间完成的 GeoJSON 加载不应该写回缓存', async () => {
+    let resolveData: (value: FeatureCollection) => void = () => {};
+    const dataPromise = new Promise<FeatureCollection>((resolve) => {
+      resolveData = resolve;
+    });
+    const loadData = vi.fn(() => dataPromise);
+    const readyTileBudget = {
+      add: vi.fn(),
+      delete: vi.fn(),
+      touch: vi.fn(),
+    };
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      readyTileBudget: readyTileBudget as any,
+      source: createGeojsonSource({
+        data: 'https://example.com/data.geojson',
+      }),
+      sourceId: 'places',
+    });
+
+    const requestPromise = sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+
+    sourceCache.destroy();
+    resolveData({
+      features: [],
+      type: 'FeatureCollection',
+    } satisfies FeatureCollection);
+
+    await expect(requestPromise).resolves.toBeUndefined();
+    expect(readyTileBudget.add).not.toHaveBeenCalled();
   });
 
   it('caches an empty GeoJSON tile instead of reloading it', async () => {
@@ -151,7 +211,7 @@ describe('geojson-source-cache', () => {
       features: [],
       type: 'FeatureCollection',
     };
-    const loadData = vi.fn((_, signal: AbortSignal) => new Promise<GeoJsonObject>((resolve, reject) => {
+    const loadData = vi.fn((_, signal: AbortSignal) => new Promise<FeatureCollection>((resolve, reject) => {
       if (signal.aborted) {
         reject(abortedError);
         return;

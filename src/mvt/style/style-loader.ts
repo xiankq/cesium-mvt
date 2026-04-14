@@ -4,11 +4,16 @@ import type {
   SourceSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
+import type { SpriteAtlas } from './sprite-atlas';
+import { Resource } from 'cesium';
 import { deepClone, resolveUrl } from '../utils/common';
+import { loadSpriteAtlas } from './sprite-atlas';
 
 export interface StyleSet {
   backgroundColor?: string;
-  style: StyleSpecification;
+  style: StyleSpecification & {
+    spriteAtlas?: SpriteAtlas;
+  };
   styleUrl?: string;
 }
 
@@ -40,7 +45,7 @@ function extractBackgroundColor(style: StyleSpecification) {
 }
 
 export interface LoadStyleSetOptions {
-  style: string | StyleSpecification;
+  style: string | URL | Resource | StyleSpecification;
 }
 
 export function normalizeStyle(
@@ -60,17 +65,46 @@ export async function loadStyleSet(
   options: LoadStyleSetOptions,
 ): Promise<StyleSet> {
   const { style } = options;
-  if (typeof style !== 'string') {
-    return normalizeStyle(style);
+  if (typeof style !== 'string' && !(style instanceof URL) && !(style instanceof Resource)) {
+    const styleSet = normalizeStyle(style);
+    if (typeof styleSet.style.sprite === 'string') {
+      styleSet.style.spriteAtlas = await loadSpriteAtlas(styleSet.style.sprite);
+    }
+    return styleSet;
   }
 
-  const response = await fetch(style);
+  if (style instanceof Resource) {
+    const styleDefinition = await style.fetchJson();
+    if (!styleDefinition) {
+      throw new Error(`Failed to load style: ${style.url}`);
+    }
+
+    const styleSet = normalizeStyle(
+      styleDefinition as StyleSpecification,
+      style.getBaseUri(),
+    );
+
+    if (typeof styleSet.style.sprite === 'string') {
+      styleSet.style.spriteAtlas = await loadSpriteAtlas(styleSet.style.sprite);
+    }
+
+    return styleSet;
+  }
+
+  const styleUrl = style.toString();
+  const response = await fetch(styleUrl);
   if (!response.ok) {
-    throw new Error(`Failed to load style: ${style}`);
+    throw new Error(`Failed to load style: ${styleUrl}`);
   }
 
   const styleDefinition = await response.json() as StyleSpecification;
-  return normalizeStyle(styleDefinition, style);
+  const styleSet = normalizeStyle(styleDefinition, styleUrl);
+
+  if (typeof styleSet.style.sprite === 'string') {
+    styleSet.style.spriteAtlas = await loadSpriteAtlas(styleSet.style.sprite);
+  }
+
+  return styleSet;
 }
 
 function cloneStyle(style: StyleSpecification): StyleSpecification {

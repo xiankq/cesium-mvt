@@ -32,7 +32,11 @@ describe('bucket-fill-backend', () => {
       });
 
       it('应该按 filter 和数据驱动样式分别渲染同一 family 的要素', async () => {
-        const { BufferPolygon, BufferPolygonMaterial } = await import('cesium');
+        const {
+          BufferPolygon,
+          BufferPolygonCollection,
+          BufferPolygonMaterial,
+        } = await import('cesium');
         const { createBucketFillTileHandle }
           = await import('@/mvt/render/backend/bucket-fill-backend');
 
@@ -92,25 +96,137 @@ describe('bucket-fill-backend', () => {
         const waterCollection = handle!.collections.find(collection => collection.layerId === 'water-layer');
         expect(parkCollection).toBeDefined();
         expect(waterCollection).toBeDefined();
-        expect(parkCollection?.collection.primitiveCount).toBe(1);
-        expect(waterCollection?.collection.primitiveCount).toBe(1);
+        expect(parkCollection?.collection).toBeInstanceOf(BufferPolygonCollection);
+        expect(waterCollection?.collection).toBeInstanceOf(BufferPolygonCollection);
 
-        const polygon = new BufferPolygon();
-        const material = new BufferPolygonMaterial();
+        if (
+          parkCollection?.collection instanceof BufferPolygonCollection
+          && waterCollection?.collection instanceof BufferPolygonCollection
+        ) {
+          expect(parkCollection.collection.primitiveCount).toBe(1);
+          expect(waterCollection.collection.primitiveCount).toBe(1);
 
-        parkCollection!.collection.get(0, polygon);
-        const parkMaterial = polygon.getMaterial(material);
-        expect(parkMaterial.color.red).toBeCloseTo(0x11 / 255, 4);
-        expect(parkMaterial.color.green).toBeCloseTo(0x22 / 255, 4);
-        expect(parkMaterial.color.blue).toBeCloseTo(0x33 / 255, 4);
-        expect(parkMaterial.color.alpha).toBeCloseTo(128 / 255, 4);
+          const polygon = new BufferPolygon();
+          const material = new BufferPolygonMaterial();
 
-        waterCollection!.collection.get(0, polygon);
-        const waterMaterial = polygon.getMaterial(material);
-        expect(waterMaterial.color.red).toBeCloseTo(0x44 / 255, 4);
-        expect(waterMaterial.color.green).toBeCloseTo(0x55 / 255, 4);
-        expect(waterMaterial.color.blue).toBeCloseTo(0x66 / 255, 4);
-        expect(waterMaterial.color.alpha).toBeCloseTo(192 / 255, 4);
+          parkCollection.collection.get(0, polygon);
+          const parkMaterial = polygon.getMaterial(material);
+          expect(parkMaterial.color.red).toBeCloseTo(0x11 / 255, 4);
+          expect(parkMaterial.color.green).toBeCloseTo(0x22 / 255, 4);
+          expect(parkMaterial.color.blue).toBeCloseTo(0x33 / 255, 4);
+          expect(parkMaterial.color.alpha).toBeCloseTo(128 / 255, 4);
+
+          waterCollection.collection.get(0, polygon);
+          const waterMaterial = polygon.getMaterial(material);
+          expect(waterMaterial.color.red).toBeCloseTo(0x44 / 255, 4);
+          expect(waterMaterial.color.green).toBeCloseTo(0x55 / 255, 4);
+          expect(waterMaterial.color.blue).toBeCloseTo(0x66 / 255, 4);
+          expect(waterMaterial.color.alpha).toBeCloseTo(192 / 255, 4);
+        }
+      });
+
+      it('应该为带 fill-pattern 的填充使用纹理 Primitive', async () => {
+        const { Material, Primitive, WebMercatorTilingScheme } = await import('cesium');
+        const { FillBucketBuilder } = await import('@/mvt/bucket/fill-bucket-builder');
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
+
+        const tilingScheme = new WebMercatorTilingScheme();
+        const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
+        const bucketBuilder = new FillBucketBuilder({
+          extent: 4096,
+          familyId: 'source/layer/fill/0',
+          layerIds: ['layer1'],
+          sourceLayer: 'layer',
+          tileKey: 'source/0/0/0',
+          tileProjection: {
+            east: rect.east,
+            north: rect.north,
+            south: rect.south,
+            west: rect.west,
+          },
+        });
+
+        bucketBuilder.addFeature({
+          id: 1,
+          loadGeometry: () => [[
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            { x: 100, y: 100 },
+            { x: 0, y: 100 },
+            { x: 0, y: 0 },
+          ]],
+          properties: { kind: 'park' },
+          type: 3,
+        } as any, 0);
+
+        const bucket = bucketBuilder.build();
+        const bucketTile = {
+          buckets: [bucket],
+          byteLength: bucket.stats.byteLength,
+          epoch: 1,
+          key: 'source/0/0/0',
+        };
+        const style = {
+          version: 8 as const,
+          sources: {},
+          spriteAtlas: {
+            getImage(name: string) {
+              if (name !== 'stripe') {
+                return undefined;
+              }
+
+              return {
+                height: 4,
+                image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nqkAAAAASUVORK5CYII=',
+                pixelRatio: 1,
+                width: 8,
+              };
+            },
+          },
+          layers: [
+            {
+              'id': 'layer1',
+              'paint': {
+                'fill-color': '#112233',
+                'fill-pattern': 'stripe',
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'fill',
+            },
+          ],
+        } as StyleSpecification & {
+          spriteAtlas: {
+            getImage: (name: string) => {
+              height: number;
+              image: string;
+              pixelRatio: number;
+              width: number;
+            } | undefined;
+          };
+        };
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        const collection = handle!.collections[0]?.collection;
+        expect(collection).toBeInstanceOf(Primitive);
+        if (collection instanceof Primitive) {
+          expect(collection.appearance?.material.type).toBe(Material.ImageType);
+          expect(collection.appearance?.material.uniforms.image).toBe(
+            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nqkAAAAASUVORK5CYII=',
+          );
+
+          const geometryInstance = Array.isArray(collection.geometryInstances)
+            ? collection.geometryInstances[0]
+            : collection.geometryInstances;
+          expect(geometryInstance).toBeDefined();
+          expect(geometryInstance?.geometry.attributes.st).toBeDefined();
+        }
       });
 
       it('应该为空bucket tile返回undefined', async () => {

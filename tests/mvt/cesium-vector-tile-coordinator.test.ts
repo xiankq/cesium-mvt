@@ -2,7 +2,10 @@ import type {
   SourceSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
+import type { FeatureCollection, Point } from 'geojson';
 import type { ParsedTileResult } from '@/mvt/bucket';
+import { GeoJSONVT } from '@maplibre/geojson-vt';
+import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 async function createCoordinator(options: Record<string, unknown> = {}) {
@@ -37,6 +40,37 @@ function createStyle(): StyleSpecification {
       },
     ],
   };
+}
+
+function createRenderedTileBuffer() {
+  const data: FeatureCollection<Point, { kind: string }> = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        id: 1,
+        geometry: {
+          type: 'Point',
+          coordinates: [0, 0],
+        },
+        properties: {
+          kind: 'cafe',
+        },
+      },
+    ],
+  };
+
+  const tileIndex = new GeoJSONVT(data);
+  const tile = tileIndex.getTile(0, 0, 0);
+  if (!tile) {
+    throw new Error('Expected fixture tile to exist.');
+  }
+
+  const encoded = fromGeojsonVt({ poi: tile } as Parameters<typeof fromGeojsonVt>[0]);
+  return encoded.buffer.slice(
+    encoded.byteOffset,
+    encoded.byteOffset + encoded.byteLength,
+  ) as ArrayBuffer;
 }
 
 function createParsedTileResult(key: string) {
@@ -217,6 +251,59 @@ describe('cesiumVectorTileCoordinator', () => {
     expect(removeSpy).not.toHaveBeenCalled();
     expect(clearSpy).toHaveBeenCalledTimes(1);
     expect(renderManager.getHandle(renderKey)).toBeUndefined();
+  });
+
+  it('queryRenderedFeatures 会读取可见渲染瓦片', async () => {
+    const coordinator = await createCoordinator();
+    coordinator.updateStyle({
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'poi',
+          'source': 'base',
+          'source-layer': 'poi',
+          'type': 'circle',
+        },
+      ],
+    });
+
+    const renderKey = `${(coordinator as any).styleManager.getStyleEpoch()}:base/0/0/0`;
+    const tileBuffer = createRenderedTileBuffer();
+    const sourceManager = (coordinator as any).sourceManager;
+    const renderManager = (coordinator as any).renderManager;
+
+    sourceManager.getSourceCache = vi.fn(() => ({
+      getEntry: vi.fn(() => ({
+        state: 'ready',
+        value: tileBuffer,
+      })),
+    }));
+    renderManager.getAllKeys = vi.fn(() => [renderKey]);
+    renderManager.getHandle = vi.fn(() => ({
+      visible: true,
+    }));
+
+    const renderedFeatures = coordinator.queryRenderedFeatures({
+      filter: ['==', ['get', 'kind'], 'cafe'],
+    });
+
+    expect(renderedFeatures).toHaveLength(1);
+    expect(renderedFeatures[0]).toMatchObject({
+      id: 1,
+      layerId: 'poi',
+      properties: {
+        kind: 'cafe',
+      },
+      sourceId: 'base',
+      sourceLayer: 'poi',
+      type: 'Feature',
+    });
   });
 
   it('会按请求顺序传递优先级', async () => {
@@ -466,7 +553,7 @@ describe('cesiumVectorTileCoordinator', () => {
         {
           'id': 'poi',
           'paint': {
-            'circle-color': ['case', ['feature-state', 'selected'], '#ff0000', '#0000ff'],
+            'circle-color': ['case', ['==', ['feature-state', 'selected'], true], '#ff0000', '#0000ff'],
             'circle-radius': 5,
           },
           'source': 'base',
@@ -584,6 +671,44 @@ describe('cesiumVectorTileCoordinator', () => {
     const requestTile = (coordinator as any).requestTile.bind(coordinator);
     await requestTile('base', 0, 0, 0);
 
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('销毁期间完成的请求不应该在销毁后继续挂载', async () => {
+    const coordinator = await createCoordinator();
+    coordinator.updateStyle(createStyle());
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    let resolveRequest: (value: ParsedTileResult | undefined) => void = () => {};
+    const requestPromise = new Promise<ParsedTileResult | undefined>((resolve) => {
+      resolveRequest = resolve;
+    });
+
+    const sourceManager = {
+      abort: vi.fn(),
+      abortAll: vi.fn(),
+      destroy: vi.fn(),
+      getNextRetryAt: vi.fn(() => undefined),
+      getSourceConstraints: vi.fn(() => ({})),
+      getSourceIds: vi.fn(() => ['base']),
+      isDestroyed: vi.fn(() => false),
+      reconcileSources: vi.fn(),
+      requestTile: vi.fn(() => requestPromise),
+    };
+    (coordinator as any).sourceManager = sourceManager;
+
+    const renderManager = (coordinator as any).renderManager;
+    const mountSpy = vi.spyOn(renderManager, 'mount');
+    const requestTile = (coordinator as any).requestTile.bind(coordinator);
+    const pending = requestTile('base', 0, 0, 0);
+
+    resolveRequest(createParsedTileResult('base/0/0/0@1'));
+    coordinator.destroy();
+
+    await pending;
+
+    expect(mountSpy).not.toHaveBeenCalled();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 

@@ -4,6 +4,7 @@ import type { TileProjectionData } from '../geometry/tile-projection';
 import type { RenderTile } from '../render/render-tile';
 import type { WorkerLike } from '../utils/worker-dispatcher';
 import type { ParsedTileResult } from './bucket-types';
+import { parseRenderTileCoordinateFromKey } from '../render/render-tile';
 import { formatErrorMessage } from '../utils/common';
 import {
   extractWorkerResponse,
@@ -156,7 +157,17 @@ function extractTileProjection(
   tileKey: string,
   tilingScheme: WebMercatorTilingScheme,
 ): TileProjectionData {
-  const { level, x, y } = parseTileCoordinateFromKey(tileKey);
+  let level = 0;
+  let x = 0;
+  let y = 0;
+
+  try {
+    ({ level, x, y } = parseRenderTileCoordinateFromKey(tileKey));
+  }
+  catch {
+    // 保持旧行为：坐标无法解析时回落到默认瓦片原点。
+  }
+
   const rect = tilingScheme.tileXYToNativeRectangle(x, y, level);
   return {
     east: rect.east,
@@ -164,29 +175,4 @@ function extractTileProjection(
     south: rect.south,
     west: rect.west,
   };
-}
-
-/**
- * 从瓦片键解析瓦片坐标
- *
- * @param key - 瓦片键（格式：sourceId/level/x/y 或 sourceId/level/x/y@epoch）
- * @returns 瓦片坐标
- */
-function parseTileCoordinateFromKey(key: string) {
-  const scopedKey = key.split('@')[0];
-  const parts = scopedKey.split('/');
-
-  if (parts.length < 4) {
-    return { level: 0, x: 0, y: 0 };
-  }
-
-  const level = Number(parts[parts.length - 3]);
-  const x = Number(parts[parts.length - 2]);
-  const y = Number(parts[parts.length - 1]);
-
-  if (!Number.isInteger(level) || !Number.isInteger(x) || !Number.isInteger(y)) {
-    return { level: 0, x: 0, y: 0 };
-  }
-
-  return { level, x, y };
 }

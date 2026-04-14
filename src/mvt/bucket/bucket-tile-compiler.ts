@@ -9,6 +9,7 @@ import { isSupportedGeometryLayer } from '../style/layer-family';
 import { CircleBucketBuilder } from './circle-bucket-builder';
 import { FillBucketBuilder } from './fill-bucket-builder';
 import { LineBucketBuilder } from './line-bucket-builder';
+import { SymbolBucketBuilder } from './symbol-bucket-builder';
 
 /**
  * Bucket 瓦片编译器模块
@@ -143,6 +144,7 @@ function compileGeometryBatch(
       tileProjection,
       tileKey,
       zoom,
+      layersById,
       layer.id,
     );
     if (!builder) {
@@ -150,6 +152,7 @@ function compileGeometryBatch(
     }
 
     return [{
+      layer,
       builder,
       filter: createFeatureFilter(layer.filter),
       shouldFrontloadFilter: !containsFeatureStateExpression(layer.filter),
@@ -160,11 +163,15 @@ function compileGeometryBatch(
     return [];
   }
 
+  const symbolAcceptsLineGeometry = layerEntries.some(({ layer }) => layer.type === 'symbol'
+    && (layer.layout?.['symbol-placement'] === 'line'
+      || layer.layout?.['symbol-placement'] === 'line-center'));
+
   const buckets: ParsedTileResult['buckets'] = [];
   for (let index = 0; index < sourceLayer.length; index += 1) {
     const feature = sourceLayer.feature(index);
     const featureType = getFeatureType(feature.type);
-    if (!featureType || !matchesBatchType(batch.type, featureType)) {
+    if (!featureType || !matchesBatchType(batch.type, featureType, symbolAcceptsLineGeometry)) {
       continue;
     }
 
@@ -214,6 +221,7 @@ function createBucketBuilder(
   tileProjection: TileProjectionData,
   tileKey: string,
   zoom: number,
+  layersById: ReadonlyMap<string, StyleSpecification['layers'][number]>,
   layerId: string,
 ) {
   const options = {
@@ -224,18 +232,65 @@ function createBucketBuilder(
     tileProjection,
     tileKey,
     zoom,
+    symbolPlacement: resolveSymbolPlacement(batch, layerId, layersById),
+    symbolSpacing: resolveSymbolSpacing(batch, layerId, layersById),
   };
 
   switch (batch.type) {
     case 'fill':
       return new FillBucketBuilder(options);
+    case 'fill-extrusion':
+      return new FillBucketBuilder({
+        ...options,
+        bucketType: 'fill-extrusion',
+      });
     case 'line':
       return new LineBucketBuilder(options);
     case 'circle':
       return new CircleBucketBuilder(options);
+    case 'symbol':
+      return new SymbolBucketBuilder(options);
     default:
       return undefined;
   }
+}
+
+function resolveSymbolPlacement(
+  batch: GeometryBatch,
+  layerId: string,
+  layersById: ReadonlyMap<string, StyleSpecification['layers'][number]>,
+): 'point' | 'line' | 'line-center' | undefined {
+  if (batch.type !== 'symbol') {
+    return undefined;
+  }
+
+  const layer = layersById.get(layerId);
+  const symbolPlacement = layer?.type === 'symbol'
+    ? layer.layout?.['symbol-placement']
+    : undefined;
+
+  if (symbolPlacement === 'line' || symbolPlacement === 'line-center') {
+    return symbolPlacement;
+  }
+
+  return 'point';
+}
+
+function resolveSymbolSpacing(
+  batch: GeometryBatch,
+  layerId: string,
+  layersById: ReadonlyMap<string, StyleSpecification['layers'][number]>,
+): number | undefined {
+  if (batch.type !== 'symbol') {
+    return undefined;
+  }
+
+  const layer = layersById.get(layerId);
+  const symbolSpacing = layer?.type === 'symbol'
+    ? layer.layout?.['symbol-spacing']
+    : undefined;
+
+  return typeof symbolSpacing === 'number' ? symbolSpacing : undefined;
 }
 
 function getFeatureType(type: 0 | 1 | 2 | 3) {
@@ -254,10 +309,14 @@ function getFeatureType(type: 0 | 1 | 2 | 3) {
 function matchesBatchType(
   batchType: GeometryBatch['type'],
   featureType: ReturnType<typeof getFeatureType>,
+  symbolAcceptsLineGeometry = false,
 ) {
   return (batchType === 'circle' && featureType === 'point')
     || (batchType === 'line' && featureType === 'line')
-    || (batchType === 'fill' && featureType === 'polygon');
+    || (batchType === 'fill' && featureType === 'polygon')
+    || (batchType === 'fill-extrusion' && featureType === 'polygon')
+    || (batchType === 'symbol' && featureType === 'point')
+    || (batchType === 'symbol' && symbolAcceptsLineGeometry && featureType === 'line');
 }
 
 function containsFeatureStateExpression(value: unknown): boolean {

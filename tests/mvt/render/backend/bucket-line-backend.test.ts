@@ -48,8 +48,31 @@ describe('bucket-line-backend', () => {
         expect(handle?.byteLength).toBeGreaterThan(0);
       });
 
+      it('应该兼容带 styleEpoch 后缀的 bucket tile key', async () => {
+        const { createBucketLineTileHandle }
+          = await import('@/mvt/render/backend/bucket-line-backend');
+
+        const bucketTile = createMockLineBucketTile({
+          tileKey: 'openmaptiles/8/205/114@1',
+        });
+        const style = createMockStyle('line');
+
+        const handle = createBucketLineTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.key).toBe('openmaptiles/8/205/114@1');
+        expect(handle?.collections.length).toBeGreaterThan(0);
+      });
+
       it('应该按 filter 和数据驱动样式分别渲染同一 family 的要素', async () => {
-        const { BufferPolyline, BufferPolylineMaterial } = await import('cesium');
+        const {
+          BufferPolyline,
+          BufferPolylineCollection,
+          BufferPolylineMaterial,
+        } = await import('cesium');
         const { createBucketLineTileHandle }
           = await import('@/mvt/render/backend/bucket-line-backend');
 
@@ -111,8 +134,14 @@ describe('bucket-line-backend', () => {
         const casingCollection = handle!.collections.find(collection => collection.layerId === 'road-casing');
         expect(baseCollection).toBeDefined();
         expect(casingCollection).toBeDefined();
-        expect(baseCollection?.collection.primitiveCount).toBe(1);
-        expect(casingCollection?.collection.primitiveCount).toBe(1);
+        expect(baseCollection?.collection).toBeInstanceOf(BufferPolylineCollection);
+        expect(casingCollection?.collection).toBeInstanceOf(BufferPolylineCollection);
+        if (baseCollection?.collection instanceof BufferPolylineCollection) {
+          expect(baseCollection.collection.primitiveCount).toBe(1);
+        }
+        if (casingCollection?.collection instanceof BufferPolylineCollection) {
+          expect(casingCollection.collection.primitiveCount).toBe(1);
+        }
 
         const polyline = new BufferPolyline();
         const material = new BufferPolylineMaterial();
@@ -146,6 +175,110 @@ describe('bucket-line-backend', () => {
         expect(casingMaterial.color.green).toBeCloseTo(0x55 / 255, 4);
         expect(casingMaterial.color.blue).toBeCloseTo(0x66 / 255, 4);
         expect(casingMaterial.width).toBe(4);
+      });
+
+      it('应该为带 line-dasharray 的线使用 PolylineCollection', async () => {
+        const { Material, PolylineCollection } = await import('cesium');
+        const { createBucketLineTileHandle }
+          = await import('@/mvt/render/backend/bucket-line-backend');
+
+        const bucketTile = createMockLineBucketTile();
+        const style: StyleSpecification = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'id': 'layer1',
+              'paint': {
+                'line-color': '#00ff00',
+                'line-dasharray': ['literal', [2, 1]],
+                'line-width': 2,
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'line',
+            },
+          ],
+        };
+
+        const handle = createBucketLineTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        const collection = handle?.collections[0]?.collection;
+        expect(collection).toBeInstanceOf(PolylineCollection);
+        if (collection instanceof PolylineCollection) {
+          const polyline = collection.get(0);
+          expect(polyline.material.type).toBe(Material.PolylineDashType);
+          expect(polyline.material.uniforms.dashLength).toBe(6);
+          expect(polyline.material.uniforms.dashPattern).not.toBe(255);
+        }
+      });
+
+      it('应该为带 line-pattern 的线使用图案材质', async () => {
+        const { PolylineCollection } = await import('cesium');
+        const { createBucketLineTileHandle }
+          = await import('@/mvt/render/backend/bucket-line-backend');
+
+        const bucketTile = createMockLineBucketTile();
+        const style = {
+          version: 8 as const,
+          sources: {},
+          spriteAtlas: {
+            getImage(name: string) {
+              if (name !== 'stripe') {
+                return undefined;
+              }
+
+              return {
+                height: 4,
+                image: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22%3E%3C/svg%3E',
+                pixelRatio: 1,
+                width: 8,
+              };
+            },
+          },
+          layers: [
+            {
+              'id': 'layer1',
+              'paint': {
+                'line-color': '#00ff00',
+                'line-pattern': 'stripe',
+                'line-width': 2,
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'line',
+            },
+          ],
+        } as StyleSpecification & {
+          spriteAtlas: {
+            getImage: (name: string) => {
+              height: number;
+              image: string;
+              pixelRatio: number;
+              width: number;
+            } | undefined;
+          };
+        };
+
+        const handle = createBucketLineTileHandle({
+          bucketTile,
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        const collection = handle?.collections[0]?.collection;
+        expect(collection).toBeInstanceOf(PolylineCollection);
+        if (collection instanceof PolylineCollection) {
+          const polyline = collection.get(0);
+          expect(polyline.material.type).toBe('PolylineImagePattern');
+          expect(polyline.material.uniforms.image).toContain('data:image/svg+xml');
+          expect(polyline.material.uniforms.imageSize.x).toBe(8);
+          expect(polyline.material.uniforms.imageSize.y).toBe(4);
+        }
       });
 
       it('应该为同一line bucket的多个layerId分别创建collection', async () => {

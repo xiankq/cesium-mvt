@@ -22,6 +22,8 @@ export interface BucketBuilderOptions {
   familyId: string;
   layerIds: string[];
   sourceLayer?: string;
+  symbolPlacement?: 'point' | 'line' | 'line-center';
+  symbolSpacing?: number;
   tileProjection: TileProjectionData;
   tileKey: string;
   zoom?: number;
@@ -47,6 +49,17 @@ export interface FillBucketStats extends BucketStats {
 }
 
 /**
+ * 3D 填充 Bucket 统计信息
+ */
+export interface FillExtrusionBucketStats extends BucketStats {
+  type: 'fill-extrusion';
+  vertexCount: number;
+  triangleCount: number;
+  holeCount: number;
+  polygonCount: number;
+}
+
+/**
  * 线 Bucket 统计信息
  */
 export interface LineBucketStats extends BucketStats {
@@ -64,12 +77,23 @@ export interface CircleBucketStats extends BucketStats {
 }
 
 /**
+ * 符号 Bucket 统计信息
+ */
+export interface SymbolBucketStats extends BucketStats {
+  type: 'symbol';
+  labelCount: number;
+  billboardCount: number;
+}
+
+/**
  * 几何 Bucket 统计信息联合类型
  */
 export type GeometryBucketStats
   = | FillBucketStats
+    | FillExtrusionBucketStats
     | LineBucketStats
-    | CircleBucketStats;
+    | CircleBucketStats
+    | SymbolBucketStats;
 
 /**
  * 填充（多边形）Bucket 数据
@@ -102,12 +126,39 @@ export interface CircleBucketData {
 }
 
 /**
+ * 符号 Bucket 数据
+ */
+export interface SymbolBucketData {
+  positions: Float64Array;
+  featureIds: Float32Array;
+  lineAngles?: Float32Array;
+
+  // 文本标注数据
+  texts?: string[];
+  textFonts?: string[];
+  textSizes?: number[];
+  textColors?: string[];
+  textOpacities?: number[];
+  textOffsets?: Array<[number, number]>;
+  textAnchors?: string[];
+
+  // 图标数据
+  iconImages?: string[];
+  iconSizes?: number[];
+  iconColors?: string[];
+  iconOpacities?: number[];
+  iconOffsets?: Array<[number, number]>;
+  iconAnchors?: string[];
+}
+
+/**
  * 几何 Bucket 数据联合类型
  */
 export type GeometryBucketData
   = | FillBucketData
     | LineBucketData
-    | CircleBucketData;
+    | CircleBucketData
+    | SymbolBucketData;
 
 /**
  * 特征索引条目
@@ -168,6 +219,7 @@ export interface ParsedTileResult {
 export function calculateBucketByteLength(stats: GeometryBucketStats): number {
   switch (stats.type) {
     case 'fill':
+    case 'fill-extrusion':
       return stats.vertexCount * 3 * 8
         + stats.triangleCount * 3 * 4
         + stats.holeCount * 4
@@ -180,6 +232,9 @@ export function calculateBucketByteLength(stats: GeometryBucketStats): number {
     case 'circle':
       return stats.pointCount * 3 * 8
         + stats.pointCount * 4;
+    case 'symbol':
+      return stats.labelCount * 100
+        + stats.billboardCount * 100;
   }
 }
 

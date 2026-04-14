@@ -1,7 +1,13 @@
 import type { VectorTileFeature } from '@mapbox/vector-tile';
 import type { Cartesian3 } from 'cesium';
 import type { TilePoint } from '../geometry/grid-subdivision';
-import type { Bucket, BucketBuilderOptions, FillBucketData, FillBucketStats } from './bucket-types';
+import type {
+  Bucket,
+  BucketBuilderOptions,
+  FillBucketData,
+  FillBucketStats,
+  FillExtrusionBucketStats,
+} from './bucket-types';
 import { classifyRings } from '@mapbox/vector-tile';
 import earcut from 'earcut';
 import { getGranularityForZoomLevel, subdivideTriangleEdges } from '../geometry/grid-subdivision';
@@ -9,11 +15,18 @@ import { createTileProjectionContext, projectTilePoint } from '../geometry/tile-
 import { calculateBucketByteLength, calculateFeatureIndexByteLength } from './bucket-types';
 
 const DEFAULT_GRANULARITY = 128;
+type PolygonBucketType = 'fill' | 'fill-extrusion';
+type PolygonBucketStats = FillBucketStats | FillExtrusionBucketStats;
+
+export interface FillBucketBuilderOptions extends BucketBuilderOptions {
+  bucketType?: PolygonBucketType;
+}
 
 export class FillBucketBuilder {
   readonly type = 'fill' as const;
 
   private readonly extent: number;
+  private readonly bucketType: PolygonBucketType;
   private readonly familyId: string;
   private readonly layerIds: string[];
   private readonly sourceLayer?: string;
@@ -34,22 +47,15 @@ export class FillBucketBuilder {
   private polygonTriangleCounts: number[] = [];
   private polygonVertexCounts: number[] = [];
 
-  private _stats: FillBucketStats = {
-    type: 'fill',
-    featureCount: 0,
-    byteLength: 0,
-    vertexCount: 0,
-    triangleCount: 0,
-    holeCount: 0,
-    polygonCount: 0,
-  };
+  private _stats!: PolygonBucketStats;
 
-  get stats(): FillBucketStats {
+  get stats(): PolygonBucketStats {
     return this._stats;
   }
 
-  constructor(options: BucketBuilderOptions) {
+  constructor(options: FillBucketBuilderOptions) {
     this.extent = options.extent;
+    this.bucketType = options.bucketType ?? 'fill';
     this.familyId = options.familyId;
     this.layerIds = options.layerIds;
     this.sourceLayer = options.sourceLayer;
@@ -57,6 +63,15 @@ export class FillBucketBuilder {
     this.granularity = options.zoom !== undefined
       ? getGranularityForZoomLevel(options.zoom)
       : DEFAULT_GRANULARITY;
+    this._stats = {
+      type: this.bucketType,
+      featureCount: 0,
+      byteLength: 0,
+      vertexCount: 0,
+      triangleCount: 0,
+      holeCount: 0,
+      polygonCount: 0,
+    };
   }
 
   addFeature(feature: VectorTileFeature, localId: number): void {
@@ -183,7 +198,7 @@ export class FillBucketBuilder {
     };
 
     return {
-      type: 'fill',
+      type: this.bucketType,
       familyId: this.familyId,
       layerIds: this.layerIds,
       sourceLayer: this.sourceLayer,

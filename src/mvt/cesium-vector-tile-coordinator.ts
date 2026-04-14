@@ -1,9 +1,12 @@
 import type { SourceSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
+import type { QueryRenderedFeaturesOptions } from './render';
+import type { RenderedFeature } from './render/render-query';
+import type { QuerySourceFeaturesOptions } from './source/source-query';
 import type { TileAvailability } from './source/tile-selection';
 import type { FeatureStateTarget } from './style/feature-state-store';
 import { RequestScheduler } from 'cesium';
-import { RenderManager } from './render';
+import { queryRenderedFeaturesFromState, RenderManager } from './render';
 import { compileRenderTile } from './render/render-tile';
 import {
   computeTileLifecycle,
@@ -72,7 +75,10 @@ export class CesiumVectorTileCoordinator {
     this.cacheManager = new TileCacheManager({
       readyTileBudget: sharedTileBudget,
     });
-    this.renderManager = new RenderManager({ root: options.root });
+    this.renderManager = new RenderManager({
+      root: options.root,
+      tileWidth: options.tileWidth,
+    });
     this.cacheManager.setOnEvict((key: string) => {
       this.renderManager.remove(key);
     });
@@ -138,6 +144,29 @@ export class CesiumVectorTileCoordinator {
 
   getStyle(): StyleSpecification | undefined {
     return this.styleManager.getStyle();
+  }
+
+  querySourceFeatures(
+    sourceId: string,
+    options: QuerySourceFeaturesOptions = {},
+  ) {
+    return this.sourceManager.querySourceFeatures(sourceId, options);
+  }
+
+  queryRenderedFeatures(
+    options: QueryRenderedFeaturesOptions = {},
+  ): RenderedFeature[] {
+    const style = this.styleManager.getStyle();
+    if (!style) {
+      return [];
+    }
+
+    return queryRenderedFeaturesFromState({
+      getFeatureState: target => this.featureStateManager.getFeatureState(target),
+      getSourceCache: sourceId => this.sourceManager.getSourceCache(sourceId),
+      renderManager: this.renderManager,
+      style,
+    }, options);
   }
 
   setFeatureState(
@@ -346,6 +375,10 @@ export class CesiumVectorTileCoordinator {
     try {
       const tile = await requestPromise;
 
+      if (this.destroyed) {
+        return;
+      }
+
       // 使用 epoch 检测样式是否在请求期间发生了变化
       if (this.styleManager.getStyleEpoch() !== renderTile.epoch) {
         return;
@@ -360,6 +393,10 @@ export class CesiumVectorTileCoordinator {
       this.renderRequested = true;
     }
     catch (error) {
+      if (this.destroyed) {
+        return;
+      }
+
       if (this.styleManager.getStyleEpoch() !== renderTile.epoch) {
         return;
       }

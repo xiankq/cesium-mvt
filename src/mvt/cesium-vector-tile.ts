@@ -1,5 +1,8 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
+import type { Resource } from 'cesium';
 import type { FrameState as CesiumVectorTileCoordinatorFrameState } from './cesium-vector-tile-coordinator';
+import type { QueryRenderedFeaturesOptions, RenderedFeature } from './render';
+import type { QuerySourceFeaturesOptions } from './source/source-query';
 import type { FeatureStateTarget } from './style/feature-state-store';
 import type { StyleSet } from './style/style-loader';
 import { BoundingSphere, Event, PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
@@ -44,19 +47,17 @@ export class CesiumVectorTile extends PrimitiveCollection {
 
   private readonly root = new PrimitiveCollection();
   private readonly coordinator: CesiumVectorTileCoordinator;
+  private styleLoadToken = 0;
   private styleSetPromise?: Promise<StyleSet>;
 
   static async fromUrl(
-    url: string | URL,
+    url: string | URL | Resource,
     options: CesiumVectorTileFromUrlOptions = {},
   ): Promise<CesiumVectorTile> {
-    const vectorTile = new CesiumVectorTile({
-      ...options,
-      style: url.toString(),
-    });
+    const vectorTile = new CesiumVectorTile(options);
 
     try {
-      await vectorTile.styleSetPromise;
+      await vectorTile.loadAndApplyStyle(url);
       return vectorTile;
     }
     catch (error) {
@@ -83,14 +84,7 @@ export class CesiumVectorTile extends PrimitiveCollection {
     this.add(this.root);
 
     if (options.style) {
-      this.styleSetPromise = loadStyleSet({
-        style: options.style,
-      }).then((styleSet) => {
-        if (!this.destroyed) {
-          this.coordinator.updateStyle(styleSet.style);
-        }
-        return styleSet;
-      });
+      this.loadAndApplyStyle(options.style);
     }
   }
 
@@ -128,12 +122,12 @@ export class CesiumVectorTile extends PrimitiveCollection {
     });
   }
 
-  updateStyle(style: StyleSpecification): void {
+  updateStyle(style: StyleSpecification): Promise<void> {
     if (this.destroyed) {
-      return;
+      return Promise.resolve();
     }
 
-    this.coordinator.updateStyle(style);
+    return this.loadAndApplyStyle(style).then(() => {});
   }
 
   setFeatureState(
@@ -160,6 +154,19 @@ export class CesiumVectorTile extends PrimitiveCollection {
     return this.coordinator.getStyle();
   }
 
+  querySourceFeatures(
+    sourceId: string,
+    options: QuerySourceFeaturesOptions = {},
+  ) {
+    return this.coordinator.querySourceFeatures(sourceId, options);
+  }
+
+  queryRenderedFeatures(
+    options: QueryRenderedFeaturesOptions = {},
+  ): RenderedFeature[] {
+    return this.coordinator.queryRenderedFeatures(options);
+  }
+
   isDestroyed(): boolean {
     return this.destroyed;
   }
@@ -173,5 +180,22 @@ export class CesiumVectorTile extends PrimitiveCollection {
     this.destroyed = true;
     super.destroy();
     return this;
+  }
+
+  private loadAndApplyStyle(
+    style: string | URL | Resource | StyleSpecification,
+  ): Promise<StyleSet> {
+    const loadToken = ++this.styleLoadToken;
+    const styleSetPromise = loadStyleSet({
+      style,
+    }).then((styleSet) => {
+      if (!this.destroyed && this.styleLoadToken === loadToken) {
+        this.coordinator.updateStyle(styleSet.style);
+      }
+      return styleSet;
+    });
+
+    this.styleSetPromise = styleSetPromise;
+    return styleSetPromise;
   }
 }

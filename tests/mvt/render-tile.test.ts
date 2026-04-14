@@ -94,6 +94,55 @@ describe('render-tile', () => {
     });
   });
 
+  it('includes fill-extrusion geometry batches in render order', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'building',
+          'type': 'fill-extrusion',
+          'source': 'base',
+          'source-layer': 'building',
+          'paint': {
+            'fill-extrusion-color': '#556677',
+            'fill-extrusion-height': 32,
+          },
+        },
+      ],
+    };
+
+    const layerFamilies = createLayerFamilies(style);
+    const renderOrder = createRenderOrder(style, layerFamilies);
+
+    expect(compileRenderTile({
+      key: createRenderTileKey('base', 14, 1, 2),
+      layerFamilies,
+      renderOrder,
+      style,
+      styleEpoch: 2,
+    })).toEqual({
+      epoch: 2,
+      geometryBatches: [
+        {
+          backend: 'fill-extrusion',
+          familyId: 'base/building/fill-extrusion/0',
+          layerIds: ['building'],
+          order: 0,
+          sourceId: 'base',
+          sourceLayer: 'building',
+          type: 'fill-extrusion',
+        },
+      ],
+      key: 'base/14/1/2@2',
+    });
+  });
+
   it('resolves background color expressions with tile zoom', () => {
     const style = {
       version: 8,

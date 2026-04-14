@@ -3,8 +3,11 @@ import type { PrimitiveCollection } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
 import type { FeatureStateResolver } from '../style/feature-state-store';
 import type { LayerFamily } from '../style/layer-family';
+import type { BucketSymbolPlacementHandle } from './backend/bucket-symbol-types';
+import type { SymbolPlacementIndexPlacement } from './backend/symbol-placement-index';
 import type { BucketRenderedTileHandle } from './bucket-rendered-tile';
 import type { RenderEntry } from './render-order';
+import { createSymbolPlacementIndex } from './backend/symbol-placement-index';
 import {
   createBucketRenderedTileHandle,
   destroyBucketRenderedTileHandle,
@@ -16,10 +19,12 @@ import { parseRenderTileCoordinateFromKey } from './render-tile';
 
 export interface RenderManagerOptions {
   root: PrimitiveCollection;
+  tileWidth?: number;
 }
 
 export class RenderManager {
   private readonly root: PrimitiveCollection;
+  private readonly tileWidth: number;
   private readonly renderedTileHandles = new Map<string, BucketRenderedTileHandle>();
   private renderOrder: RenderEntry[] = [];
   private layerFamilies: LayerFamily[] = [];
@@ -28,6 +33,7 @@ export class RenderManager {
 
   constructor(options: RenderManagerOptions) {
     this.root = options.root;
+    this.tileWidth = options.tileWidth ?? 256;
   }
 
   updateLayerFamilies(style: StyleSpecification, layerFamilies: LayerFamily[]): void {
@@ -61,11 +67,13 @@ export class RenderManager {
     const handle = createBucketRenderedTileHandle({
       bucketTile,
       featureStateResolver: this.featureStateResolver,
+      tileWidth: this.tileWidth,
       style,
     });
 
     mountBucketRenderedTileHandle(this.root, handle);
     this.renderedTileHandles.set(key, handle);
+    this.reconcileSymbolPlacements();
     return handle;
   }
 
@@ -83,6 +91,7 @@ export class RenderManager {
     const nextHandle = createBucketRenderedTileHandle({
       bucketTile,
       featureStateResolver: this.featureStateResolver,
+      tileWidth: this.tileWidth,
       style,
     });
 
@@ -93,6 +102,7 @@ export class RenderManager {
     }
 
     this.renderedTileHandles.set(key, nextHandle);
+    this.reconcileSymbolPlacements();
     return nextHandle;
   }
 
@@ -121,7 +131,11 @@ export class RenderManager {
     if (!handle) {
       return false;
     }
-    return setBucketRenderedTileVisibility(handle, true);
+    const changed = setBucketRenderedTileVisibility(handle, true);
+    if (changed) {
+      this.reconcileSymbolPlacements();
+    }
+    return changed;
   }
 
   hide(key: string): boolean {
@@ -129,7 +143,11 @@ export class RenderManager {
     if (!handle) {
       return false;
     }
-    return setBucketRenderedTileVisibility(handle, false);
+    const changed = setBucketRenderedTileVisibility(handle, false);
+    if (changed) {
+      this.reconcileSymbolPlacements();
+    }
+    return changed;
   }
 
   getHandle(key: string): BucketRenderedTileHandle | undefined {
@@ -152,6 +170,7 @@ export class RenderManager {
 
     destroyBucketRenderedTileHandle(this.root, handle);
     this.renderedTileHandles.delete(key);
+    this.reconcileSymbolPlacements();
     return true;
   }
 
@@ -160,9 +179,72 @@ export class RenderManager {
       destroyBucketRenderedTileHandle(this.root, handle);
     }
     this.renderedTileHandles.clear();
+    this.reconcileSymbolPlacements();
   }
 
   destroy(): void {
     this.clear();
+  }
+
+  private reconcileSymbolPlacements(): void {
+    const symbolTileHandles = Array.from(this.renderedTileHandles.values())
+      .filter(handle => handle.visible && handle.symbols?.placements.length)
+      .map(handle => ({
+        coordinate: parseRenderTileCoordinateFromKey(handle.key),
+        handle,
+      }));
+
+    if (symbolTileHandles.length === 0) {
+      return;
+    }
+
+    symbolTileHandles.sort((left, right) => {
+      // 先让更高 zoom 的瓦片占位，和 MapLibre 一样优先保留更细粒度的数据。
+      if (left.coordinate.level !== right.coordinate.level) {
+        return right.coordinate.level - left.coordinate.level;
+      }
+
+      return left.handle.key.localeCompare(right.handle.key);
+    });
+
+    const placementIndex = createSymbolPlacementIndex();
+
+    for (const { coordinate, handle } of symbolTileHandles) {
+      for (const placement of handle.symbols!.placements) {
+        const indexedPlacement = this.toSymbolPlacementIndexPlacement(
+          placement,
+          coordinate.level,
+        );
+        const visible = !placementIndex.hasMatch(indexedPlacement);
+        this.setSymbolPlacementVisibility(placement, visible);
+        if (!visible) {
+          continue;
+        }
+
+        placementIndex.insert(indexedPlacement);
+      }
+    }
+  }
+
+  private toSymbolPlacementIndexPlacement(
+    placement: BucketSymbolPlacementHandle,
+    level: number,
+  ): SymbolPlacementIndexPlacement {
+    return {
+      anchorX: placement.anchorX,
+      anchorY: placement.anchorY,
+      collision: placement.collision,
+      key: placement.key,
+      level,
+    };
+  }
+
+  private setSymbolPlacementVisibility(
+    placement: BucketSymbolPlacementHandle,
+    visible: boolean,
+  ): void {
+    for (const renderable of placement.renderables) {
+      renderable.collection.get(renderable.index).show = visible;
+    }
   }
 }

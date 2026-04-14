@@ -63,7 +63,16 @@ describe('render-order', () => {
         type: 'fill',
       },
       {
-        familyId: 'base/road/line/1',
+        familyId: 'base/land/symbol/1',
+        kind: 'geometry',
+        layerId: 'label',
+        order: 2,
+        sourceId: 'base',
+        sourceLayer: 'land',
+        type: 'symbol',
+      },
+      {
+        familyId: 'base/road/line/2',
         kind: 'geometry',
         layerId: 'road',
         order: 3,
@@ -72,7 +81,7 @@ describe('render-order', () => {
         type: 'line',
       },
       {
-        familyId: 'base/poi/circle/2',
+        familyId: 'base/poi/circle/3',
         kind: 'geometry',
         layerId: 'poi',
         order: 4,

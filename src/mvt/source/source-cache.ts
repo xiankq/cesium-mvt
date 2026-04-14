@@ -113,6 +113,10 @@ export class SourceCache<TValue = ArrayBuffer> {
     coordinate: TileCoordinate,
     priority = 0,
   ): Promise<TValue | undefined> {
+    if (this.destroyed) {
+      return undefined;
+    }
+
     const key = createTileKey(
       this.sourceId,
       coordinate.level,
@@ -138,13 +142,19 @@ export class SourceCache<TValue = ArrayBuffer> {
     entry.error = undefined;
     entry.state = 'requesting';
     entry.promise = this.resolveTileRequest(coordinate, priority)
-      .then(request => this.loadTile(
-        request,
-        abortController.signal,
-        priority,
-      ))
+      .then((request) => {
+        if (this.destroyed) {
+          throw createAbortError();
+        }
+
+        return this.loadTile(
+          request,
+          abortController.signal,
+          priority,
+        );
+      })
       .then((value) => {
-        if (abortController.signal.aborted) {
+        if (this.destroyed || abortController.signal.aborted) {
           throw createAbortError();
         }
 
@@ -164,7 +174,8 @@ export class SourceCache<TValue = ArrayBuffer> {
         entry.abortController = undefined;
         entry.promise = undefined;
         if (
-          abortController.signal.aborted
+          this.destroyed
+          || abortController.signal.aborted
           || isAbortError(error)
           || isThrottleError(error)
         ) {
@@ -223,6 +234,21 @@ export class SourceCache<TValue = ArrayBuffer> {
         ? cloneValue(entry.value)
         : entry.value,
     };
+  }
+
+  peekEntryValue(key: string): ArrayBuffer | undefined {
+    const entry = this.entries.get(key);
+    if (!entry || !(entry.value instanceof ArrayBuffer)) {
+      return undefined;
+    }
+
+    return entry.value;
+  }
+
+  getLoadedTileKeys(): string[] {
+    return Array.from(this.entries.entries())
+      .filter(([, entry]) => entry.state === 'ready' && entry.value !== undefined)
+      .map(([key]) => key);
   }
 
   updateSource(source: SourceSpecification) {

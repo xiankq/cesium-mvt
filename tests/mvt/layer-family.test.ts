@@ -63,6 +63,12 @@ describe('layer-family', () => {
           },
         },
         {
+          'id': 'building',
+          'type': 'fill-extrusion',
+          'source': 'base',
+          'source-layer': 'building',
+        },
+        {
           'id': 'poi',
           'type': 'circle',
           'source': 'base',
@@ -87,14 +93,28 @@ describe('layer-family', () => {
         type: 'line',
       },
       {
-        id: 'base/road/line/2',
+        id: 'base/road/symbol/2',
+        layerIds: ['label'],
+        sourceId: 'base',
+        sourceLayer: 'road',
+        type: 'symbol',
+      },
+      {
+        id: 'base/road/line/3',
         layerIds: ['road-dash'],
         sourceId: 'base',
         sourceLayer: 'road',
         type: 'line',
       },
       {
-        id: 'base/poi/circle/3',
+        id: 'base/building/fill-extrusion/4',
+        layerIds: ['building'],
+        sourceId: 'base',
+        sourceLayer: 'building',
+        type: 'fill-extrusion',
+      },
+      {
+        id: 'base/poi/circle/5',
         layerIds: ['poi'],
         sourceId: 'base',
         sourceLayer: 'poi',

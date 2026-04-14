@@ -6,9 +6,10 @@ import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-fam
 import type { RenderEntry } from './render-order';
 import { createTileKey } from '../source/tile-request';
 import { isLayerVisibleAtZoom } from '../style/layer-family';
-import { createStylePropertyEvaluator } from '../style/style-property-evaluator';
+import { createColorPropertyEvaluator } from '../style/style-property-evaluator';
 
 const STYLE_EPOCH_PREFIX = /^\d+:/;
+const STYLE_EPOCH_SUFFIX = /@\d+$/;
 
 // RenderTile 表示某个 source tile 在当前 styleEpoch 下的渲染计划，
 // 此时还没有真正构建出可提交给 Cesium 的几何资源。
@@ -77,7 +78,7 @@ export function compileRenderTile({
       background = {
         color: backgroundColor === undefined
           ? undefined
-          : createStylePropertyEvaluator<string>(backgroundColor)(
+          : createColorPropertyEvaluator(backgroundColor)(
               createBackgroundStyleContext(coordinate.level),
             ),
         layerId: entry.layerId,
@@ -121,9 +122,7 @@ export function compileRenderTile({
 }
 
 export function parseRenderTileCoordinateFromKey(key: string) {
-  const scopedKey = STYLE_EPOCH_PREFIX.test(key)
-    ? key.slice(key.indexOf(':') + 1)
-    : key;
+  const scopedKey = stripRenderTileScope(key);
   const parts = scopedKey.split('/');
   if (parts.length < 4) {
     throw new Error(`Invalid render tile key: ${key}`);
@@ -134,16 +133,36 @@ export function parseRenderTileCoordinateFromKey(key: string) {
     throw new TypeError(`Invalid render tile key level: ${key}`);
   }
 
+  const x = Number(parts[parts.length - 2]);
+  if (!Number.isInteger(x)) {
+    throw new TypeError(`Invalid render tile key x: ${key}`);
+  }
+
+  const y = Number(parts[parts.length - 1]);
+  if (!Number.isInteger(y)) {
+    throw new TypeError(`Invalid render tile key y: ${key}`);
+  }
+
   return {
     level,
+    x,
+    y,
     sourceId: parts.slice(0, -3).join('/'),
   };
 }
 
 function createBackgroundStyleContext(zoom: number) {
   return {
-    geometryType: undefined,
-    properties: {},
     zoom,
   };
+}
+
+// 协调器会把 styleEpoch 编进前缀，编译后的 bucket 也会把 epoch 编进后缀。
+// 先把这两种作用域信息去掉，再按 sourceId/z/x/y 解析坐标，避免同一套 key 在不同阶段格式不一致。
+export function stripRenderTileScope(key: string): string {
+  const scopedKey = STYLE_EPOCH_PREFIX.test(key)
+    ? key.slice(key.indexOf(':') + 1)
+    : key;
+
+  return scopedKey.replace(STYLE_EPOCH_SUFFIX, '');
 }

@@ -3,19 +3,23 @@ import type { WebMercatorTilingScheme } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
 import type { RenderTile } from '../render/render-tile';
 import type { TileBudget } from '../utils/tile-budget';
+import type { QueryableSourceCache, QuerySourceFeaturesOptions } from './source-query';
 import type { TileCoordinate } from './tile-request';
 import { createBucketTileDispatcher } from '../bucket';
+import { parseRenderTileCoordinateFromKey } from '../render/render-tile';
 import { isAbortError } from '../utils/common';
 import { GeojsonSourceCache } from './geojson-source-cache';
 import { isThrottleError } from './request-scheduler';
 import { SourceCache } from './source-cache';
+import { querySourceFeaturesFromCache } from './source-query';
+import { createTileKey } from './tile-request';
 
 /**
  * 瓦片数据源缓存接口
  *
  * 定义了不同类型数据源缓存的通用操作
  */
-interface TileSourceCache {
+interface TileSourceCache extends QueryableSourceCache {
   abortTile?: (key: string) => void;
   destroy: () => void;
   getEntry?: (key: string) => {
@@ -26,7 +30,6 @@ interface TileSourceCache {
   getMinZoom?: () => number | undefined;
   getNextRetryAt?: () => number | undefined;
   isDestroyed: () => boolean;
-  readonly sourceType: SourceSpecification['type'];
   requestTile: (
     coordinate: TileCoordinate,
     priority?: number,
@@ -71,6 +74,13 @@ export class SourceManager {
     return Array.from(this.sourceCaches.keys());
   }
 
+  querySourceFeatures(
+    sourceId: string,
+    options: QuerySourceFeaturesOptions = {},
+  ) {
+    return querySourceFeaturesFromCache(this.sourceCaches.get(sourceId), options);
+  }
+
   getSourceConstraints(sourceId: string): {
     maxZoom?: number;
     minZoom?: number;
@@ -91,8 +101,22 @@ export class SourceManager {
       let nextRetryAt: number | undefined;
 
       for (const renderTileKey of sourceIdOrKeys) {
-        const sourceKey = stripStyleEpoch(renderTileKey);
-        const sourceId = sourceKey.split('/')[0];
+        let sourceKey: string;
+        let sourceId: string;
+        try {
+          const coordinate = parseRenderTileCoordinateFromKey(renderTileKey);
+          sourceId = coordinate.sourceId;
+          sourceKey = createTileKey(
+            coordinate.sourceId,
+            coordinate.level,
+            coordinate.x,
+            coordinate.y,
+          );
+        }
+        catch {
+          continue;
+        }
+
         const cache = this.sourceCaches.get(sourceId);
         const entry = cache?.getEntry?.(sourceKey);
         if (!entry || entry.state !== 'failed' || entry.nextRetryAt === undefined) {
@@ -292,11 +316,4 @@ function createTileSourceCache(
   }
 
   return undefined;
-}
-
-function stripStyleEpoch(renderTileKey: string): string {
-  const separatorIndex = renderTileKey.indexOf(':');
-  return separatorIndex >= 0
-    ? renderTileKey.slice(separatorIndex + 1)
-    : renderTileKey;
 }

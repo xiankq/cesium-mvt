@@ -100,5 +100,6 @@ function matchesBatchType(
 ) {
   return (batchType === 'circle' && featureType === 'point')
     || (batchType === 'line' && featureType === 'line')
-    || (batchType === 'fill' && featureType === 'polygon');
+    || (batchType === 'fill' && featureType === 'polygon')
+    || (batchType === 'fill-extrusion' && featureType === 'polygon');
 }

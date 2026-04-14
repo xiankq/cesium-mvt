@@ -10,7 +10,7 @@ import type {
 } from '../../bucket/bucket-types';
 import type { FeatureStateResolver } from '../../style/feature-state-store';
 import { BufferPoint, BufferPointCollection, Cartesian3 } from 'cesium';
-import { createFeatureFilter } from '../../style/feature-filter';
+import { createFeatureFilter } from '../../style/filter-adapter';
 import { isValidTypedArray } from '../../utils/validation';
 import { parseRenderTileCoordinateFromKey } from '../render-tile';
 import { getCircleMaterial } from './material-cache';
@@ -152,7 +152,7 @@ function createCircleCollection(
       zoom,
     });
 
-    if (!filter(context)) {
+    if (context.feature && !filter({ zoom: context.zoom, feature: context.feature })) {
       continue;
     }
 

@@ -49,6 +49,81 @@ describe('source-cache', () => {
     expect(loadTile).toHaveBeenCalledTimes(1);
   });
 
+  it('销毁后不应该再启动新的瓦片请求', async () => {
+    const loadTileJson = vi.fn(async () => ({
+      tiles: ['./{z}/{x}/{y}.pbf'],
+    } satisfies TileJson));
+    const loadTile = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer);
+    const sourceCache = new SourceCache({
+      loadTile,
+      loadTileJson,
+      source: createVectorSource({
+        tiles: undefined,
+        url: 'https://tiles.example.com/catalog/tilejson.json',
+      }),
+      sourceId: 'base',
+    });
+
+    sourceCache.destroy();
+
+    await expect(sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    })).resolves.toBeUndefined();
+
+    expect(loadTileJson).not.toHaveBeenCalled();
+    expect(loadTile).not.toHaveBeenCalled();
+  });
+
+  it('销毁期间完成的瓦片加载不应该写回缓存', async () => {
+    let resolveTileJson: (value: TileJson) => void = () => {};
+    const tileJsonPromise = new Promise<TileJson>((resolve) => {
+      resolveTileJson = resolve;
+    });
+    let resolveTile: (value: ArrayBuffer) => void = () => {};
+    const tilePromise = new Promise<ArrayBuffer>((resolve) => {
+      resolveTile = resolve;
+    });
+    const loadTileJson = vi.fn(() => tileJsonPromise);
+    const loadTile = vi.fn(() => tilePromise);
+    const readyTileBudget = {
+      add: vi.fn(),
+      delete: vi.fn(),
+      touch: vi.fn(),
+    };
+    const sourceCache = new SourceCache({
+      loadTile,
+      loadTileJson,
+      readyTileBudget: readyTileBudget as any,
+      source: createVectorSource({
+        tiles: undefined,
+        url: 'https://tiles.example.com/catalog/tilejson.json',
+      }),
+      sourceId: 'base',
+    });
+
+    const requestPromise = sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+
+    resolveTileJson({
+      tiles: ['./{z}/{x}/{y}.pbf'],
+    } satisfies TileJson);
+
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(loadTile).toHaveBeenCalledTimes(1);
+
+    sourceCache.destroy();
+    resolveTile(new Uint8Array([1, 2, 3]).buffer);
+
+    await expect(requestPromise).resolves.toBeUndefined();
+    expect(readyTileBudget.add).not.toHaveBeenCalled();
+  });
+
   it('allows concurrent requests to safely transfer their ArrayBuffer copies', async () => {
     const value = new Uint8Array([1, 2, 3, 4, 5]).buffer;
     const loadTile = vi.fn(async () => value);

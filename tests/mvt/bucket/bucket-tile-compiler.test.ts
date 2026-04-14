@@ -1,4 +1,5 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
+import type { SymbolBucketStats } from '@/mvt/bucket/bucket-types';
 import type { ParsedTile } from '@/mvt/source/vector-tile';
 import { describe, expect, it } from 'vitest';
 import { createMockStyle } from '../../helpers/style-helpers';
@@ -61,6 +62,55 @@ describe('bucket-tile-compiler', () => {
       expect(result.buckets[0].type).toBe('fill');
     });
 
+    it('should create fill-extrusion bucket for fill-extrusion batch', async () => {
+      const { compileBucketTile } = await import('@/mvt/bucket/bucket-tile-compiler');
+      const { WebMercatorTilingScheme } = await import('cesium');
+
+      const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
+      const renderTile = createMockRenderTile('fill-extrusion');
+      renderTile.geometryBatches[0]!.layerIds = ['building'];
+      renderTile.geometryBatches[0]!.familyId = 'source/building/fill-extrusion/0';
+      const tile = createMockParsedTile('fill-extrusion') as unknown as ParsedTile;
+      const style: StyleSpecification = {
+        version: 8,
+        sources: {
+          source: {
+            type: 'vector',
+            tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+          },
+        },
+        layers: [
+          {
+            'id': 'building',
+            'type': 'fill-extrusion',
+            'source': 'source',
+            'source-layer': 'layer',
+            'paint': {
+              'fill-extrusion-color': '#556677',
+              'fill-extrusion-height': 32,
+            },
+          },
+        ],
+      };
+
+      const result = compileBucketTile({
+        renderTile,
+        style,
+        tile,
+        tileProjection,
+      } as any);
+
+      expect(result.buckets).toHaveLength(1);
+      expect(result.buckets[0].type).toBe('fill-extrusion');
+    });
+
     it('should create line bucket for line batch', async () => {
       const { compileBucketTile } = await import('@/mvt/bucket/bucket-tile-compiler');
       const { WebMercatorTilingScheme } = await import('cesium');
@@ -113,6 +163,109 @@ describe('bucket-tile-compiler', () => {
 
       expect(result.buckets).toHaveLength(1);
       expect(result.buckets[0].type).toBe('circle');
+    });
+
+    it('should create symbol bucket for line-center symbol batch', async () => {
+      const { compileBucketTile } = await import('@/mvt/bucket/bucket-tile-compiler');
+      const { WebMercatorTilingScheme } = await import('cesium');
+
+      const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
+      const renderTile = createMockRenderTile('symbol');
+      const tile = createMockParsedTile('symbol') as unknown as ParsedTile;
+      const style: StyleSpecification = {
+        version: 8,
+        sources: {
+          source: {
+            type: 'vector',
+            tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+          },
+        },
+        layers: [
+          {
+            'id': 'poi',
+            'type': 'symbol',
+            'source': 'source',
+            'source-layer': 'layer',
+            'layout': {
+              'symbol-placement': 'line-center',
+              'text-field': ['get', 'name'],
+            },
+          },
+        ],
+      };
+
+      renderTile.geometryBatches[0]!.layerIds = ['poi'];
+      renderTile.geometryBatches[0]!.familyId = 'source/layer/symbol/0';
+
+      const result = compileBucketTile({
+        renderTile,
+        style,
+        tile,
+        tileProjection,
+      } as any);
+
+      expect(result.buckets).toHaveLength(1);
+      expect(result.buckets[0].type).toBe('symbol');
+      expect((result.buckets[0].stats as SymbolBucketStats).labelCount).toBe(1);
+    });
+
+    it('should create repeated symbol anchors for line placement batch', async () => {
+      const { compileBucketTile } = await import('@/mvt/bucket/bucket-tile-compiler');
+      const { WebMercatorTilingScheme } = await import('cesium');
+
+      const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
+      const renderTile = createMockRenderTile('symbol');
+      const tile = createMockParsedTile('symbol') as unknown as ParsedTile;
+      const style: StyleSpecification = {
+        version: 8,
+        sources: {
+          source: {
+            type: 'vector',
+            tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+          },
+        },
+        layers: [
+          {
+            'id': 'road-label',
+            'type': 'symbol',
+            'source': 'source',
+            'source-layer': 'layer',
+            'layout': {
+              'symbol-placement': 'line',
+              'symbol-spacing': 250,
+              'text-field': ['get', 'name'],
+            },
+          },
+        ],
+      };
+
+      renderTile.geometryBatches[0]!.layerIds = ['road-label'];
+      renderTile.geometryBatches[0]!.familyId = 'source/layer/symbol/0';
+
+      const result = compileBucketTile({
+        renderTile,
+        style,
+        tile,
+        tileProjection,
+      } as any);
+
+      expect(result.buckets).toHaveLength(1);
+      expect(result.buckets[0].type).toBe('symbol');
+      expect((result.buckets[0].stats as SymbolBucketStats).labelCount).toBeGreaterThan(1);
     });
 
     it('should keep layer semantics separate when a family contains multiple layers', async () => {
@@ -206,7 +359,7 @@ describe('bucket-tile-compiler', () => {
   });
 });
 
-function createMockRenderTile(type: 'fill' | 'line' | 'circle' = 'fill') {
+function createMockRenderTile(type: 'fill' | 'fill-extrusion' | 'line' | 'circle' | 'symbol' = 'fill') {
   return {
     epoch: 1,
     key: 'source/0/0/0',
@@ -224,20 +377,19 @@ function createMockRenderTile(type: 'fill' | 'line' | 'circle' = 'fill') {
   };
 }
 
-function createMockParsedTile(type: 'fill' | 'line' | 'circle' = 'fill') {
+function createMockParsedTile(type: 'fill' | 'fill-extrusion' | 'line' | 'circle' | 'symbol' = 'fill') {
   return {
     layers: {
       layer: {
         extent: 4096,
         length: 1,
         feature: () => {
-          if (type === 'line') {
+          if (type === 'line' || type === 'symbol') {
             return {
               id: 1,
               loadGeometry: () => [[
                 { x: 0, y: 0 },
-                { x: 100, y: 0 },
-                { x: 200, y: 100 },
+                { x: 4096, y: 0 },
               ]],
               properties: { name: 'test' },
               type: 2,
