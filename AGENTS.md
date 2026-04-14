@@ -17,6 +17,11 @@
 - 一旦确定正确模型，就收敛到单一实现，不保留新旧双轨逻辑
 - 优先复用 Cesium、MapLibre 及其子模块已经提供的能力、状态和语义，不要重复实现已有函数、机制等
 - CesiumVectorTile的整体设计（api，参数、字段、请求，缓存的大致方式）应该要贴近Cesium3dtileset，因为他们本质上应该是同一种类型的东西，但又要参考maplibre，因为需要以他做mvt渲染流程的参照
+- 比如fromurl应该接收Resource | string
+- 比如缓存方式既要参考Cesium3dtileset，又要参考maplibre
+- 比如按层级渲染参考maplibre但用cesium的方式实现
+- 比如有些应该按照cesium的方式处理比较合理，但却完全照搬了maplibre，反之也不行
+  等等
 
 ## 修改策略
 
