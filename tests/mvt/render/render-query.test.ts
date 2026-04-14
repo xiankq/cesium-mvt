@@ -170,6 +170,62 @@ describe('render-query', () => {
     });
   });
 
+  it('应该在 queryRenderedFeatures 中读取 feature-state', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'poi',
+          'paint': {
+            'circle-color': '#ff0000',
+          },
+          'source': 'base',
+          'source-layer': 'poi',
+          'type': 'circle',
+          'filter': ['==', ['feature-state', 'selected'], true] as any,
+        },
+      ],
+    };
+
+    const tileBuffer = createTileBuffer();
+    const renderedFeatures = queryRenderedFeaturesFromState({
+      getFeatureState: vi.fn(() => ({
+        selected: true,
+      })),
+      getSourceCache: vi.fn(() => ({
+        getEntry: vi.fn(() => ({
+          state: 'ready',
+          value: tileBuffer,
+        })),
+      })),
+      renderManager: {
+        getAllKeys: vi.fn(() => ['0:base/0/0/0']),
+        getHandle: vi.fn(() => ({
+          visible: true,
+        })),
+      },
+      style,
+    });
+
+    expect(renderedFeatures).toHaveLength(1);
+    expect(renderedFeatures[0]).toMatchObject({
+      id: 1,
+      layerId: 'poi',
+      properties: {
+        kind: 'cafe',
+      },
+      sourceId: 'base',
+      sourceLayer: 'poi',
+      type: 'Feature',
+    });
+  });
+
   it('应该兼容带 styleEpoch 前缀和后缀的渲染瓦片 key', () => {
     const style: StyleSpecification = {
       version: 8,

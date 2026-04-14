@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   configureRequestScheduler,
-  createTileRequest,
   getRequestSchedulerStats,
   scheduleJsonRequest,
   scheduleTileRequest,
@@ -77,63 +76,6 @@ afterEach(() => {
 });
 
 describe('request-scheduler', () => {
-  describe('createTileRequest', () => {
-    it('创建瓦片请求', () => {
-      const cancelFunction = vi.fn();
-
-      const request = createTileRequest({
-        cancelFunction,
-        priority: 10,
-        serverKey: 'example.com:443',
-        url: 'https://example.com/tile.pbf',
-      });
-
-      expect(request.priority).toBe(10);
-      expect(request.throttle).toBe(true);
-      expect(request.url).toBe('https://example.com/tile.pbf');
-      expect((request as any).serverKey).toBe('example.com:443');
-    });
-
-    it('使用默认优先级', () => {
-      const request = createTileRequest({
-        url: 'https://example.com/tile.pbf',
-      });
-
-      expect(request.priority).toBe(0);
-    });
-
-    it('启用服务器节流', () => {
-      const request = createTileRequest({
-        serverKey: 'example.com:443',
-        url: 'https://example.com/tile.pbf',
-      });
-
-      expect(request.throttleByServer).toBe(true);
-    });
-
-    it('使用 Cesium 的 serverKey 解析', async () => {
-      const request = createTileRequest({
-        url: '/tiles/2/1/3.pbf',
-      });
-      const { RequestScheduler } = await import('cesium');
-      const mockedRequestScheduler = RequestScheduler as any;
-
-      expect(mockedRequestScheduler.getServerKey).toHaveBeenCalledWith('/tiles/2/1/3.pbf');
-      expect((request as any).serverKey).toBe('example.com:443');
-      expect(request.throttleByServer).toBe(true);
-    });
-
-    it('不会注入自定义 priorityFunction', () => {
-      const request = createTileRequest({
-        priority: 8,
-        url: 'https://example.com/tile.pbf',
-      });
-
-      expect(request.priority).toBe(8);
-      expect(request.priorityFunction).toBeUndefined();
-    });
-  });
-
   describe('scheduleTileRequest', () => {
     it('调度瓦片请求', async () => {
       const result = await scheduleTileRequest({

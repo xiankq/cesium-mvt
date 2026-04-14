@@ -165,7 +165,7 @@ function createLineCollection(
       zoom,
     });
 
-    if (context.feature && !filter({ zoom: context.zoom, feature: context.feature })) {
+    if (context.feature && !filter(context)) {
       vertexOffset += vertexCount;
       continue;
     }

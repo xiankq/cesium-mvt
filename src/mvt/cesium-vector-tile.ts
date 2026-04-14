@@ -5,29 +5,13 @@ import type { QueryRenderedFeaturesOptions, RenderedFeature } from './render';
 import type { QuerySourceFeaturesOptions } from './source/source-query';
 import type { FeatureStateTarget } from './style/feature-state-store';
 import type { StyleSet } from './style/style-loader';
-import { BoundingSphere, Event, PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
+import { BoundingSphere, PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
 import { CesiumVectorTileCoordinator } from './cesium-vector-tile-coordinator';
 import { loadStyleSet } from './style/style-loader';
-
-export interface TileLoadEvent {
-  readonly sourceId: string;
-  readonly level: number;
-  readonly x: number;
-  readonly y: number;
-}
-
-export interface TileFailedEvent {
-  readonly sourceId: string;
-  readonly level: number;
-  readonly x: number;
-  readonly y: number;
-  readonly error: unknown;
-}
 
 export interface CesiumVectorTileOptions {
   maximumLevel?: number;
   minimumLevel?: number;
-  onError?: (error: unknown) => void;
   rectangle?: Rectangle;
   style?: string | StyleSpecification;
   tileWidth?: number;
@@ -42,9 +26,6 @@ export type CesiumVectorTileFromUrlOptions = Omit<
 export class CesiumVectorTile extends PrimitiveCollection {
   private destroyed = false;
   private readonly _rectangle: Rectangle;
-  private readonly _tileLoad = new Event();
-  private readonly _tileFailed = new Event();
-
   private readonly root = new PrimitiveCollection();
   private readonly coordinator: CesiumVectorTileCoordinator;
   private styleLoadToken = 0;
@@ -100,14 +81,6 @@ export class CesiumVectorTile extends PrimitiveCollection {
     return this._rectangle;
   }
 
-  get tileLoad(): Event<(event: TileLoadEvent) => void> {
-    return this._tileLoad;
-  }
-
-  get tileFailed(): Event<(event: TileFailedEvent) => void> {
-    return this._tileFailed;
-  }
-
   update(frameState: any): void {
     super.update(frameState);
 
@@ -117,7 +90,6 @@ export class CesiumVectorTile extends PrimitiveCollection {
 
     this.coordinator.update({
       camera: frameState.camera,
-      viewportHeight: frameState.context?.drawingBufferHeight ?? 0,
       viewportWidth: frameState.context?.drawingBufferWidth ?? 0,
     });
   }

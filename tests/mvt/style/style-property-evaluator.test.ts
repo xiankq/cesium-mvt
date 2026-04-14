@@ -1,10 +1,9 @@
 import type { StylePropertyContext } from '@/mvt/style/style-property-evaluator';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createColorPropertyEvaluator,
   createNumberArrayPropertyEvaluator,
   createNumberPropertyEvaluator,
-  createStylePropertyEvaluator,
 } from '@/mvt/style/style-property-evaluator';
 
 function createContext(overrides: Partial<StylePropertyContext> = {}): StylePropertyContext {
@@ -43,35 +42,6 @@ describe('style-property-evaluator', () => {
       const result = evaluator(createContext());
 
       expect(result).toEqual([8, -6]);
-    });
-  });
-
-  describe('表达式', () => {
-    it('解析表达式', () => {
-      const evaluator = createStylePropertyEvaluator(['get', 'name'], '', {
-        'type': 'string',
-        'property-type': 'data-driven',
-        'transition': false,
-        'default': '',
-      });
-      const result = evaluator(createFeatureContext({ name: 'Beijing' }));
-      expect(result).toBe('Beijing');
-    });
-
-    it('解析条件表达式', () => {
-      const evaluator = createStylePropertyEvaluator([
-        'case',
-        ['>=', ['get', 'population'], 1000000],
-        'large',
-        'small',
-      ], '', {
-        'type': 'string',
-        'property-type': 'data-driven',
-        'transition': false,
-        'default': '',
-      });
-      expect(evaluator(createFeatureContext({ population: 2000000 }))).toBe('large');
-      expect(evaluator(createFeatureContext({ population: 500000 }))).toBe('small');
     });
   });
 
@@ -123,48 +93,6 @@ describe('style-property-evaluator', () => {
     });
   });
 
-  describe('数据驱动样式', () => {
-    it('解析数据驱动样式（step 表达式）', () => {
-      const evaluator = createStylePropertyEvaluator([
-        'step',
-        ['get', 'population'],
-        'small',
-        100000,
-        'medium',
-        1000000,
-        'large',
-      ], '', {
-        'type': 'string',
-        'property-type': 'data-driven',
-        'transition': false,
-        'default': '',
-      });
-      expect(evaluator(createFeatureContext({ population: 50000 }))).toBe('small');
-      expect(evaluator(createFeatureContext({ population: 500000 }))).toBe('medium');
-      expect(evaluator(createFeatureContext({ population: 5000000 }))).toBe('large');
-    });
-
-    it('解析数据驱动样式（match 表达式）', () => {
-      const evaluator = createStylePropertyEvaluator([
-        'match',
-        ['get', 'type'],
-        'city',
-        'urban',
-        'village',
-        'rural',
-        'unknown',
-      ], '', {
-        'type': 'string',
-        'property-type': 'data-driven',
-        'transition': false,
-        'default': '',
-      });
-      expect(evaluator(createFeatureContext({ type: 'city' }))).toBe('urban');
-      expect(evaluator(createFeatureContext({ type: 'village' }))).toBe('rural');
-      expect(evaluator(createFeatureContext({ type: 'unknown' }))).toBe('unknown');
-    });
-  });
-
   describe('组合 zoom 和数据驱动', () => {
     it('解析组合表达式（zoom + feature）', () => {
       const evaluator = createNumberPropertyEvaluator([
@@ -181,22 +109,15 @@ describe('style-property-evaluator', () => {
       expect(evaluator(createFeatureContext({ type: 'village' }, 0))).toBe(0.5);
       expect(evaluator(createFeatureContext({ type: 'city' }, 10))).toBe(5);
     });
-  });
 
-  describe('默认值', () => {
-    it('返回默认值当属性不存在时', () => {
-      const evaluator = createStylePropertyEvaluator(
-        ['coalesce', ['get', 'missing'], 'default'],
-        '',
-        {
-          'type': 'string',
-          'property-type': 'data-driven',
-          'transition': false,
-          'default': '',
-        },
-      );
-      const result = evaluator(createFeatureContext({}));
-      expect(result).toBe('default');
+    it('数值表达式遇到 null 时静默回退默认值', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const evaluator = createNumberPropertyEvaluator(['get', 'value']);
+
+      expect(evaluator(createFeatureContext({ value: null }))).toBe(0);
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
     });
   });
 });

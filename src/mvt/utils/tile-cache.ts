@@ -12,24 +12,6 @@ export interface EvictedCacheEntry {
   key: string;
 }
 
-export function calculateDynamicCacheSize(viewportSize: {
-  height: number;
-  tileSize: number;
-  width: number;
-}): number {
-  // 计算视口内需要的瓦片数量（宽度和高度各加1作为缓冲）
-  const widthInTiles = Math.ceil(viewportSize.width / viewportSize.tileSize) + 1;
-  const heightInTiles = Math.ceil(viewportSize.height / viewportSize.tileSize) + 1;
-  const approxTilesInView = widthInTiles * heightInTiles;
-
-  // 考虑常见的缩放范围层级数，缓存多个层级的瓦片以支持快速缩放
-  const commonZoomRange = 5;
-  const viewDependentMaxSize = Math.floor(approxTilesInView * commonZoomRange);
-
-  // 单个瓦片估算为 100KB（包括矢量数据和元数据）
-  return viewDependentMaxSize * 100 * 1024;
-}
-
 interface CacheNode {
   entry: CacheEntry;
   key: string;

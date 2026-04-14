@@ -1,22 +1,40 @@
-import type { Feature, FilterSpecification, GlobalProperties, ICanonicalTileID } from '@maplibre/maplibre-gl-style-spec';
-import { featureFilter } from '@maplibre/maplibre-gl-style-spec';
+import type {
+  Feature,
+  FeatureState,
+  FilterSpecification,
+  GlobalProperties,
+  ICanonicalTileID,
+  StylePropertySpecification,
+} from '@maplibre/maplibre-gl-style-spec';
+import { convertFilter, createExpression } from '@maplibre/maplibre-gl-style-spec';
 
 export type {
   Feature,
+  FeatureState,
   FilterSpecification,
   GlobalProperties,
   ICanonicalTileID,
 };
 
-export interface FeatureFilterContext {
-  zoom: number;
-  feature: Feature;
-  canonical?: ICanonicalTileID;
-}
+const FILTER_SPEC: StylePropertySpecification = {
+  'default': false,
+  'expression': {
+    interpolated: false,
+    parameters: ['zoom', 'feature', 'feature-state'],
+  },
+  'property-type': 'data-driven',
+  'transition': false,
+  'type': 'boolean',
+} as StylePropertySpecification;
 
-export interface FeatureFilterResult {
-  filter: (globals: GlobalProperties, feature: Feature, canonical?: ICanonicalTileID) => boolean;
-  needGeometry: boolean;
+export interface FeatureFilterContext {
+  feature?: Feature;
+  featureState?: FeatureState;
+  zoom: number;
+  geometryType?: string;
+  id?: Feature['id'];
+  properties?: Feature['properties'];
+  canonical?: ICanonicalTileID;
 }
 
 export function createFeatureFilter(
@@ -26,31 +44,118 @@ export function createFeatureFilter(
     return () => true;
   }
 
-  const filter = featureFilter(filterSpec);
+  if (filterSpec === true) {
+    return () => true;
+  }
+
+  if (filterSpec === false) {
+    return () => false;
+  }
+
+  const filter = createExpression(
+    convertFilter(normalizeFilterSpec(filterSpec)),
+    FILTER_SPEC,
+  );
+  if (filter.result === 'error') {
+    throw new Error(filter.value.map(err => `${err.key}: ${err.message}`).join(', '));
+  }
 
   return (context: FeatureFilterContext): boolean => {
     const globals: GlobalProperties = {
       zoom: context.zoom,
     };
+    const feature = context.feature ?? ({
+      id: context.id,
+      properties: context.properties ?? {},
+      type: context.geometryType ?? 'Unknown',
+    } as Feature);
 
-    return filter.filter(globals, context.feature, context.canonical);
+    try {
+      return Boolean(filter.value.evaluateWithoutErrorHandling(
+        globals,
+        feature,
+        context.featureState,
+        context.canonical,
+      ));
+    }
+    catch {
+      return false;
+    }
   };
 }
 
-export function createFeatureFilterWithGeometry(
-  filterSpec: FilterSpecification | null | undefined,
-): FeatureFilterResult {
-  if (filterSpec === null || filterSpec === undefined) {
-    return {
-      filter: () => true,
-      needGeometry: false,
-    };
+function normalizeFilterSpec(
+  filterSpec: FilterSpecification,
+): FilterSpecification {
+  if (filterSpec === true || filterSpec === false) {
+    return filterSpec;
   }
 
-  const filter = featureFilter(filterSpec);
+  if (!Array.isArray(filterSpec) || filterSpec.length === 0) {
+    return filterSpec;
+  }
 
-  return {
-    filter: filter.filter,
-    needGeometry: filter.needGeometry,
-  };
+  const [operator, ...args] = filterSpec;
+  switch (operator) {
+    case 'all':
+      if (args.length === 0) {
+        return true;
+      }
+      return [operator, ...args.map(arg => normalizeFilterSpec(arg as FilterSpecification))] as FilterSpecification;
+    case 'any':
+      if (args.length === 0) {
+        return false;
+      }
+      return [operator, ...args.map(arg => normalizeFilterSpec(arg as FilterSpecification))] as FilterSpecification;
+    case '!':
+      return ['!', normalizeFilterSpec(args[0] as FilterSpecification)] as FilterSpecification;
+    case 'none':
+      if (args.length === 0) {
+        return true;
+      }
+      return ['!', ['any', ...args.map(arg => normalizeFilterSpec(arg as FilterSpecification))]] as FilterSpecification;
+    case 'in':
+      if (args.length <= 1) {
+        return false;
+      }
+      return convertInExpression(args);
+    case '!in':
+      if (args.length <= 1) {
+        return true;
+      }
+      return ['!', convertInExpression(args)] as FilterSpecification;
+    default:
+      return filterSpec;
+  }
+}
+
+function convertInExpression(args: unknown[]): FilterSpecification {
+  const [valueExpression, ...values] = args;
+  const normalizedValueExpression = normalizeValueExpression(valueExpression);
+
+  return [
+    'any',
+    ...values.map(value => ['==', normalizedValueExpression, value] as FilterSpecification),
+  ] as FilterSpecification;
+}
+
+function normalizeValueExpression(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value === '$type') {
+    return ['geometry-type'];
+  }
+
+  if (value === '$id') {
+    return ['id'];
+  }
+
+  if (typeof value === 'string') {
+    return ['get', value];
+  }
+
+  // 数字、布尔值和 null 作为字面量保留，避免被误判成属性名。
+  return ['literal', value];
 }

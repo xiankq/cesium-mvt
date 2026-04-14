@@ -9,8 +9,10 @@
 当前真正进入运行时主链路的能力只有：
 
 - Vector source / GeoJSON source
-- `fill` / `line` / `circle` 三类基础几何
-- `fill` / `line` / `circle` 后端已接入 `filter`、表达式和 `feature-state`，写入后会刷新已挂载瓦片
+- `fill` / `line` / `circle` / `fill-extrusion` 几何渲染
+- `symbol` 基础文本 / 图标渲染
+- `queryRenderedFeatures()` / `querySourceFeatures()`
+- `fill` / `line` / `circle` / `fill-extrusion` 后端已接入 `filter`、表达式和 `feature-state`，写入后会刷新已挂载瓦片
 - 祖先瓦片 fallback
 - 编译后瓦片的字节级 LRU
 - Worker / Inline 两种 bucket 编译模式
@@ -20,9 +22,9 @@
 当前没有真正接入主链路的能力包括：
 
 - 视锥 / 地平线可见性裁剪
-- Symbol 文本与碰撞检测
-- Feature Query
-- Background layer 渲染
+- 完整的 MapLibre 级 Symbol 碰撞与 placement
+
+background layer 已从 runtime 收敛掉，不再进入主链路。
 
 ## 快速开始
 
@@ -83,13 +85,14 @@ Cesium 帧循环
         -> Fill / Line / CircleBucketBuilder
   -> RenderManager.mount()
      -> BufferPolygonCollection / BufferPolylineCollection / BufferPointCollection
+     -> LabelCollection / BillboardCollection
 ```
 
 这条链路里的关键现实约束是：
 
 - 调度层目前基于 `camera.computeViewRectangle()` 和 `viewportWidth` 估算单一 zoom，不是 Cesium `QuadtreePrimitive` 那种多级 LOD + SSE。
 - 请求层已经通过 Cesium `RequestScheduler` + `Resource` 接入默认 tile / TileJSON / GeoJSON 请求，`CesiumVectorTileCoordinator.update()` 也会每帧驱动 `RequestScheduler.update()`。
-- 样式层已经把 `filter`、表达式和 `feature-state` 接进 `fill` / `line` / `circle` 后端，但 `background`、`symbol` 与查询链路仍未接入。
+- 样式层已经把 `filter`、表达式和 `feature-state` 接进 `fill` / `line` / `circle` / `fill-extrusion` 后端，`queryRenderedFeatures()` / `querySourceFeatures()` 也已经接入；`symbol` 已有基础文本 / 图标渲染，但碰撞与 placement 仍在继续收敛。
 - 渲染层目前直接挂 `PrimitiveCollection`，没有复用 Cesium 现成的地表瓦片基础设施。
 
 ## 与上游源码对照
@@ -108,7 +111,7 @@ Cesium 帧循环
 | Worker 模型 | MapLibre 默认多 worker actor 池                                                     | 单 worker / inline                                       | 吞吐明显偏弱                           |
 | LayerFamily | 借鉴了 MapLibre `groupByLayout` 思路                                                | 只完成了 family 分组，没有把 layer 语义完整保留下来      | 只借到“形”，没借到“义”                 |
 | 缓存        | Cesium 有统一 tile 生命周期与替换队列；MapLibre 有 in-view / out-of-view tile cache | 编译后 tile 与源数据 ready tile 已接到同一条共享字节预算 | 部分借鉴                               |
-| Symbol      | MapLibre 有 `symbol_bucket + placement + pauseable_placement` 全链路                | 完全缺失                                                 | 关键能力缺口                           |
+| Symbol      | MapLibre 有 `symbol_bucket + placement + pauseable_placement` 全链路                | 基础文本 / 图标渲染已接入，碰撞与 placement 仍在收敛     | 仍有精度缺口                           |
 
 ## 运行时已实现
 
@@ -134,9 +137,8 @@ Cesium 帧循环
 
 ### 语义正确性
 
-- `filter`、表达式、`feature-state` 已进入 `fill` / `line` / `circle` 后端，但 `background`、`symbol` 与查询链路仍未接入。
+- `filter`、表达式、`feature-state` 已进入 `fill` / `line` / `circle` / `fill-extrusion` 后端，查询链路也已接入。
 - `line` / `circle` 已经按 `bucket.layerIds` 展开为独立 collection，和 `fill` 的按 layerId 展开思路一致，但 family 仍然没有按 `filter` / 数据驱动样式切分 feature。
-- `background` layer 会进入 `RenderTile`，但没有实际渲染后端。
 - 当前 bucket 编译阶段按 `source-layer + geometry type` 抓取全部 feature，没有按 layer filter 切分。
 
 ### 调度与取消
@@ -157,8 +159,7 @@ Cesium 帧循环
 
 ### 代码结构
 
-- 多个模块只被测试引用，不在运行时主链路：`request-scheduler.ts`、`tile-visibility.ts`、`tile-lifecycle.ts`、`feature-tile-dispatcher.ts`。
-- 这会让单测通过与运行时真实能力之间出现偏差，文档也容易被“测试存在”误导成“功能已接入”。
+- 历史 `feature-tile` / 旧表达式桥接已经删除，background 也不再进入 runtime；后续主要继续收敛 symbol 渲染与查询精度。
 
 ## 文档说明
 

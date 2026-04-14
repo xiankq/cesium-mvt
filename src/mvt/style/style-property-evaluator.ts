@@ -35,13 +35,6 @@ function colorToHex(color: Color): string {
   return `#${r}${g}${b}`;
 }
 
-function normalizeColorValue(value: unknown): unknown {
-  if (value instanceof Color) {
-    return colorToHex(value);
-  }
-  return value;
-}
-
 const COLOR_SPEC: StylePropertySpecification = {
   'type': 'color',
   'property-type': 'data-driven',
@@ -133,80 +126,40 @@ const STRING_ARRAY_SPEC: StylePropertySpecification = {
   'value': 'string',
 } as StylePropertySpecification;
 
-function inferSpecification(value: unknown): StylePropertySpecification {
-  if (typeof value === 'number') {
-    return NUMBER_SPEC;
-  }
-
-  if (typeof value === 'boolean') {
-    return BOOLEAN_SPEC;
-  }
-
-  if (typeof value === 'string') {
-    if (value.startsWith('#') || value.startsWith('rgb') || value.startsWith('hsl')) {
-      return COLOR_SPEC;
-    }
-    return STRING_SPEC;
-  }
-
-  if (Array.isArray(value) && value.length > 0) {
-    const first = value[0];
-    if (typeof first === 'string') {
-      if (first === 'interpolate' || first === 'step') {
-        return NUMBER_SPEC;
-      }
-    }
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const obj = value as Record<string, unknown>;
-
-    if ('stops' in obj) {
-      const stops = obj.stops;
-      if (Array.isArray(stops) && stops.length > 0) {
-        const firstStop = stops[0];
-        if (Array.isArray(firstStop) && firstStop.length === 2) {
-          const stopValue = firstStop[1];
-          if (typeof stopValue === 'number') {
-            return NUMBER_SPEC;
-          }
-          if (typeof stopValue === 'string') {
-            if (stopValue.startsWith('#') || stopValue.startsWith('rgb') || stopValue.startsWith('hsl')) {
-              return COLOR_SPEC;
-            }
-            return STRING_SPEC;
-          }
-        }
-      }
-    }
-  }
-
-  return COLOR_SPEC;
+interface StyleExpressionLike {
+  evaluate: (...args: unknown[]) => unknown;
+  evaluateWithoutErrorHandling?: (...args: unknown[]) => unknown;
 }
 
-export function createStylePropertyEvaluator<T = unknown>(
-  value: unknown,
-  defaultValue?: T,
-  specification?: StylePropertySpecification,
-): StylePropertyEvaluator<T> {
-  const spec = specification ?? inferSpecification(value);
-  const expression = normalizePropertyExpression(value as any, spec);
+function evaluateStyleExpression(
+  expression: unknown,
+  context: StylePropertyContext,
+): unknown {
+  const globals: GlobalProperties = {
+    zoom: context.zoom,
+  };
+  const styleExpression = expression as StyleExpressionLike;
 
-  return (context: StylePropertyContext): T => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
+  try {
+    if (typeof styleExpression.evaluateWithoutErrorHandling === 'function') {
+      return styleExpression.evaluateWithoutErrorHandling(
+        globals,
+        context.feature,
+        context.featureState,
+        context.canonical,
+      );
+    }
 
-    const evaluated = expression.evaluate(
+    return styleExpression.evaluate(
       globals,
       context.feature,
       context.featureState,
       context.canonical,
     );
-
-    const normalized = normalizeColorValue(evaluated);
-    return (normalized ?? defaultValue) as T;
-  };
+  }
+  catch {
+    return undefined;
+  }
 }
 
 export function createColorPropertyEvaluator(
@@ -216,16 +169,7 @@ export function createColorPropertyEvaluator(
   const expression = normalizePropertyExpression(value as any, COLOR_SPEC);
 
   return (context: StylePropertyContext): string => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     if (evaluated === null || evaluated === undefined) {
       return defaultValue ?? '#000000';
@@ -250,16 +194,7 @@ export function createNumberPropertyEvaluator(
   const expression = normalizePropertyExpression(value as any, NUMBER_SPEC);
 
   return (context: StylePropertyContext): number => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     if (typeof evaluated === 'number') {
       return evaluated;
@@ -280,16 +215,7 @@ export function createNumberArrayPropertyEvaluator(
   const allowNegative = options?.allowNegative ?? false;
 
   return (context: StylePropertyContext): number[] | undefined => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     const normalized = normalizeNumberArrayValue(evaluated, allowNegative);
     if (normalized) {
@@ -307,16 +233,7 @@ export function createBooleanPropertyEvaluator(
   const expression = normalizePropertyExpression(value as any, BOOLEAN_SPEC);
 
   return (context: StylePropertyContext): boolean => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     if (typeof evaluated === 'boolean') {
       return evaluated;
@@ -352,16 +269,7 @@ export function createStringPropertyEvaluator(
   const expression = normalizePropertyExpression(value as any, STRING_SPEC);
 
   return (context: StylePropertyContext): string => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     if (typeof evaluated === 'string') {
       return evaluated;
@@ -377,16 +285,7 @@ export function createFormattedPropertyEvaluator(
   const expression = normalizePropertyExpression(value as any, FORMATTED_SPEC);
 
   return (context: StylePropertyContext): string | Formatted | undefined => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     if (typeof evaluated === 'string') {
       return evaluated.length > 0 ? evaluated : undefined;
@@ -406,16 +305,7 @@ export function createResolvedImagePropertyEvaluator(
   const expression = normalizePropertyExpression(value as any, RESOLVED_IMAGE_SPEC);
 
   return (context: StylePropertyContext): string | ResolvedImage | undefined => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     if (typeof evaluated === 'string') {
       return evaluated.length > 0 ? evaluated : undefined;
@@ -435,16 +325,7 @@ export function createStringArrayPropertyEvaluator(
   const expression = normalizePropertyExpression(value as any, STRING_ARRAY_SPEC);
 
   return (context: StylePropertyContext): string[] | undefined => {
-    const globals: GlobalProperties = {
-      zoom: context.zoom,
-    };
-
-    const evaluated = expression.evaluate(
-      globals,
-      context.feature,
-      context.featureState,
-      context.canonical,
-    );
+    const evaluated = evaluateStyleExpression(expression, context);
 
     if (Array.isArray(evaluated)) {
       const entries: string[] = [];

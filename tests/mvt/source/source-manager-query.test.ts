@@ -96,6 +96,30 @@ describe('source-manager querySourceFeatures', () => {
     });
   });
 
+  it('应该跳过无法解析的 tile key', () => {
+    const sourceManager = new SourceManager();
+    const tileBuffer = createTileBuffer();
+    const sourceCache = {
+      destroy: vi.fn(),
+      getEntry: vi.fn(() => ({
+        state: 'ready',
+        value: tileBuffer,
+      })),
+      getLoadedTileKeys: vi.fn(() => ['invalid-tile-key']),
+      isDestroyed: vi.fn(() => false),
+      sourceType: 'vector' as const,
+      updateSource: vi.fn(),
+    };
+
+    (sourceManager as any).sourceCaches.set('base', sourceCache);
+
+    const features = sourceManager.querySourceFeatures('base', {
+      sourceLayer: 'poi',
+    });
+
+    expect(features).toHaveLength(0);
+  });
+
   it('应该正确解析包含 / 的 sourceId 的重试时间', () => {
     const sourceManager = new SourceManager();
     const nextRetryAt = Date.now() + 1000;

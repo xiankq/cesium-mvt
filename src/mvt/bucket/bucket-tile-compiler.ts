@@ -4,7 +4,7 @@ import type { GeometryBatch, RenderTile } from '../render/render-tile';
 import type { ParsedTile } from '../source/vector-tile';
 import type { ParsedTileResult } from './bucket-types';
 import { getSourceLayer, parseVectorTile } from '../source/vector-tile';
-import { createFeatureFilter } from '../style/feature-filter';
+import { createFeatureFilter } from '../style/filter-adapter';
 import { isSupportedGeometryLayer } from '../style/layer-family';
 import { CircleBucketBuilder } from './circle-bucket-builder';
 import { FillBucketBuilder } from './fill-bucket-builder';

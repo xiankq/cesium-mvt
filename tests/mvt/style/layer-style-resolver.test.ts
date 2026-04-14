@@ -6,8 +6,11 @@ import type {
   SymbolLayerSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerStyleContext } from '@/mvt/style/layer-style-resolver';
+import {
+  Formatted,
+  ResolvedImage,
+} from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
-import { Formatted, ResolvedImage } from '@/mvt/style/expression-adapter';
 import {
   createCircleLayerStyleResolver,
   createFillExtrusionLayerStyleResolver,

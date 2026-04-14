@@ -48,12 +48,6 @@ describe('render-order', () => {
 
     expect(createRenderOrder(style, layerFamilies)).toEqual([
       {
-        kind: 'background',
-        layerId: 'background',
-        order: 0,
-        type: 'background',
-      },
-      {
         familyId: 'base/land/fill/0',
         kind: 'geometry',
         layerId: 'land',

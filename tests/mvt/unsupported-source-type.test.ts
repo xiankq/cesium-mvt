@@ -69,7 +69,6 @@ describe('cesiumVectorTileCoordinator - 不支持的 source 类型', () => {
         )),
       },
       viewportWidth: 1920,
-      viewportHeight: 1080,
     };
 
     coordinator.update(frameState);
@@ -128,7 +127,6 @@ describe('cesiumVectorTileCoordinator - 不支持的 source 类型', () => {
         )),
       },
       viewportWidth: 1920,
-      viewportHeight: 1080,
     };
 
     expect(() => coordinator.update(frameState)).not.toThrow();

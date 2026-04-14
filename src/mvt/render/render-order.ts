@@ -1,18 +1,6 @@
-import type {
-  BackgroundLayerSpecification,
-  LayerSpecification,
-  StyleSpecification,
-} from '@maplibre/maplibre-gl-style-spec';
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
 import { isSupportedGeometryLayer } from '../style/layer-family';
-
-// 渲染顺序直接镜像样式顺序，不支持的图层会在这里提前过滤掉。
-export interface BackgroundRenderEntry {
-  kind: 'background';
-  layerId: string;
-  order: number;
-  type: 'background';
-}
 
 export interface GeometryRenderEntry {
   familyId: string;
@@ -24,7 +12,8 @@ export interface GeometryRenderEntry {
   type: SupportedGeometryLayerType;
 }
 
-export type RenderEntry = BackgroundRenderEntry | GeometryRenderEntry;
+// 渲染顺序直接镜像样式顺序，不支持的图层会在这里提前过滤掉。
+export type RenderEntry = GeometryRenderEntry;
 
 export function createRenderOrder(
   style: StyleSpecification,
@@ -38,15 +27,6 @@ export function createRenderOrder(
   }
 
   return style.layers.flatMap<RenderEntry>((layer, order) => {
-    if (isBackgroundLayer(layer)) {
-      return [{
-        kind: 'background',
-        layerId: layer.id,
-        order,
-        type: 'background',
-      }];
-    }
-
     if (!isSupportedGeometryLayer(layer)) {
       return [];
     }
@@ -66,10 +46,4 @@ export function createRenderOrder(
       type: family.type,
     }];
   });
-}
-
-function isBackgroundLayer(
-  layer: LayerSpecification,
-): layer is BackgroundLayerSpecification {
-  return layer.type === 'background';
 }

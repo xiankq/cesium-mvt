@@ -155,7 +155,6 @@ export class SourceManager {
     tilingScheme: WebMercatorTilingScheme,
     renderTile: RenderTile,
     style: StyleSpecification,
-    onCompile: (tile: ParsedTileResult) => void,
     priority = 0,
   ): Promise<ParsedTileResult | undefined> {
     const sourceCache = this.sourceCaches.get(sourceId);
@@ -199,7 +198,6 @@ export class SourceManager {
         if (abortController.signal.aborted) {
           return undefined;
         }
-        onCompile(bucketTile);
         return bucketTile;
       }
       catch (error) {

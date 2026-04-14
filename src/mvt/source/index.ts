@@ -1,6 +1,5 @@
 export {
   configureRequestScheduler,
-  createTileRequest,
   getRequestSchedulerStats,
   scheduleJsonRequest,
   scheduleTileRequest,
@@ -19,15 +18,8 @@ export type {
 export type { TileCoordinate } from './tile-request';
 export { TileScheduler } from './tile-scheduler';
 export {
-  computeTileVisibility,
-  createTileVisibilityContext,
   isTileVisibleAtZoom,
   shouldRenderTile,
   shouldRequestTile,
 } from './tile-visibility';
-export type {
-  ComputeTileVisibilityOptions,
-  CreateTileVisibilityContextOptions,
-  SourceConstraints,
-  TileVisibilityContext,
-} from './tile-visibility';
+export type { SourceConstraints } from './tile-visibility';

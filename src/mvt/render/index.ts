@@ -10,11 +10,6 @@ export type {
   QueryRenderedFeaturesState,
   RenderedFeature,
 } from './render-query';
-export {
-  compileTileRenderVisibility,
-  isTileRenderable,
-} from './tile-render-visibility';
-export type { TileRenderVisibilityOptions } from './tile-render-visibility';
 export type {
   RenderQueryBoxGeometry,
   RenderQueryGeometry,

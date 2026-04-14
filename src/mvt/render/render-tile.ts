@@ -1,24 +1,14 @@
-import type {
-  BackgroundLayerSpecification,
-  StyleSpecification,
-} from '@maplibre/maplibre-gl-style-spec';
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
 import type { RenderEntry } from './render-order';
 import { createTileKey } from '../source/tile-request';
 import { isLayerVisibleAtZoom } from '../style/layer-family';
-import { createColorPropertyEvaluator } from '../style/style-property-evaluator';
 
 const STYLE_EPOCH_PREFIX = /^\d+:/;
 const STYLE_EPOCH_SUFFIX = /@\d+$/;
 
 // RenderTile 表示某个 source tile 在当前 styleEpoch 下的渲染计划，
 // 此时还没有真正构建出可提交给 Cesium 的几何资源。
-export interface BackgroundBatch {
-  color?: string;
-  layerId: string;
-  order: number;
-}
-
 export interface GeometryBatch {
   backend: SupportedGeometryLayerType;
   familyId: string;
@@ -30,7 +20,6 @@ export interface GeometryBatch {
 }
 
 export interface RenderTile {
-  background?: BackgroundBatch;
   epoch: number;
   geometryBatches: GeometryBatch[];
   key: string;
@@ -64,26 +53,10 @@ export function compileRenderTile({
   const familiesById = new Map(layerFamilies.map(family => [family.id, family]));
   const layersById = new Map(style.layers.map(layer => [layer.id, layer]));
   const geometryBatchesByFamilyId = new Map<string, GeometryBatch>();
-  let background: BackgroundBatch | undefined;
 
   for (const entry of renderOrder) {
     const layer = layersById.get(entry.layerId);
     if (!layer || !isLayerVisibleAtZoom(layer, coordinate.level)) {
-      continue;
-    }
-
-    if (entry.kind === 'background') {
-      const backgroundLayer = layer as BackgroundLayerSpecification;
-      const backgroundColor = backgroundLayer.paint?.['background-color'];
-      background = {
-        color: backgroundColor === undefined
-          ? undefined
-          : createColorPropertyEvaluator(backgroundColor)(
-              createBackgroundStyleContext(coordinate.level),
-            ),
-        layerId: entry.layerId,
-        order: entry.order,
-      };
       continue;
     }
 
@@ -114,7 +87,6 @@ export function compileRenderTile({
   }
 
   return {
-    background,
     epoch: styleEpoch,
     geometryBatches: [...geometryBatchesByFamilyId.values()],
     key: createScopedRenderTileKey(key, styleEpoch),
@@ -148,12 +120,6 @@ export function parseRenderTileCoordinateFromKey(key: string) {
     x,
     y,
     sourceId: parts.slice(0, -3).join('/'),
-  };
-}
-
-function createBackgroundStyleContext(zoom: number) {
-  return {
-    zoom,
   };
 }
 

@@ -125,6 +125,46 @@ describe('bucket-fill-backend', () => {
         }
       });
 
+      it('应该读取 feature-state 过滤要素', async () => {
+        const { createBucketFillTileHandle }
+          = await import('@/mvt/render/backend/bucket-fill-backend');
+
+        const bucketTile = createMockFillBucketTile({
+          featureCount: 2,
+          layerId: 'selected-layer',
+        });
+        bucketTile.buckets[0]!.layerIds = ['selected-layer'];
+
+        const style = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'filter': ['==', ['feature-state', 'selected'], true] as any,
+              'id': 'selected-layer',
+              'paint': {
+                'fill-color': '#112233',
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'fill' as const,
+            },
+          ],
+        } as StyleSpecification;
+
+        const handle = createBucketFillTileHandle({
+          bucketTile,
+          featureStateResolver: ({ id }) => ({
+            selected: id === 1,
+          }),
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toHaveLength(1);
+        expect(handle?.collections[0]?.polygonCount).toBe(1);
+      });
+
       it('应该为带 fill-pattern 的填充使用纹理 Primitive', async () => {
         const { Material, Primitive, WebMercatorTilingScheme } = await import('cesium');
         const { FillBucketBuilder } = await import('@/mvt/bucket/fill-bucket-builder');

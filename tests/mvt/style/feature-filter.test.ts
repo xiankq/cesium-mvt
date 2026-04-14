@@ -1,18 +1,28 @@
 import type { FilterSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { FeatureFilterContext } from '@/mvt/style/feature-filter';
-import { describe, expect, it } from 'vitest';
-import {
-  createFeatureFilter,
+import type { Feature, FeatureFilterContext } from '@/mvt/style/filter-adapter';
+import { describe, expect, it, vi } from 'vitest';
+import { createFeatureFilter } from '@/mvt/style/filter-adapter';
 
-} from '@/mvt/style/feature-filter';
-
-function createContext(overrides: Partial<FeatureFilterContext> = {}): FeatureFilterContext {
+function createContext(overrides: {
+  canonical?: FeatureFilterContext['canonical'];
+  feature?: Partial<Feature>;
+  geometryType?: 'LineString' | 'Point' | 'Polygon';
+  id?: Feature['id'];
+  featureState?: FeatureFilterContext['featureState'];
+  properties?: Record<string, unknown>;
+  zoom?: number;
+} = {}): FeatureFilterContext {
+  const geometryType = overrides.geometryType ?? 'Point';
   return {
-    geometryType: 'Point',
-    id: 0,
-    properties: {},
-    zoom: 0,
-    ...overrides,
+    canonical: overrides.canonical,
+    feature: {
+      id: overrides.id,
+      properties: overrides.properties ?? {},
+      type: geometryType,
+      ...overrides.feature,
+    } as Feature,
+    featureState: overrides.featureState,
+    zoom: overrides.zoom ?? 0,
   };
 }
 
@@ -69,6 +79,16 @@ describe('feature-filter', () => {
       const filter = createFeatureFilter(['<=', ['get', 'population'], 100000] as FilterSpecification);
       expect(filter(createContext({ properties: { population: 100000 } }))).toBe(true);
       expect(filter(createContext({ properties: { population: 200000 } }))).toBe(false);
+    });
+
+    it('比较过滤器在 null 时静默回退 false', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const filter = createFeatureFilter(['<', ['get', 'population'], 100000] as FilterSpecification);
+
+      expect(filter(createContext({ properties: { population: null } }))).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
     });
   });
 
@@ -141,11 +161,47 @@ describe('feature-filter', () => {
       expect(filter(createContext({ properties: { type: 'road' } }))).toBe(false);
     });
 
+    it('in 过滤器支持字面量 needle', () => {
+      const filter = createFeatureFilter(['in', 42, 7, 42] as unknown as FilterSpecification);
+      expect(filter(createContext())).toBe(true);
+    });
+
+    it('in 过滤器在空候选集时返回 false', () => {
+      const filter = createFeatureFilter(['in', ['get', 'type']] as unknown as FilterSpecification);
+      expect(filter(createContext({ properties: { type: 'city' } }))).toBe(false);
+    });
+
     it('!in 过滤器', () => {
       const filter = createFeatureFilter(['!in', ['get', 'type'], 'city', 'town'] as unknown as FilterSpecification);
       expect(filter(createContext({ properties: { type: 'city' } }))).toBe(false);
       expect(filter(createContext({ properties: { type: 'town' } }))).toBe(false);
       expect(filter(createContext({ properties: { type: 'village' } }))).toBe(true);
+    });
+
+    it('!in 过滤器在空候选集时返回 true', () => {
+      const filter = createFeatureFilter(['!in', ['get', 'type']] as unknown as FilterSpecification);
+      expect(filter(createContext({ properties: { type: 'city' } }))).toBe(true);
+    });
+  });
+
+  describe('feature-state 过滤器', () => {
+    it('能够读取 feature-state', () => {
+      const filter = createFeatureFilter([
+        '==',
+        ['feature-state', 'selected'],
+        true,
+      ] as FilterSpecification);
+
+      expect(filter(createContext({
+        featureState: {
+          selected: true,
+        },
+      }))).toBe(true);
+      expect(filter(createContext({
+        featureState: {
+          selected: false,
+        },
+      }))).toBe(false);
     });
   });
 

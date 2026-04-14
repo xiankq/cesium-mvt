@@ -46,7 +46,7 @@ describe('style-loader', () => {
     expect((normalized.style.sources.data as GeoJSONSourceSpecification).data).toBe('https://example.com/styles/data/world.geojson');
   });
 
-  it('loads a style url and extracts the background color', async () => {
+  it('loads a style url and only keeps live style fields', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -96,8 +96,8 @@ describe('style-loader', () => {
       style: 'https://example.com/styles/basic/style.json',
     });
 
-    expect(styleSet.styleUrl).toBe('https://example.com/styles/basic/style.json');
-    expect(styleSet.backgroundColor).toBe('#123456');
+    expect(styleSet).not.toHaveProperty('styleUrl');
+    expect(styleSet).not.toHaveProperty('backgroundColor');
     expect(styleSet.style.sprite).toBe('https://example.com/styles/basic/sprite');
   });
 

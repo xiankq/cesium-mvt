@@ -39,7 +39,6 @@ describe('sourceManager', () => {
         key: 'test/0/0/0',
       } as any,
       createMockStyle('fill'),
-      () => {},
     );
 
     await expect(requestPromise).rejects.toThrow('network failed');
@@ -132,7 +131,6 @@ describe('sourceManager', () => {
         tilingScheme,
         renderTile,
         style,
-        () => {},
       );
 
       sourceManager.destroy();
@@ -191,7 +189,6 @@ describe('sourceManager', () => {
         tilingScheme,
         renderTile,
         style,
-        () => {},
       );
 
       sourceManager.destroy();
@@ -261,7 +258,6 @@ describe('sourceManager', () => {
         tilingScheme,
         renderTile,
         style,
-        () => {},
         8,
       );
 
@@ -278,7 +274,6 @@ describe('sourceManager', () => {
         tilingScheme,
         renderTile,
         style,
-        () => {},
         2,
       );
 
@@ -437,7 +432,6 @@ describe('sourceManager', () => {
           west: 0,
         }),
       } as any;
-      const onCompile = vi.fn();
 
       const requestPromise = sourceManager.requestTile(
         'test',
@@ -448,7 +442,6 @@ describe('sourceManager', () => {
         tilingScheme,
         renderTile,
         style,
-        onCompile,
       );
 
       resolveTileData(new Uint8Array([1, 2, 3]).buffer);
@@ -466,7 +459,6 @@ describe('sourceManager', () => {
       });
 
       await expect(requestPromise).resolves.toBeUndefined();
-      expect(onCompile).not.toHaveBeenCalled();
     });
   });
 });

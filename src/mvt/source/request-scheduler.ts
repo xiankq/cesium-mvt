@@ -59,15 +59,6 @@ interface RequestSchedulerRuntime {
 }
 
 /**
- * 创建瓦片请求
- *
- * 使用 Cesium 的 Request 进行请求调度
- */
-export function createTileRequest(options: TileRequestOptions): Request {
-  return createRequest(options, RequestType.TILES3D);
-}
-
-/**
  * 调度 JSON 请求
  *
  * 使用 Cesium 的 Resource 和 RequestScheduler 进行请求调度
@@ -103,7 +94,7 @@ export function scheduleTileRequest(options: TileRequestOptions): Promise<ArrayB
     return Promise.reject(createAbortError());
   }
 
-  const request = createTileRequest(options);
+  const request = createRequest(options, RequestType.TILES3D);
   const resource = new Resource({
     request,
     url: options.url,

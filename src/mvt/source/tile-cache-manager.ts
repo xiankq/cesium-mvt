@@ -22,13 +22,9 @@ export class TileCacheManager {
   private readonly pendingRequests = new Map<string, Promise<ParsedTileResult | undefined>>();
   private onEvict?: OnEvictCallback;
 
-  constructor(options: number | TileCacheManagerOptions = DEFAULT_CACHE_SIZE) {
-    const maxBytes = typeof options === 'number'
-      ? options
-      : options.maxBytes ?? DEFAULT_CACHE_SIZE;
-    this.bucketTileBudget = typeof options === 'number'
-      ? new TileBudget({ maxBytes })
-      : options.readyTileBudget ?? new TileBudget({ maxBytes });
+  constructor(options: TileCacheManagerOptions = {}) {
+    const maxBytes = options.maxBytes ?? DEFAULT_CACHE_SIZE;
+    this.bucketTileBudget = options.readyTileBudget ?? new TileBudget({ maxBytes });
   }
 
   setOnEvict(callback: OnEvictCallback): void {
@@ -41,10 +37,6 @@ export class TileCacheManager {
       this.bucketTileBudget.touch(key);
     }
     return cached;
-  }
-
-  getPending(key: string): Promise<ParsedTileResult | undefined> | undefined {
-    return this.pendingRequests.get(key);
   }
 
   set(key: string, tile: ParsedTileResult): void {

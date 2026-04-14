@@ -1,12 +1,13 @@
 import type { FilterSpecification, SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Feature } from 'geojson';
-import { createFeatureFilter } from '../style/feature-filter';
+import type { Feature as StyleFeature } from '../style/filter-adapter';
+import { parseRenderTileCoordinateFromKey } from '../render/render-tile';
+import { createFeatureFilter } from '../style/filter-adapter';
 import { getSourceLayer, listSourceLayers, parseVectorTile } from './vector-tile';
 
 export interface QuerySourceFeaturesOptions {
   filter?: FilterSpecification | null;
   sourceLayer?: string;
-  validate?: boolean;
 }
 
 export interface QueryableSourceCache {
@@ -17,12 +18,6 @@ export interface QueryableSourceCache {
   getLoadedTileKeys: () => string[];
   peekEntryValue?: (key: string) => ArrayBuffer | undefined;
   readonly sourceType: SourceSpecification['type'];
-}
-
-interface TileCoordinate {
-  level: number;
-  x: number;
-  y: number;
 }
 
 export function querySourceFeaturesFromCache(
@@ -42,7 +37,16 @@ export function querySourceFeaturesFromCache(
       continue;
     }
 
-    const coordinate = parseTileCoordinate(tileKey);
+    let coordinate: ReturnType<typeof parseRenderTileCoordinateFromKey> | undefined;
+    try {
+      coordinate = parseRenderTileCoordinateFromKey(tileKey);
+    }
+    catch {
+      continue;
+    }
+    if (!coordinate) {
+      continue;
+    }
     const tile = parseVectorTile(entry.value);
     const layerNames = cache.sourceType === 'geojson'
       ? listSourceLayers(tile)
@@ -63,10 +67,13 @@ export function querySourceFeaturesFromCache(
           continue;
         }
 
-        if (!filter({
-          geometryType,
+        const filterFeature: StyleFeature = {
           id: feature.id,
           properties: feature.properties as Record<string, unknown>,
+          type: geometryType,
+        };
+        if (!filter({
+          feature: filterFeature,
           zoom: coordinate.level,
         })) {
           continue;
@@ -82,7 +89,7 @@ export function querySourceFeaturesFromCache(
   return features;
 }
 
-function getGeometryType(type: 0 | 1 | 2 | 3) {
+function getGeometryType(type: 0 | 1 | 2 | 3): StyleFeature['type'] | undefined {
   switch (type) {
     case 1:
       return 'Point';
@@ -93,37 +100,4 @@ function getGeometryType(type: 0 | 1 | 2 | 3) {
     default:
       return undefined;
   }
-}
-
-function parseTileCoordinate(key: string): TileCoordinate {
-  const scopedKey = key.includes(':')
-    ? key.slice(key.indexOf(':') + 1)
-    : key;
-  const parts = scopedKey.split('/');
-
-  if (parts.length < 4) {
-    return {
-      level: 0,
-      x: 0,
-      y: 0,
-    };
-  }
-
-  const level = Number(parts[parts.length - 3]);
-  const x = Number(parts[parts.length - 2]);
-  const y = Number(parts[parts.length - 1]);
-
-  if (!Number.isInteger(level) || !Number.isInteger(x) || !Number.isInteger(y)) {
-    return {
-      level: 0,
-      x: 0,
-      y: 0,
-    };
-  }
-
-  return {
-    level,
-    x,
-    y,
-  };
 }

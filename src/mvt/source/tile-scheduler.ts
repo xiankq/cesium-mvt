@@ -1,6 +1,7 @@
 import type { Camera, Rectangle, WebMercatorTilingScheme } from 'cesium';
 import type { TileCoordinate } from './tile-request';
 import type { TileAvailability } from './tile-selection';
+import type { SourceConstraints } from './tile-visibility';
 import { resolveTileSelection } from './tile-selection';
 import { collectSceneViewTileSelection } from './view-state';
 
@@ -30,11 +31,6 @@ export type GetAvailability = (
   x: number,
   y: number,
 ) => TileAvailability;
-
-export interface SourceConstraints {
-  maxZoom?: number;
-  minZoom?: number;
-}
 
 export class TileScheduler {
   private readonly maximumLevel: number | undefined;

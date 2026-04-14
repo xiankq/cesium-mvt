@@ -1,8 +1,8 @@
 import type { Color, HorizontalOrigin, VerticalOrigin } from 'cesium';
 import type { SymbolLayerStyle } from '../../style/layer-style-resolver';
 import type { resolveStyleImage } from '../../style/sprite-atlas';
+import { Formatted } from '@maplibre/maplibre-gl-style-spec';
 import { Color as CesiumColor, HorizontalOrigin as CesiumHorizontalOrigin, Math as CesiumMath, VerticalOrigin as CesiumVerticalOrigin } from 'cesium';
-import { Formatted } from '../../style/expression-adapter';
 
 const DEFAULT_TEXT_SIZE = 16;
 const DEFAULT_TEXT_LINE_HEIGHT = 1.2;

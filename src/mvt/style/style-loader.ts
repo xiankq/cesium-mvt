@@ -1,5 +1,4 @@
 import type {
-  BackgroundLayerSpecification,
   GeoJSONSourceSpecification,
   SourceSpecification,
   StyleSpecification,
@@ -10,38 +9,9 @@ import { deepClone, resolveUrl } from '../utils/common';
 import { loadSpriteAtlas } from './sprite-atlas';
 
 export interface StyleSet {
-  backgroundColor?: string;
   style: StyleSpecification & {
     spriteAtlas?: SpriteAtlas;
   };
-  styleUrl?: string;
-}
-
-export function createStyleSet(
-  style: StyleSpecification,
-  styleUrl?: string,
-): StyleSet {
-  return {
-    backgroundColor: extractBackgroundColor(style),
-    style,
-    styleUrl,
-  };
-}
-
-function extractBackgroundColor(style: StyleSpecification) {
-  for (const layer of style.layers) {
-    if (layer.type !== 'background') {
-      continue;
-    }
-
-    const backgroundLayer = layer as BackgroundLayerSpecification;
-    const backgroundColor = backgroundLayer.paint?.['background-color'];
-    if (typeof backgroundColor === 'string') {
-      return backgroundColor;
-    }
-  }
-
-  return undefined;
 }
 
 export interface LoadStyleSetOptions {
@@ -58,7 +28,9 @@ export function normalizeStyle(
     normalizeAssetUrls(normalizedStyle, styleUrl);
   }
 
-  return createStyleSet(normalizedStyle, styleUrl);
+  return {
+    style: normalizedStyle,
+  };
 }
 
 export async function loadStyleSet(

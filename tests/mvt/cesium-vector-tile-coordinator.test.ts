@@ -137,7 +137,6 @@ function createAbortableSourceManager() {
     _tilingScheme?: unknown,
     _renderTile?: unknown,
     _style?: unknown,
-    _onCompile?: unknown,
     _priority?: number,
   ) => {
     if (!sourceIds.has(sourceId)) {
@@ -196,7 +195,6 @@ describe('cesiumVectorTileCoordinator', () => {
 
     coordinator.update({
       camera: {},
-      viewportHeight: 100,
       viewportWidth: 100,
     });
 
@@ -319,7 +317,7 @@ describe('cesiumVectorTileCoordinator', () => {
       { level: 0, x: 1, y: 0 },
     ]);
 
-    const priorities = sourceManager.requestTile.mock.calls.map(call => call[9]);
+    const priorities = sourceManager.requestTile.mock.calls.map(call => call[8]);
     expect(priorities).toEqual([0, 1]);
   });
 
@@ -380,8 +378,8 @@ describe('cesiumVectorTileCoordinator', () => {
 
     const requestTileMock = sourceManager.requestTile as any;
     expect(requestTileMock).toHaveBeenCalledTimes(4);
-    expect(requestTileMock.mock.calls.slice(0, 2).map((call: any[]) => call[9])).toEqual([0, 1]);
-    expect(requestTileMock.mock.calls.slice(2, 4).map((call: any[]) => call[9])).toEqual([0, 1]);
+    expect(requestTileMock.mock.calls.slice(0, 2).map((call: any[]) => call[8])).toEqual([0, 1]);
+    expect(requestTileMock.mock.calls.slice(2, 4).map((call: any[]) => call[8])).toEqual([0, 1]);
   });
 
   it('请求失败后不应该写入空瓦片并阻断后续重试', async () => {
@@ -506,7 +504,6 @@ describe('cesiumVectorTileCoordinator', () => {
 
       coordinator.update({
         camera: {},
-        viewportHeight: 100,
         viewportWidth: 100,
       });
 
@@ -515,7 +512,6 @@ describe('cesiumVectorTileCoordinator', () => {
 
       coordinator.update({
         camera: {},
-        viewportHeight: 100,
         viewportWidth: 100,
       });
 
@@ -526,7 +522,6 @@ describe('cesiumVectorTileCoordinator', () => {
 
       coordinator.update({
         camera: {},
-        viewportHeight: 100,
         viewportWidth: 100,
       });
 
@@ -766,7 +761,6 @@ describe('cesiumVectorTileCoordinator', () => {
 
       coordinator.update({
         camera: {},
-        viewportHeight: 100,
         viewportWidth: 100,
       });
 

@@ -4,7 +4,7 @@ import type { FeatureStateResolver } from '../style/feature-state-store';
 import type { SupportedGeometryLayer } from '../style/layer-family';
 import type { RenderedSymbolPlacement } from './render-query-utils';
 import type { RenderQueryGeometry } from './tile-spatial-index';
-import { createFeatureFilter } from '../style/feature-filter';
+import { createFeatureFilter } from '../style/filter-adapter';
 import { isLayerVisibleAtZoom, isSupportedGeometryLayer } from '../style/layer-family';
 import {
   getVisibleSymbolSourceIndexes,
@@ -123,19 +123,22 @@ export function queryRenderedFeaturesFromState(
             continue;
           }
 
-          const { feature, geometryType } = candidate;
-
           const featureState = state.getFeatureState?.({
-            id: feature.id,
+            id: candidate.feature.id,
             sourceId: coordinate.sourceId,
             sourceLayer: sourceLayerName,
           });
-
+          const feature = {
+            id: candidate.feature.id,
+            properties: candidate.feature.properties ?? {},
+            type: candidate.geometryType,
+          };
           const context = {
+            feature,
             featureState,
-            geometryType,
-            id: feature.id,
-            properties: (feature.properties ?? {}) as Record<string, unknown>,
+            geometryType: candidate.geometryType,
+            id: candidate.feature.id,
+            properties: candidate.feature.properties ?? {},
             zoom: coordinate.level,
           };
 
@@ -144,8 +147,12 @@ export function queryRenderedFeaturesFromState(
           }
 
           features.push({
-            ...feature.toGeoJSON(coordinate.x, coordinate.y, coordinate.level),
-            id: feature.id,
+            ...candidate.feature.toGeoJSON(
+              coordinate.x,
+              coordinate.y,
+              coordinate.level,
+            ),
+            id: candidate.feature.id,
             layerId: layer.id,
             sourceId: coordinate.sourceId,
             sourceLayer: sourceLayerName,

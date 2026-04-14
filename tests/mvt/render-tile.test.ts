@@ -8,7 +8,7 @@ import {
 import { createLayerFamilies } from '@/mvt/style/layer-family';
 
 describe('render-tile', () => {
-  it('compiles background and geometry batches from style order', () => {
+  it('compiles geometry batches from style order only', () => {
     const style: StyleSpecification = {
       version: 8,
       sources: {
@@ -55,11 +55,6 @@ describe('render-tile', () => {
       style,
       styleEpoch: 2,
     })).toEqual({
-      background: {
-        color: '#102030',
-        layerId: 'background',
-        order: 0,
-      },
       epoch: 2,
       geometryBatches: [
         {
@@ -143,7 +138,7 @@ describe('render-tile', () => {
     });
   });
 
-  it('resolves background color expressions with tile zoom', () => {
+  it('ignores background layers during render tile compilation', () => {
     const style = {
       version: 8,
       sources: {
@@ -176,12 +171,9 @@ describe('render-tile', () => {
       renderOrder,
       style,
       styleEpoch: 2,
-    })).toMatchObject({
-      background: {
-        color: '#808080',
-        layerId: 'background',
-        order: 0,
-      },
+    })).toEqual({
+      epoch: 2,
+      geometryBatches: [],
       key: 'base/5/4/5@2',
     });
   });

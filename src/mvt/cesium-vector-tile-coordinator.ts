@@ -38,7 +38,6 @@ export interface CesiumVectorTileCoordinatorOptions {
 export interface FrameState {
   afterRender?: Array<() => boolean | void>;
   camera: any;
-  viewportHeight: number;
   viewportWidth: number;
 }
 
@@ -367,7 +366,6 @@ export class CesiumVectorTileCoordinator {
       this.tilingScheme,
       renderTile,
       style,
-      () => {},
       priority,
     );
     this.cacheManager.setPending(key, requestPromise);

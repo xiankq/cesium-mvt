@@ -16,7 +16,7 @@
 
 **完成时间：** 2026-04-14
 
-**总体状态：** P0-1 至 P0-4 全部完成，所有 419 个测试通过
+**总体状态：** P0-1 至 P0-4 全部完成，相关测试通过
 
 **核心成果：**
 
@@ -27,7 +27,7 @@
 
 2. **P0-2: 渲染后端重构**
    - 更新所有渲染后端使用新的属性求值系统
-   - 修复 background 颜色和 feature-state 表达式处理
+   - 修复 feature-state 表达式处理
    - 所有测试通过
 
 3. **P0-3: 数据源和瓦片管理优化**
@@ -37,10 +37,10 @@
 
 4. **P0-4: 图层和样式管理优化**
    - StyleManager、LayerFamily、FeatureStateStore 已完善
-   - 支持 fill、line、circle、background 图层
-   - 136 个测试全部通过
+   - 支持 fill、line、circle、symbol、fill-extrusion 图层
+   - 相关测试通过
 
-**下一步：** P1-1 Symbol 图层支持
+**下一步：** P2-2 动画支持与剩余边角收敛
 
 ---
 
@@ -60,10 +60,15 @@
 ```
 src/mvt/style/
 ├── index.ts                    # 导出入口
-├── expression-adapter.ts       # 表达式适配器（复用 maplibre）
-├── style-property-adapter.ts   # 属性适配器（复用 maplibre）
+├── feature-state-store.ts      # 特征状态存储
 ├── filter-adapter.ts           # 过滤器适配器（复用 maplibre）
-└── style-manager.ts            # 样式管理器（重构）
+├── layer-family.ts             # 图层分组
+├── layer-style-resolver.ts     # 图层样式解析
+├── sprite-atlas.ts             # 图集管理
+├── style-loader.ts             # 样式加载
+├── style-manager.ts            # 样式管理器
+├── style-property-evaluator.ts # 属性求值器
+└── style-validation.ts         # 样式验证
 ```
 
 **实现内容：**
@@ -101,10 +106,10 @@ src/mvt/style/
 **已完成：**
 
 - [x] 重构属性求值系统，使用 `normalizePropertyExpression`
-- [x] 更新所有渲染后端（fill, line, circle）使用新的求值系统
+- [x] 更新所有渲染后端（fill, line, circle, fill-extrusion）使用新的求值系统
 - [x] 支持 zoom-dependent 属性
 - [x] 支持 feature-state 属性
-- [x] 修复 background 颜色表达式求值
+- [x] 修复 feature-state 颜色表达式求值
 - [x] 所有测试通过
 
 **文件结构：**
@@ -263,7 +268,7 @@ src/mvt/source/
   - 特征状态读写
   - 支持按数据源和数据源图层分组
 - [x] LayerStyleResolver - 图层样式解析
-  - 支持 fill、line、circle 图层
+  - 支持 fill、line、circle、symbol、fill-extrusion 图层
   - 支持静态值和表达式
   - 支持 zoom-dependent 属性
   - 支持 feature-state 属性
@@ -277,24 +282,24 @@ src/mvt/source/
 - [x] fill - 填充图层
 - [x] line - 线图层
 - [x] circle - 圆图层
-- [x] background - 背景图层
-- [ ] symbol - 符号图层（P1-1）
-- [ ] fill-extrusion - 3D 填充（P2-1）
+- [x] symbol - 符号图层
+- [x] fill-extrusion - 3D 填充
+- background 已从 runtime 收敛掉，不再作为支持图层追踪
 
 **文件结构：**
 
 ```
 src/mvt/style/
-├── style-manager.ts            # 样式管理器（重构）
-├── layer/
-│   ├── index.ts                # Layer 接口
-│   ├── fill-layer.ts           # 填充图层
-│   ├── line-layer.ts           # 线图层
-│   ├── circle-layer.ts         # 圆图层
-│   ├── symbol-layer.ts         # 符号图层
-│   └── background-layer.ts     # 背景图层
-├── layer-family.ts             # 图层分组（保留）
-└── feature-state-store.ts      # 特征状态存储（保留）
+├── feature-state-store.ts      # 特征状态存储
+├── filter-adapter.ts           # 过滤器适配器
+├── index.ts                    # 导出入口
+├── layer-family.ts             # 图层分组
+├── layer-style-resolver.ts     # 图层样式解析
+├── sprite-atlas.ts             # 图集管理
+├── style-loader.ts             # 样式加载
+├── style-manager.ts            # 样式管理器
+├── style-property-evaluator.ts # 属性求值器
+└── style-validation.ts         # 样式验证
 ```
 
 **实现内容：**
@@ -312,7 +317,7 @@ src/mvt/style/
   - `LineLayer` - 线
   - `CircleLayer` - 圆
   - `SymbolLayer` - 符号
-  - `BackgroundLayer` - 背景
+  - `FillExtrusionLayer` - 3D 填充
 - [ ] 图层分组（保留现有实现）
 - [ ] 特征状态存储（保留现有实现）
 
@@ -444,6 +449,5 @@ src/mvt/style/
 - [x] P0-1~P0-5（旧版）：调度优先级和取消机制
 - [x] P0-1~P0-5（旧版）：错误重试退避机制
 - [x] P0-1（新版）：复用 maplibre style-spec 表达式系统
-  - 创建 expression-adapter.ts 复用 maplibre 表达式
-  - 创建 style-property-adapter.ts 复用属性表达式
+  - 统一到 filter-adapter / style-property-evaluator
   - 删除不必要的自定义表达式实现

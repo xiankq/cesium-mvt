@@ -146,6 +146,47 @@ describe('bucket-circle-backend', () => {
         expect(highlightMaterial.size).toBe(14);
       });
 
+      it('应该读取 feature-state 过滤要素', async () => {
+        const { createBucketCircleTileHandle }
+          = await import('@/mvt/render/backend/bucket-circle-backend');
+
+        const bucketTile = createMockCircleBucketTile({
+          featureCount: 2,
+          layerId: 'selected-layer',
+        });
+        bucketTile.buckets[0]!.layerIds = ['selected-layer'];
+
+        const style = {
+          version: 8 as const,
+          sources: {},
+          layers: [
+            {
+              'filter': ['==', ['feature-state', 'selected'], true],
+              'id': 'selected-layer',
+              'paint': {
+                'circle-color': '#112233',
+                'circle-radius': 5,
+              },
+              'source': 'source',
+              'source-layer': 'layer',
+              'type': 'circle' as const,
+            },
+          ],
+        } as StyleSpecification;
+
+        const handle = createBucketCircleTileHandle({
+          bucketTile,
+          featureStateResolver: ({ id }) => ({
+            selected: id === 1,
+          }),
+          style,
+        });
+
+        expect(handle).toBeDefined();
+        expect(handle?.collections).toHaveLength(1);
+        expect(handle?.collections[0]?.pointCount).toBe(1);
+      });
+
       it('应该为同一circle bucket的多个layerId分别创建collection', async () => {
         const { createBucketCircleTileHandle }
           = await import('@/mvt/render/backend/bucket-circle-backend');
