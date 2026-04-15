@@ -6,6 +6,9 @@ on:
       - gh-pages
   workflow_dispatch:
 
+env:
+  GITHUB_PAGES: 'true'
+
 permissions:
   contents: read
   pages: write
