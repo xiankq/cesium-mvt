@@ -5,14 +5,14 @@ import ImageryLayer from './imagery-layer.vue';
 
 const containerRef = useTemplateRef('containerRef');
 const viewer = shallowRef<Viewer>();
-// 默认相机视角，此位置提供给camera.flyHome调用
+
 Camera.DEFAULT_VIEW_RECTANGLE = new Rectangle(
-  1.8678385340361645,
-  0.312485648539553,
-  1.9623184684984898,
-  0.3555841642945612,
+  2.119768731510039,
+  0.5450066465113448,
+  2.121083088948845,
+  0.545555933360964,
 );
-Camera.DEFAULT_VIEW_FACTOR = 0; // 默认相机位置放大系数
+Camera.DEFAULT_VIEW_FACTOR = 0;
 
 watchPostEffect((onCleanup) => {
   onCleanup(() => {
