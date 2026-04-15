@@ -43,13 +43,6 @@ pnpm lint:eslint --fix
 pnpm lint:tsc
 ```
 
-## GitHub Pages
-
-- 仓库已经内置 [GitHub Pages workflow](./.github/workflows/deploy-github-pages.yml)，推送到 `main` 后会自动构建并发布
-- 首次启用时，请在仓库 `Settings -> Pages` 里把 `Source` 设为 `GitHub Actions`
-- 构建时会自动切到相对 `base`，避免 GitHub Pages 子路径下的资源引用失效
-- 如果你要手动检查线上效果，优先看生产构建，不要用开发环境里的性能观感做最终判断
-
 ## 使用示例
 
 ```typescript
