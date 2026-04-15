@@ -28,6 +28,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          pnpm-cache: true
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm build
+
       - name: Configure GitHub Pages
         id: pages
         uses: actions/configure-pages@v5
@@ -35,7 +50,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: .
+          path: ./dist
 
       - name: Deploy to GitHub Pages
         id: deployment
