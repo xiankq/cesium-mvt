@@ -1,5 +1,6 @@
 import type { WorkerLike } from './worker-dispatcher';
 import { createAbortError } from './common';
+import { computeOptimalWorkerCount } from './worker-count';
 
 export interface WorkerPoolDispatcherOptions<TJob, TResult, TMessage, TTransferable> {
   createJobMessage: (id: number, job: TJob) => { message: TMessage; transfer?: TTransferable[] };
@@ -38,7 +39,7 @@ export class WorkerPoolDispatcher<TJob, TResult, TMessage, TTransferable = never
 
   constructor(options: WorkerPoolDispatcherOptions<TJob, TResult, TMessage, TTransferable>) {
     this.options = options;
-    const workerCount = Math.max(1, options.workerCount ?? 2);
+    const workerCount = Math.max(1, options.workerCount ?? computeOptimalWorkerCount());
     this.slots = Array.from({ length: workerCount }, () => ({}));
 
     for (let index = 0; index < this.slots.length; index += 1) {
