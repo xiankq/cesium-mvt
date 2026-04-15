@@ -1,9 +1,11 @@
 export interface TileCacheOptions {
   maxBytes: number;
+  maximumCacheOverflowBytes?: number;
 }
 
 export interface CacheEntry {
   byteLength: number;
+  isVisible?: boolean;
   [key: string]: any;
 }
 
@@ -21,6 +23,7 @@ interface CacheNode {
 
 export class TileCache {
   private maxBytes: number;
+  private maximumCacheOverflowBytes: number;
   private currentBytes: number = 0;
   private cache: Map<string, CacheNode> = new Map();
   private head: CacheNode | null = null;
@@ -28,25 +31,54 @@ export class TileCache {
 
   constructor(options: TileCacheOptions) {
     this.maxBytes = options.maxBytes;
+    this.maximumCacheOverflowBytes = options.maximumCacheOverflowBytes ?? 0;
   }
 
   add(key: string, entry: CacheEntry): EvictedCacheEntry[] {
     const evictedEntries: EvictedCacheEntry[] = [];
+    const normalizedEntry: CacheEntry = {
+      ...entry,
+      isVisible: entry.isVisible ?? false,
+    };
     this.delete(key);
 
-    while (this.currentBytes + entry.byteLength > this.maxBytes && this.head) {
-      const oldestNode = this.head;
-      this.detachNode(oldestNode);
-      this.cache.delete(oldestNode.key);
-      this.currentBytes -= oldestNode.entry.byteLength;
+    const hardLimit = this.maxBytes + this.maximumCacheOverflowBytes;
+
+    // 先把明显超出硬上限的部分清掉，确保缓存不会无限膨胀。
+    while (this.currentBytes + normalizedEntry.byteLength > hardLimit) {
+      const evictionCandidate = this.findEvictionCandidate();
+      if (!evictionCandidate) {
+        break;
+      }
+
+      this.detachNode(evictionCandidate);
+      this.cache.delete(evictionCandidate.key);
+      this.currentBytes -= evictionCandidate.entry.byteLength;
       evictedEntries.push({
-        entry: oldestNode.entry,
-        key: oldestNode.key,
+        entry: evictionCandidate.entry,
+        key: evictionCandidate.key,
+      });
+    }
+
+    // 再尽量回到目标预算；这里优先移除不可见条目，
+    // 让可见瓦片可以暂时占用 overflow 预算。
+    while (this.currentBytes + normalizedEntry.byteLength > this.maxBytes) {
+      const evictionCandidate = this.findInvisibleEvictionCandidate();
+      if (!evictionCandidate) {
+        break;
+      }
+
+      this.detachNode(evictionCandidate);
+      this.cache.delete(evictionCandidate.key);
+      this.currentBytes -= evictionCandidate.entry.byteLength;
+      evictedEntries.push({
+        entry: evictionCandidate.entry,
+        key: evictionCandidate.key,
       });
     }
 
     const newNode: CacheNode = {
-      entry,
+      entry: normalizedEntry,
       key,
       next: null,
       prev: this.tail,
@@ -61,7 +93,7 @@ export class TileCache {
     this.tail = newNode;
 
     this.cache.set(key, newNode);
-    this.currentBytes += entry.byteLength;
+    this.currentBytes += normalizedEntry.byteLength;
     return evictedEntries;
   }
 
@@ -79,6 +111,15 @@ export class TileCache {
     this.cache.delete(key);
     this.currentBytes -= node.entry.byteLength;
     return node.entry;
+  }
+
+  setVisibility(key: string, isVisible: boolean): void {
+    const node = this.cache.get(key);
+    if (!node) {
+      return;
+    }
+
+    node.entry.isVisible = isVisible;
   }
 
   clear(): EvictedCacheEntry[] {
@@ -141,5 +182,27 @@ export class TileCache {
 
     node.prev = null;
     node.next = null;
+  }
+
+  private findEvictionCandidate(): CacheNode | undefined {
+    const invisibleCandidate = this.findInvisibleEvictionCandidate();
+    if (invisibleCandidate) {
+      return invisibleCandidate;
+    }
+
+    return this.head ?? undefined;
+  }
+
+  private findInvisibleEvictionCandidate(): CacheNode | undefined {
+    let node = this.head;
+    while (node) {
+      if (node.entry.isVisible !== true) {
+        return node;
+      }
+
+      node = node.next;
+    }
+
+    return undefined;
   }
 }

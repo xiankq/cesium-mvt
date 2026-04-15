@@ -3,6 +3,7 @@ import type {
   SourceSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
 import type { GeoJsonObject } from 'geojson';
+import type { RequestPriority, RequestPriorityState } from './request-scheduler';
 import type { TileCoordinate } from './tile-request';
 import { GeoJSONVT } from '@maplibre/geojson-vt';
 import { fromGeojsonVt } from '@maplibre/vt-pbf';
@@ -29,6 +30,7 @@ interface SourceEntryRecord {
   error?: unknown;
   failureCount: number;
   key: string;
+  priorityState?: RequestPriorityState;
   promise?: Promise<ArrayBuffer | undefined>;
   state: SourceEntryState;
   value?: ArrayBuffer;
@@ -39,9 +41,10 @@ interface GeojsonSourceCacheOptions {
   loadData?: (
     source: GeoJSONSourceSpecification,
     signal: AbortSignal,
-    priority?: number,
+    priority?: RequestPriority,
   ) => Promise<GeoJsonObject>;
   maxBytes?: number;
+  maximumCacheOverflowBytes?: number;
   readyTileBudget?: TileBudget;
   source: SourceSpecification;
   sourceId: string;
@@ -62,7 +65,7 @@ export class GeojsonSourceCache {
   private readonly loadData: (
     source: GeoJSONSourceSpecification,
     signal: AbortSignal,
-    priority?: number,
+    priority?: RequestPriority,
   ) => Promise<GeoJsonObject>;
 
   private source: GeoJSONSourceSpecification;
@@ -80,6 +83,7 @@ export class GeojsonSourceCache {
     this.readyTileBudget = options.readyTileBudget
       ?? new TileBudget({
         maxBytes: options.maxBytes ?? DEFAULT_SOURCE_CACHE_SIZE,
+        maximumCacheOverflowBytes: options.maximumCacheOverflowBytes,
       });
     this.source = options.source;
     this.sourceId = options.sourceId;
@@ -88,7 +92,7 @@ export class GeojsonSourceCache {
 
   async requestTile(
     coordinate: TileCoordinate,
-    priority = 0,
+    priority: RequestPriority = 0,
   ): Promise<ArrayBuffer | undefined> {
     if (this.destroyed) {
       return undefined;
@@ -106,6 +110,13 @@ export class GeojsonSourceCache {
       return cloneValue(existingEntry.value);
     }
     if (existingEntry?.promise) {
+      if (existingEntry.priorityState) {
+        const requestedPriority = resolvePriorityValue(priority);
+        if (requestedPriority < existingEntry.priorityState.value) {
+          existingEntry.priorityState.value = requestedPriority;
+        }
+      }
+
       return existingEntry.promise.then(v => v === undefined ? undefined : cloneValue(v));
     }
 
@@ -114,14 +125,14 @@ export class GeojsonSourceCache {
       return Promise.reject(createThrottleError());
     }
 
+    const priorityState = entry.priorityState ?? resolvePriorityState(priority);
+    entry.priorityState = priorityState;
+
     const abortController = new AbortController();
     entry.abortController = abortController;
     entry.error = undefined;
     entry.state = 'requesting';
-    entry.promise = this.waitForTileIndex(
-      abortController.signal,
-      priority,
-    )
+    entry.promise = this.waitForTileIndex(abortController.signal, priorityState)
       .then((tileIndex) => {
         if (this.destroyed) {
           throw createAbortError();
@@ -284,7 +295,7 @@ export class GeojsonSourceCache {
   }
 
   private async getTileIndex(
-    priority: number,
+    priority: RequestPriority,
   ): Promise<GeoJSONVT> {
     if (this.tileIndexPromise) {
       return this.tileIndexPromise;
@@ -320,7 +331,7 @@ export class GeojsonSourceCache {
 
   private waitForTileIndex(
     signal: AbortSignal,
-    priority: number,
+    priority: RequestPriority,
   ): Promise<GeoJSONVT> {
     if (signal.aborted) {
       return Promise.reject(createAbortError());
@@ -399,7 +410,7 @@ function getTileData(tileIndex: GeoJSONVT, coordinate: TileCoordinate) {
 function loadGeojsonData(
   source: GeoJSONSourceSpecification,
   signal: AbortSignal,
-  priority?: number,
+  priority?: RequestPriority,
 ): Promise<GeoJsonObject> {
   if (typeof source.data !== 'string') {
     return Promise.resolve(source.data as GeoJsonObject);
@@ -446,4 +457,20 @@ function getSourceMinZoom(source: SourceSpecification): number | undefined {
 function getSourceMaxZoom(source: SourceSpecification): number | undefined {
   const maxzoom = (source as { maxzoom?: unknown }).maxzoom;
   return typeof maxzoom === 'number' ? maxzoom : undefined;
+}
+
+function resolvePriorityState(priority: RequestPriority): RequestPriorityState {
+  if (typeof priority === 'object' && priority !== null) {
+    return priority;
+  }
+
+  return {
+    value: priority,
+  };
+}
+
+function resolvePriorityValue(priority: RequestPriority): number {
+  return typeof priority === 'object' && priority !== null
+    ? priority.value
+    : priority;
 }

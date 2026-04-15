@@ -48,23 +48,23 @@ export interface LayerFamily {
 export function createLayerFamilies(style: StyleSpecification): LayerFamily[] {
   const families: LayerFamily[] = [];
   let currentFamily: LayerFamily | undefined;
-  let currentLayoutKey: string | undefined;
+  let currentFamilyKey: string | undefined;
 
   for (const layer of style.layers) {
     if (!isSupportedGeometryLayer(layer)) {
       currentFamily = undefined;
-      currentLayoutKey = undefined;
+      currentFamilyKey = undefined;
       continue;
     }
 
-    const nextLayoutKey = createLayoutKey(layer.layout);
+    const nextFamilyKey = createLayerFamilyKey(layer);
     const sourceId = layer.source;
     const sourceLayer = resolveSourceLayer(style.sources[layer.source], layer);
     const compatibleWithCurrent = currentFamily
       && currentFamily.sourceId === sourceId
       && currentFamily.sourceLayer === sourceLayer
       && currentFamily.type === layer.type
-      && currentLayoutKey === nextLayoutKey;
+      && currentFamilyKey === nextFamilyKey;
 
     if (compatibleWithCurrent && currentFamily) {
       currentFamily.layerIds.push(layer.id);
@@ -78,7 +78,7 @@ export function createLayerFamilies(style: StyleSpecification): LayerFamily[] {
       sourceLayer,
       type: layer.type,
     };
-    currentLayoutKey = nextLayoutKey;
+    currentFamilyKey = nextFamilyKey;
     families.push(currentFamily);
   }
 
@@ -95,8 +95,12 @@ export function isSupportedGeometryLayer(
     || layer.type === 'symbol';
 }
 
-function createLayoutKey(layout: unknown) {
-  return stableSerialize(layout ?? {});
+function createLayerFamilyKey(layer: SupportedGeometryLayer) {
+  return stableSerialize({
+    filter: layer.filter ?? null,
+    layout: layer.layout ?? {},
+    paint: layer.paint ?? {},
+  });
 }
 
 function resolveSourceLayer(

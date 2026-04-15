@@ -194,6 +194,7 @@ describe('bucket-tile-dispatcher', () => {
 
       expect(worker1.postMessage).toHaveBeenCalledTimes(1);
       expect(worker2.postMessage).toHaveBeenCalledTimes(1);
+      expect(dispatcher.getQueueDepth()).toBe(1);
 
       const firstMessage = worker1.postMessage.mock.calls[0][0];
       worker1.simulateMessage({

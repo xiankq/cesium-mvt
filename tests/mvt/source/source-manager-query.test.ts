@@ -4,7 +4,7 @@ import { fromGeojsonVt } from '@maplibre/vt-pbf';
 import { describe, expect, it, vi } from 'vitest';
 import { SourceManager } from '@/mvt/source/source-manager';
 
-function createTileBuffer() {
+function createTileBuffer(name = 'poi-a') {
   const data: FeatureCollection<Point, { name: string }> = {
     type: 'FeatureCollection',
     features: [
@@ -15,7 +15,7 @@ function createTileBuffer() {
           coordinates: [0, 0],
         },
         properties: {
-          name: 'poi-a',
+          name,
         },
       },
     ],
@@ -93,6 +93,35 @@ describe('source-manager querySourceFeatures', () => {
     expect(features).toHaveLength(1);
     expect(features[0]?.properties).toEqual({
       name: 'poi-a',
+    });
+  });
+
+  it('应该优先读取 peekEntryValue 中的原始瓦片快照', () => {
+    const sourceManager = new SourceManager();
+    const entryBuffer = createTileBuffer('poi-a');
+    const peekBuffer = createTileBuffer('poi-b');
+    const sourceCache = {
+      destroy: vi.fn(),
+      getEntry: vi.fn(() => ({
+        state: 'ready',
+        value: entryBuffer,
+      })),
+      getLoadedTileKeys: vi.fn(() => ['base/0/0/0']),
+      isDestroyed: vi.fn(() => false),
+      peekEntryValue: vi.fn(() => peekBuffer),
+      sourceType: 'vector' as const,
+      updateSource: vi.fn(),
+    };
+
+    (sourceManager as any).sourceCaches.set('base', sourceCache);
+
+    const features = sourceManager.querySourceFeatures('base', {
+      sourceLayer: 'poi',
+    });
+
+    expect(features).toHaveLength(1);
+    expect(features[0]?.properties).toEqual({
+      name: 'poi-b',
     });
   });
 

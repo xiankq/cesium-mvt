@@ -33,7 +33,13 @@ export function querySourceFeaturesFromCache(
 
   for (const tileKey of cache.getLoadedTileKeys()) {
     const entry = cache.getEntry?.(tileKey);
-    if (!entry || !(entry.value instanceof ArrayBuffer)) {
+    if (!entry) {
+      continue;
+    }
+
+    // 优先读取未克隆的原始 buffer，保证 source 查询与渲染查询共享同一份解析快照。
+    const tileData = cache.peekEntryValue?.(tileKey) ?? entry.value;
+    if (!(tileData instanceof ArrayBuffer)) {
       continue;
     }
 
@@ -47,7 +53,7 @@ export function querySourceFeaturesFromCache(
     if (!coordinate) {
       continue;
     }
-    const tile = parseVectorTile(entry.value);
+    const tile = parseVectorTile(tileData);
     const layerNames = cache.sourceType === 'geojson'
       ? listSourceLayers(tile)
       : options.sourceLayer

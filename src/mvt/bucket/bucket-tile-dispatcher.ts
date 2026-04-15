@@ -64,6 +64,7 @@ export interface BucketTileDispatcherOptions {
 export interface BucketTileDispatcher {
   compile: (job: CompileBucketTileJob) => Promise<ParsedTileResult>;
   destroy: () => void;
+  getQueueDepth: () => number;
 }
 
 /**
@@ -111,7 +112,7 @@ export function createBucketTileDispatcher(
   });
 
   if (!dispatcher.hasWorkers()) {
-    return new InlineDispatcher({
+    const inlineDispatcher = new InlineDispatcher({
       execute: (job: CompileBucketTileJob) => {
         const tileProjection = extractTileProjection(job.renderTile.key, job.tilingScheme);
         return compileBucketTileFromData({
@@ -122,11 +123,18 @@ export function createBucketTileDispatcher(
         });
       },
     });
+
+    return {
+      compile: (job: CompileBucketTileJob) => inlineDispatcher.compile(job),
+      destroy: () => inlineDispatcher.destroy(),
+      getQueueDepth: () => 0,
+    };
   }
 
   return {
     compile: (job: CompileBucketTileJob) => dispatcher.dispatch(job, job.signal),
     destroy: () => dispatcher.destroy(),
+    getQueueDepth: () => dispatcher.getQueueDepth(),
   };
 }
 

@@ -7,8 +7,17 @@ import Pbf from 'pbf';
 // GeoJSON 转出来的合成瓦片都会复用这一套访问方式。
 export type ParsedTile = VectorTile;
 
-export function parseVectorTile(data: ArrayBuffer) {
-  return new VectorTile(new Pbf(new Uint8Array(data)));
+const PARSED_TILE_CACHE = new WeakMap<ArrayBuffer, ParsedTile>();
+
+export function parseVectorTile(data: ArrayBuffer): ParsedTile {
+  const cachedTile = PARSED_TILE_CACHE.get(data);
+  if (cachedTile) {
+    return cachedTile;
+  }
+
+  const tile = new VectorTile(new Pbf(new Uint8Array(data)));
+  PARSED_TILE_CACHE.set(data, tile);
+  return tile;
 }
 
 export function listSourceLayers(tile: ParsedTile) {

@@ -28,7 +28,7 @@ export interface TileRequestOptions {
   /**
    * 请求优先级（数值越小优先级越高）
    */
-  priority?: number;
+  priority?: RequestPriority;
 
   /**
    * 取消函数
@@ -48,11 +48,17 @@ export interface TileRequestOptions {
 
 interface RequestOptionsBase {
   cancelFunction?: () => void;
-  priority?: number;
+  priority?: RequestPriority;
   serverKey?: string;
   signal?: AbortSignal;
   url: string;
 }
+
+export interface RequestPriorityState {
+  value: number;
+}
+
+export type RequestPriority = number | RequestPriorityState;
 
 interface RequestSchedulerRuntime {
   getServerKey: (url: string) => string;
@@ -141,9 +147,11 @@ function createRequest(
 ): Request {
   const scheduler = RequestScheduler as unknown as RequestSchedulerRuntime;
   const resolvedServerKey = options.serverKey ?? scheduler.getServerKey(options.url);
+  const priorityState = resolvePriorityState(options.priority);
   const request = new Request({
     cancelFunction: options.cancelFunction,
-    priority: options.priority ?? 0,
+    priority: priorityState.value,
+    priorityFunction: () => priorityState.value,
     serverKey: resolvedServerKey,
     throttle: true,
     throttleByServer: resolvedServerKey !== undefined,
@@ -151,6 +159,18 @@ function createRequest(
     url: options.url,
   });
   return request;
+}
+
+function resolvePriorityState(
+  priority?: RequestPriority,
+): RequestPriorityState {
+  if (typeof priority === 'object' && priority !== null) {
+    return priority;
+  }
+
+  return {
+    value: priority ?? 0,
+  };
 }
 
 function scheduleResourceRequest<T>(options: {

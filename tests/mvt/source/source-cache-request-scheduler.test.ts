@@ -32,6 +32,7 @@ describe('source-cache request scheduler integration', () => {
     const scheduleTileSpy = vi.spyOn(requestScheduler, 'scheduleTileRequest')
       .mockResolvedValue(tileBuffer);
     const { SourceCache } = await import('@/mvt/source/source-cache');
+    const priorityState = { value: 4 };
 
     const sourceCache = new SourceCache({
       source: createVectorSource(),
@@ -42,17 +43,17 @@ describe('source-cache request scheduler integration', () => {
       level: 2,
       x: 1,
       y: 3,
-    }, 4);
+    }, priorityState);
 
     expect(result).toBeInstanceOf(ArrayBuffer);
     expect(scheduleJsonSpy).toHaveBeenCalledTimes(1);
     expect(scheduleJsonSpy).toHaveBeenCalledWith(expect.objectContaining({
-      priority: 4,
+      priority: priorityState,
       url: 'https://tiles.example.com/catalog/tilejson.json',
     }));
     expect(scheduleTileSpy).toHaveBeenCalledTimes(1);
     expect(scheduleTileSpy).toHaveBeenCalledWith(expect.objectContaining({
-      priority: 4,
+      priority: priorityState,
       url: 'https://tiles.example.com/catalog/2/1/3.pbf',
     }));
   });

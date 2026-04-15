@@ -1,8 +1,12 @@
 import type { SourceSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { PrimitiveCollection, Rectangle, WebMercatorTilingScheme } from 'cesium';
 import type { QueryRenderedFeaturesOptions } from './render';
+import type { RenderManagerMetrics } from './render/render-manager';
 import type { RenderedFeature } from './render/render-query';
+import type { SourceManagerMetrics } from './source/source-manager';
 import type { QuerySourceFeaturesOptions } from './source/source-query';
+import type { TileCacheManagerMetrics } from './source/tile-cache-manager';
+import type { TileCoordinate } from './source/tile-request';
 import type { TileAvailability } from './source/tile-selection';
 import type { FeatureStateTarget } from './style/feature-state-store';
 import { RequestScheduler } from 'cesium';
@@ -15,6 +19,7 @@ import {
   TileScheduler,
 } from './source';
 import { isThrottleError } from './source/request-scheduler';
+import { computeTilePriority } from './source/tile-priority';
 import { FeatureStateStore } from './style/feature-state-store';
 import { StyleManager } from './style/style-manager';
 import { isAbortError } from './utils/common';
@@ -28,12 +33,19 @@ interface RequestSchedulerRuntime {
 
 export interface CesiumVectorTileCoordinatorOptions {
   crossSourceCollisions?: boolean;
+  maximumCacheOverflowBytes?: number;
   maximumLevel?: number;
   minimumLevel: number;
   rectangle: Rectangle;
   root: PrimitiveCollection;
   tileWidth: number;
   tilingScheme: WebMercatorTilingScheme;
+}
+
+export interface CesiumVectorTileCoordinatorMetrics {
+  cache: TileCacheManagerMetrics;
+  render: RenderManagerMetrics;
+  source: SourceManagerMetrics;
 }
 
 export interface FrameState {
@@ -71,6 +83,7 @@ export class CesiumVectorTileCoordinator {
 
     const sharedTileBudget = new TileBudget({
       maxBytes: DEFAULT_SHARED_CACHE_SIZE,
+      maximumCacheOverflowBytes: options.maximumCacheOverflowBytes,
     });
     this.cacheManager = new TileCacheManager({
       readyTileBudget: sharedTileBudget,
@@ -222,6 +235,14 @@ export class CesiumVectorTileCoordinator {
     });
   }
 
+  getMetrics(): CesiumVectorTileCoordinatorMetrics {
+    return {
+      cache: this.cacheManager.getMetrics(),
+      render: this.renderManager.getMetrics(),
+      source: this.sourceManager.getMetrics(),
+    };
+  }
+
   private processTileSelection(coordinates: any[]): void {
     if (!this.styleManager.hasStyle()) {
       return;
@@ -230,7 +251,13 @@ export class CesiumVectorTileCoordinator {
     const availableSourceIds = this.sourceManager.getSourceIds();
     const visibleKeys = new Set<string>();
     const nextRequestedKeys = new Set<string>();
-    let nextPriority = 0;
+    const requestCandidates: Array<{
+      coordinate: TileCoordinate;
+      priorityScore: number;
+      sourceId: string;
+    }> = [];
+    const selectionCenter = computeTileSelectionCenter(coordinates);
+    const now = Date.now();
 
     for (const sourceId of availableSourceIds) {
       const constraints = this.sourceManager.getSourceConstraints(sourceId);
@@ -241,6 +268,7 @@ export class CesiumVectorTileCoordinator {
           this.getTileAvailability(sid, level, x, y),
         constraints,
       );
+      const sourceRetryAt = this.sourceManager.getNextRetryAt(sourceId);
 
       for (const coord of sourceSelection.readyCoordinates) {
         const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
@@ -270,9 +298,31 @@ export class CesiumVectorTileCoordinator {
         }
 
         nextRequestedKeys.add(key);
-        void this.requestTile(sourceId, coord.level, coord.x, coord.y, nextPriority);
-        nextPriority++;
+        requestCandidates.push({
+          coordinate: coord,
+          priorityScore: computeRequestPriorityScore(
+            coord,
+            selectionCenter,
+            sourceRetryAt,
+            now,
+          ),
+          sourceId,
+        });
       }
+    }
+
+    requestCandidates.sort(compareRequestCandidates);
+
+    let nextPriority = 0;
+    for (const candidate of requestCandidates) {
+      void this.requestTile(
+        candidate.sourceId,
+        candidate.coordinate.level,
+        candidate.coordinate.x,
+        candidate.coordinate.y,
+        nextPriority,
+      );
+      nextPriority++;
     }
 
     for (const key of this.requestedTileKeys) {
@@ -292,6 +342,7 @@ export class CesiumVectorTileCoordinator {
     const allKeys = this.renderManager.getAllKeys();
     for (const key of allKeys) {
       if (!visibleKeys.has(key)) {
+        this.cacheManager.setVisibility(key, false);
         this.renderManager.hide(key);
         if (!this.cacheManager.has(key)) {
           this.renderManager.remove(key);
@@ -321,6 +372,7 @@ export class CesiumVectorTileCoordinator {
     y: number,
   ): void {
     const key = this.resolveRenderTileKey(sourceId, level, x, y);
+    this.cacheManager.setVisibility(key, true);
     this.renderManager.show(key);
   }
 
@@ -342,6 +394,7 @@ export class CesiumVectorTileCoordinator {
       const style = this.styleManager.getStyle();
       if (style) {
         this.renderManager.mount(key, tile, style);
+        this.cacheManager.setVisibility(key, true);
       }
       return;
     }
@@ -420,4 +473,80 @@ export class CesiumVectorTileCoordinator {
   ): string {
     return `${this.styleManager.getStyleEpoch()}:${sourceId}/${level}/${x}/${y}`;
   }
+}
+
+function computeTileSelectionCenter(coordinates: readonly TileCoordinate[]) {
+  if (coordinates.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const firstCoordinate = coordinates[0]!;
+  let minX = firstCoordinate.x;
+  let maxX = firstCoordinate.x;
+  let minY = firstCoordinate.y;
+  let maxY = firstCoordinate.y;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const coordinate = coordinates[index]!;
+    minX = Math.min(minX, coordinate.x);
+    maxX = Math.max(maxX, coordinate.x);
+    minY = Math.min(minY, coordinate.y);
+    maxY = Math.max(maxY, coordinate.y);
+  }
+
+  return {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2,
+  };
+}
+
+function computeRequestPriorityScore(
+  coordinate: TileCoordinate,
+  selectionCenter: { x: number; y: number },
+  sourceRetryAt: number | undefined,
+  now: number,
+): number {
+  const distanceToCenter = Math.abs(coordinate.x - selectionCenter.x)
+    + Math.abs(coordinate.y - selectionCenter.y);
+  const retryPenalty = sourceRetryAt !== undefined && sourceRetryAt > now
+    ? (sourceRetryAt - now) / 1000
+    : 0;
+
+  return computeTilePriority({
+    distanceToCamera: distanceToCenter,
+    isLoaded: false,
+    level: coordinate.level,
+    screenSpaceError: 1 / (1 + coordinate.level),
+  }) - retryPenalty;
+}
+
+function compareRequestCandidates(
+  left: {
+    coordinate: TileCoordinate;
+    priorityScore: number;
+    sourceId: string;
+  },
+  right: {
+    coordinate: TileCoordinate;
+    priorityScore: number;
+    sourceId: string;
+  },
+): number {
+  if (left.priorityScore !== right.priorityScore) {
+    return right.priorityScore - left.priorityScore;
+  }
+
+  if (left.sourceId !== right.sourceId) {
+    return left.sourceId.localeCompare(right.sourceId);
+  }
+
+  if (left.coordinate.level !== right.coordinate.level) {
+    return left.coordinate.level - right.coordinate.level;
+  }
+
+  if (left.coordinate.y !== right.coordinate.y) {
+    return left.coordinate.y - right.coordinate.y;
+  }
+
+  return left.coordinate.x - right.coordinate.x;
 }

@@ -34,6 +34,7 @@ describe('geojson-source-cache request scheduler integration', () => {
         type: 'FeatureCollection',
       } satisfies FeatureCollection);
     const { GeojsonSourceCache } = await import('@/mvt/source/geojson-source-cache');
+    const priorityState = { value: 4 };
 
     const sourceCache = new GeojsonSourceCache({
       source: createGeojsonSource(),
@@ -44,12 +45,12 @@ describe('geojson-source-cache request scheduler integration', () => {
       level: 2,
       x: 1,
       y: 3,
-    }, 4);
+    }, priorityState);
 
     expect(result).toBeInstanceOf(ArrayBuffer);
     expect(scheduleJsonSpy).toHaveBeenCalledTimes(1);
     expect(scheduleJsonSpy).toHaveBeenCalledWith(expect.objectContaining({
-      priority: 4,
+      priority: priorityState,
       url: 'https://example.com/data.geojson',
     }));
   });

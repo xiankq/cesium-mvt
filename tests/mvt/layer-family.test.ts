@@ -154,4 +154,144 @@ describe('layer-family', () => {
       },
     ]);
   });
+
+  it('应该在 filter 不同的时候拆分 family', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'land-a',
+          'type': 'fill',
+          'source': 'base',
+          'source-layer': 'land',
+          'filter': ['==', ['get', 'kind'], 'park'],
+        },
+        {
+          'id': 'land-b',
+          'type': 'fill',
+          'source': 'base',
+          'source-layer': 'land',
+          'filter': ['==', ['get', 'kind'], 'grass'],
+        },
+      ],
+    };
+
+    expect(createLayerFamilies(style)).toEqual([
+      {
+        id: 'base/land/fill/0',
+        layerIds: ['land-a'],
+        sourceId: 'base',
+        sourceLayer: 'land',
+        type: 'fill',
+      },
+      {
+        id: 'base/land/fill/1',
+        layerIds: ['land-b'],
+        sourceId: 'base',
+        sourceLayer: 'land',
+        type: 'fill',
+      },
+    ]);
+  });
+
+  it('应该在 data-driven paint 不同的时候拆分 family', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'land-a',
+          'type': 'fill',
+          'source': 'base',
+          'source-layer': 'land',
+          'paint': {
+            'fill-color': ['get', 'color'],
+          },
+        },
+        {
+          'id': 'land-b',
+          'type': 'fill',
+          'source': 'base',
+          'source-layer': 'land',
+          'paint': {
+            'fill-color': '#00ff00',
+          },
+        },
+      ],
+    };
+
+    expect(createLayerFamilies(style)).toEqual([
+      {
+        id: 'base/land/fill/0',
+        layerIds: ['land-a'],
+        sourceId: 'base',
+        sourceLayer: 'land',
+        type: 'fill',
+      },
+      {
+        id: 'base/land/fill/1',
+        layerIds: ['land-b'],
+        sourceId: 'base',
+        sourceLayer: 'land',
+        type: 'fill',
+      },
+    ]);
+  });
+
+  it('应该在 sprite 依赖不同的时候拆分 family', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'land-pattern',
+          'type': 'fill',
+          'source': 'base',
+          'source-layer': 'land',
+          'paint': {
+            'fill-pattern': 'forest',
+          },
+        },
+        {
+          'id': 'land-solid',
+          'type': 'fill',
+          'source': 'base',
+          'source-layer': 'land',
+        },
+      ],
+    };
+
+    expect(createLayerFamilies(style)).toEqual([
+      {
+        id: 'base/land/fill/0',
+        layerIds: ['land-pattern'],
+        sourceId: 'base',
+        sourceLayer: 'land',
+        type: 'fill',
+      },
+      {
+        id: 'base/land/fill/1',
+        layerIds: ['land-solid'],
+        sourceId: 'base',
+        sourceLayer: 'land',
+        type: 'fill',
+      },
+    ]);
+  });
 });

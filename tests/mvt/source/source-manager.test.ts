@@ -199,11 +199,11 @@ describe('sourceManager', () => {
       sourceManager.destroy();
     });
 
-    it('同一个待处理请求再次进入时会复用同一个请求且不引入额外优先级状态', async () => {
+    it('同一个待处理请求再次进入时会更新共享优先级状态并复用同一个请求', async () => {
       const { SourceManager } = await import('@/mvt/source/source-manager');
 
       const sourceManager = new SourceManager();
-      let capturedArgs: unknown[] = [];
+      let capturedPriorityState: { value: number } | undefined;
       let resolveTileData: (value: ArrayBuffer) => void = () => {};
       const tileDataPromise = new Promise<ArrayBuffer>((resolve) => {
         resolveTileData = resolve;
@@ -215,7 +215,7 @@ describe('sourceManager', () => {
         getMinZoom: vi.fn(() => undefined),
         isDestroyed: vi.fn(() => false),
         requestTile: vi.fn((...args: unknown[]) => {
-          capturedArgs = args;
+          capturedPriorityState = args[1] as { value: number };
           return tileDataPromise;
         }),
         sourceType: 'vector' as const,
@@ -262,8 +262,9 @@ describe('sourceManager', () => {
       );
 
       expect(sourceCache.requestTile).toHaveBeenCalledTimes(1);
-      expect(capturedArgs.length).toBe(2);
-      expect(capturedArgs[1]).toBe(8);
+      expect(capturedPriorityState).toEqual({
+        value: 8,
+      });
 
       const secondPromise = sourceManager.requestTile(
         'test',
@@ -278,8 +279,9 @@ describe('sourceManager', () => {
       );
 
       expect(sourceCache.requestTile).toHaveBeenCalledTimes(1);
-      expect(capturedArgs.length).toBe(2);
-      expect(capturedArgs[1]).toBe(8);
+      expect(capturedPriorityState).toEqual({
+        value: 2,
+      });
 
       resolveTileData(new Uint8Array([1, 2, 3]).buffer);
 
@@ -290,6 +292,62 @@ describe('sourceManager', () => {
         key: 'test/0/0/0@1',
       });
       expect(bucketTileDispatcher.compile).toHaveBeenCalledTimes(1);
+    });
+
+    it('应该统计 request compile 和 worker queue depth', async () => {
+      const { SourceManager } = await import('@/mvt/source/source-manager');
+
+      const sourceManager = new SourceManager();
+      const sourceCache = {
+        destroy: vi.fn(),
+        getMaxZoom: vi.fn(() => undefined),
+        getMinZoom: vi.fn(() => undefined),
+        isDestroyed: vi.fn(() => false),
+        requestTile: vi.fn(() => Promise.resolve(new ArrayBuffer(8))),
+        sourceType: 'vector' as const,
+        updateSource: vi.fn(),
+      };
+
+      (sourceManager as any).sourceCaches.set('test', sourceCache);
+      (sourceManager as any).bucketTileDispatcher = {
+        compile: vi.fn(async () => ({
+          buckets: [],
+          byteLength: 0,
+          epoch: 1,
+          key: 'test/0/0/0@1',
+        })),
+        destroy: vi.fn(),
+        getQueueDepth: vi.fn(() => 0),
+      };
+
+      await sourceManager.requestTile(
+        'test',
+        0,
+        0,
+        0,
+        'test/0/0/0',
+        {
+          tileXYToNativeRectangle: () => ({
+            east: 1,
+            north: 1,
+            south: 0,
+            west: 0,
+          }),
+        } as any,
+        {
+          epoch: 1,
+          geometryBatches: [],
+          key: 'test/0/0/0',
+        } as any,
+        createMockStyle('fill'),
+      );
+
+      expect(sourceManager.getMetrics()).toEqual({
+        compileCount: 1,
+        pendingRequestCount: 0,
+        requestCount: 1,
+        workerQueueDepth: 0,
+      });
     });
 
     it('会返回最早到期的失败重试时间', async () => {

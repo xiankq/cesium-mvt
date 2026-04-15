@@ -84,6 +84,27 @@ describe('render-manager', () => {
     expect(collection?.isDestroyed()).toBe(true);
   });
 
+  it('应该统计 mount hide remove 的生命周期次数', async () => {
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const manager = new RenderManager({
+      root,
+    });
+    const bucketTile = createMockLineBucketTile();
+    const style = createDashedLineStyle();
+
+    manager.mount('source/0/0/0', bucketTile, style);
+    manager.hide('source/0/0/0');
+    manager.remove('source/0/0/0');
+
+    expect(manager.getMetrics()).toEqual({
+      hideCount: 1,
+      mountCount: 1,
+      removeCount: 1,
+    });
+  });
+
   it('应该让跨 tile 的相同符号只保留一个实例', async () => {
     vi.stubGlobal('document', createDocumentStub());
 

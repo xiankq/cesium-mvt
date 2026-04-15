@@ -219,6 +219,34 @@ describe('cesiumVectorTileCoordinator', () => {
     coordinator.destroy();
   });
 
+  it('应该暴露请求 编译 缓存和渲染观测快照', async () => {
+    const coordinator = await createCoordinator();
+
+    coordinator.updateStyle(createStyle());
+
+    expect(coordinator.getMetrics()).toMatchObject({
+      cache: {
+        entryCount: 0,
+        evictCount: 0,
+        hitCount: 0,
+        missCount: 0,
+      },
+      render: {
+        hideCount: 0,
+        mountCount: 0,
+        removeCount: 0,
+      },
+      source: {
+        compileCount: 0,
+        pendingRequestCount: 0,
+        requestCount: 0,
+        workerQueueDepth: 0,
+      },
+    });
+
+    coordinator.destroy();
+  });
+
   it('更新样式时不应该重复驱逐同一批渲染句柄', async () => {
     const coordinator = await createCoordinator();
     coordinator.updateStyle(createStyle());
@@ -347,6 +375,74 @@ describe('cesiumVectorTileCoordinator', () => {
       1,
       1,
     ]);
+  });
+
+  it('会把处于重试冷却的 source 排到后面', async () => {
+    const coordinator = await createCoordinator();
+    const retryAt = Date.now() + 5000;
+    coordinator.updateStyle({
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+        labels: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'land',
+          'source': 'base',
+          'source-layer': 'land',
+          'type': 'fill',
+        },
+      ],
+    });
+
+    const sourceManager = {
+      abort: vi.fn(),
+      abortAll: vi.fn(),
+      destroy: vi.fn(),
+      getNextRetryAt: vi.fn((sourceId?: string) => {
+        if (sourceId === 'base') {
+          return retryAt;
+        }
+
+        return undefined;
+      }),
+      getSourceConstraints: vi.fn(() => ({})),
+      getSourceIds: vi.fn(() => ['base', 'labels']),
+      isDestroyed: vi.fn(() => false),
+      reconcileSources: vi.fn(),
+      requestTile: vi.fn(() => new Promise<void>(() => {})),
+    };
+    (coordinator as any).sourceManager = sourceManager;
+    sourceManager.reconcileSources({
+      base: {
+        type: 'vector',
+        tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+      },
+      labels: {
+        type: 'vector',
+        tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+      },
+    });
+
+    const processTileSelection = (coordinator as any).processTileSelection.bind(coordinator);
+    processTileSelection([
+      { level: 0, x: 0, y: 0 },
+    ]);
+
+    const requestTileMock = sourceManager.requestTile as unknown as {
+      mock: {
+        calls: unknown[][];
+      };
+    };
+    expect(requestTileMock.mock.calls[0]?.[0]).toBe('labels');
+    expect(requestTileMock.mock.calls[1]?.[0]).toBe('base');
   });
 
   it('待处理瓦片再次进入时会重新进入请求链路而不是被 pending 早退', async () => {

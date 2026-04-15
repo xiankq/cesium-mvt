@@ -247,7 +247,7 @@ describe('geojson-source-cache', () => {
     expect(loadData).toHaveBeenCalledTimes(2);
   });
 
-  it('会把在途 geojson 请求的 priority 作为静态值传给调度器', async () => {
+  it('会把在途 geojson 请求的 priority state 作为共享状态传给调度器', async () => {
     let resolveGeojson: (value: FeatureCollection) => void = () => {};
     const dataPromise = new Promise<FeatureCollection>((resolve) => {
       resolveGeojson = resolve;
@@ -257,6 +257,7 @@ describe('geojson-source-cache', () => {
       capturedArgs = args;
       return dataPromise;
     });
+    const priorityState = { value: 8 };
     const sourceCache = new GeojsonSourceCache({
       loadData,
       source: createGeojsonSource(),
@@ -267,23 +268,24 @@ describe('geojson-source-cache', () => {
       level: 2,
       x: 1,
       y: 3,
-    }, 8);
+    }, priorityState);
 
     await Promise.resolve();
 
     expect(loadData).toHaveBeenCalledTimes(1);
     expect(capturedArgs.length).toBe(3);
-    expect(capturedArgs[2]).toBe(8);
+    expect(capturedArgs[2]).toBe(priorityState);
 
     const secondPromise = sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    }, 2);
+    }, { value: 2 });
 
     expect(loadData).toHaveBeenCalledTimes(1);
     expect(capturedArgs.length).toBe(3);
-    expect(capturedArgs[2]).toBe(8);
+    expect(capturedArgs[2]).toBe(priorityState);
+    expect(priorityState.value).toBe(2);
 
     resolveGeojson({
       features: [],

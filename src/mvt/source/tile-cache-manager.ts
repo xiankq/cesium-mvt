@@ -9,10 +9,18 @@ export interface TileCacheEntry {
   byteLength: number;
 }
 
+export interface TileCacheManagerMetrics {
+  entryCount: number;
+  evictCount: number;
+  hitCount: number;
+  missCount: number;
+}
+
 export type OnEvictCallback = (key: string, tile: ParsedTileResult) => void;
 
 export interface TileCacheManagerOptions {
   maxBytes?: number;
+  maximumCacheOverflowBytes?: number;
   readyTileBudget?: TileBudget;
 }
 
@@ -21,10 +29,19 @@ export class TileCacheManager {
   private readonly bucketTiles = new Map<string, ParsedTileResult>();
   private readonly pendingRequests = new Map<string, Promise<ParsedTileResult | undefined>>();
   private onEvict?: OnEvictCallback;
+  private readonly metrics: TileCacheManagerMetrics = {
+    entryCount: 0,
+    evictCount: 0,
+    hitCount: 0,
+    missCount: 0,
+  };
 
   constructor(options: TileCacheManagerOptions = {}) {
     const maxBytes = options.maxBytes ?? DEFAULT_CACHE_SIZE;
-    this.bucketTileBudget = options.readyTileBudget ?? new TileBudget({ maxBytes });
+    this.bucketTileBudget = options.readyTileBudget ?? new TileBudget({
+      maxBytes,
+      maximumCacheOverflowBytes: options.maximumCacheOverflowBytes,
+    });
   }
 
   setOnEvict(callback: OnEvictCallback): void {
@@ -34,8 +51,13 @@ export class TileCacheManager {
   get(key: string): ParsedTileResult | undefined {
     const cached = this.bucketTiles.get(key);
     if (cached) {
+      this.metrics.hitCount += 1;
       this.bucketTileBudget.touch(key);
+      this.metrics.entryCount = this.bucketTiles.size;
+      return cached;
     }
+    this.metrics.missCount += 1;
+    this.metrics.entryCount = this.bucketTiles.size;
     return cached;
   }
 
@@ -43,6 +65,7 @@ export class TileCacheManager {
     this.bucketTiles.set(key, tile);
     this.bucketTileBudget.add(key, {
       key,
+      isVisible: true,
       byteLength: tile.byteLength,
     }, (evictedKey) => {
       const evictedTile = this.bucketTiles.get(evictedKey);
@@ -51,6 +74,8 @@ export class TileCacheManager {
       }
 
       this.bucketTiles.delete(evictedKey);
+      this.metrics.evictCount += 1;
+      this.metrics.entryCount = this.bucketTiles.size;
       try {
         this.onEvict?.(evictedKey, evictedTile);
       }
@@ -58,6 +83,10 @@ export class TileCacheManager {
         console.warn('[TileCacheManager] onEvict callback failed:', err);
       }
     });
+  }
+
+  setVisibility(key: string, isVisible: boolean): void {
+    this.bucketTileBudget.setVisibility(key, isVisible);
   }
 
   setPending(key: string, promise: Promise<ParsedTileResult | undefined>): void {
@@ -74,6 +103,13 @@ export class TileCacheManager {
 
   hasPending(key: string): boolean {
     return this.pendingRequests.has(key);
+  }
+
+  getMetrics(): TileCacheManagerMetrics {
+    this.metrics.entryCount = this.bucketTiles.size;
+    return {
+      ...this.metrics,
+    };
   }
 
   /**

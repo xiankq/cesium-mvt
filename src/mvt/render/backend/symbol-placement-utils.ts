@@ -277,7 +277,7 @@ export function getSymbolMatchAnchor(position: Cartesian3): {
   };
 }
 
-function hasCollisionOverlap(
+export function hasCollisionOverlap(
   left: SymbolPlacementGridPlacement,
   right: SymbolPlacementGridPlacement,
 ): boolean {

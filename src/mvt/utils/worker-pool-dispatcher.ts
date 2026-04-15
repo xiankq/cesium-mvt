@@ -51,6 +51,10 @@ export class WorkerPoolDispatcher<TJob, TResult, TMessage, TTransferable = never
     return this.slots.some(slot => slot.worker !== undefined);
   }
 
+  getQueueDepth(): number {
+    return this.queuedRequests.length;
+  }
+
   dispatch(job: TJob, signal?: AbortSignal): Promise<TResult> {
     if (this.destroyed) {
       return Promise.reject(new Error(`${this.options.dispatcherName} has been destroyed.`));

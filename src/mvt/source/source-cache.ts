@@ -2,6 +2,7 @@ import type {
   SourceSpecification,
   VectorSourceSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
+import type { RequestPriority, RequestPriorityState } from './request-scheduler';
 import type { TileCoordinate, TileRequest } from './tile-request';
 import { createAbortError, isAbortError, resolveUrl } from '../utils/common';
 import { TileBudget } from '../utils/tile-budget';
@@ -39,6 +40,7 @@ export type SourceEntryState = 'failed' | 'idle' | 'ready' | 'requesting';
 interface SourceEntryRecord<TValue> extends SourceEntry<TValue> {
   abortController?: AbortController;
   failureCount: number;
+  priorityState?: RequestPriorityState;
   promise?: Promise<TValue | undefined>;
   nextRetryAt?: number;
 }
@@ -47,14 +49,15 @@ interface SourceCacheOptions<TValue> {
   loadTile?: (
     request: TileRequest,
     signal: AbortSignal,
-    priority?: number,
+    priority?: RequestPriority,
   ) => Promise<TValue>;
   loadTileJson?: (
     url: string,
     signal: AbortSignal,
-    priority?: number,
+    priority?: RequestPriority,
   ) => Promise<TileJson>;
   maxBytes?: number;
+  maximumCacheOverflowBytes?: number;
   readyTileBudget?: TileBudget;
   source: SourceSpecification;
   sourceId: string;
@@ -74,13 +77,13 @@ export class SourceCache<TValue = ArrayBuffer> {
   private readonly loadTile: (
     request: TileRequest,
     signal: AbortSignal,
-    priority?: number,
+    priority?: RequestPriority,
   ) => Promise<TValue>;
 
   private readonly loadTileJson: (
     url: string,
     signal: AbortSignal,
-    priority?: number,
+    priority?: RequestPriority,
   ) => Promise<TileJson>;
 
   private source: SourceSpecification;
@@ -96,12 +99,13 @@ export class SourceCache<TValue = ArrayBuffer> {
         ?? (loadTileBuffer as (
           request: TileRequest,
           signal: AbortSignal,
-          priority?: number,
+          priority?: RequestPriority,
         ) => Promise<TValue>);
     this.loadTileJson = options.loadTileJson ?? loadTileJson;
     this.readyTileBudget = options.readyTileBudget
       ?? new TileBudget({
         maxBytes: options.maxBytes ?? DEFAULT_SOURCE_CACHE_SIZE,
+        maximumCacheOverflowBytes: options.maximumCacheOverflowBytes,
       });
     this.source = options.source;
     this.sourceType = options.source.type;
@@ -111,7 +115,7 @@ export class SourceCache<TValue = ArrayBuffer> {
 
   async requestTile(
     coordinate: TileCoordinate,
-    priority = 0,
+    priority: RequestPriority = 0,
   ): Promise<TValue | undefined> {
     if (this.destroyed) {
       return undefined;
@@ -129,6 +133,13 @@ export class SourceCache<TValue = ArrayBuffer> {
       return cloneValue(existingEntry.value);
     }
     if (existingEntry?.promise) {
+      if (existingEntry.priorityState) {
+        const requestedPriority = resolvePriorityValue(priority);
+        if (requestedPriority < existingEntry.priorityState.value) {
+          existingEntry.priorityState.value = requestedPriority;
+        }
+      }
+
       return existingEntry.promise.then(v => v === undefined ? undefined : cloneValue(v)) as Promise<TValue | undefined>;
     }
 
@@ -137,11 +148,14 @@ export class SourceCache<TValue = ArrayBuffer> {
       return Promise.reject(createThrottleError());
     }
 
+    const priorityState = entry.priorityState ?? resolvePriorityState(priority);
+    entry.priorityState = priorityState;
+
     const abortController = new AbortController();
     entry.abortController = abortController;
     entry.error = undefined;
     entry.state = 'requesting';
-    entry.promise = this.resolveTileRequest(coordinate, priority)
+    entry.promise = this.resolveTileRequest(coordinate, priorityState)
       .then((request) => {
         if (this.destroyed) {
           throw createAbortError();
@@ -150,7 +164,7 @@ export class SourceCache<TValue = ArrayBuffer> {
         return this.loadTile(
           request,
           abortController.signal,
-          priority,
+          priorityState,
         );
       })
       .then((value) => {
@@ -320,7 +334,7 @@ export class SourceCache<TValue = ArrayBuffer> {
 
   private async resolveTileRequest(
     coordinate: TileCoordinate,
-    priority: number,
+    priority: RequestPriority,
   ) {
     const tileJson = await this.getTileJson(priority);
     return createTileRequest({
@@ -332,7 +346,7 @@ export class SourceCache<TValue = ArrayBuffer> {
   }
 
   private async getTileJson(
-    priority: number,
+    priority: RequestPriority,
   ): Promise<TileJson> {
     if (hasInlineTiles(this.source)) {
       const inlineTileJson: TileJson = {
@@ -429,7 +443,7 @@ function getDefaultSourceScheme(source: SourceSpecification) {
 function loadTileJson(
   url: string,
   signal: AbortSignal,
-  priority?: number,
+  priority?: RequestPriority,
 ) {
   return scheduleJsonRequest({
     priority,
@@ -441,7 +455,7 @@ function loadTileJson(
 function loadTileBuffer(
   request: TileRequest,
   signal: AbortSignal,
-  priority?: number,
+  priority?: RequestPriority,
 ): Promise<ArrayBuffer> {
   return scheduleTileRequest({
     priority,
@@ -475,4 +489,20 @@ function getSourceMinZoom(source: SourceSpecification): number | undefined {
 function getSourceMaxZoom(source: SourceSpecification): number | undefined {
   const maxzoom = (source as { maxzoom?: unknown }).maxzoom;
   return typeof maxzoom === 'number' ? maxzoom : undefined;
+}
+
+function resolvePriorityState(priority: RequestPriority): RequestPriorityState {
+  if (typeof priority === 'object' && priority !== null) {
+    return priority;
+  }
+
+  return {
+    value: priority,
+  };
+}
+
+function resolvePriorityValue(priority: RequestPriority): number {
+  return typeof priority === 'object' && priority !== null
+    ? priority.value
+    : priority;
 }

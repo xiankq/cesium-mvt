@@ -1,8 +1,10 @@
 import type { SourceSpecification, StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { WebMercatorTilingScheme } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
+import type { BucketTileDispatcher } from '../bucket/bucket-tile-dispatcher';
 import type { RenderTile } from '../render/render-tile';
 import type { TileBudget } from '../utils/tile-budget';
+import type { RequestPriorityState } from './request-scheduler';
 import type { QueryableSourceCache, QuerySourceFeaturesOptions } from './source-query';
 import type { TileCoordinate } from './tile-request';
 import { createBucketTileDispatcher } from '../bucket';
@@ -32,7 +34,7 @@ interface TileSourceCache extends QueryableSourceCache {
   isDestroyed: () => boolean;
   requestTile: (
     coordinate: TileCoordinate,
-    priority?: number,
+    priority?: RequestPriorityState,
   ) => Promise<ArrayBuffer | undefined>;
   updateSource: (source: SourceSpecification) => void;
 }
@@ -43,7 +45,15 @@ interface TileSourceCache extends QueryableSourceCache {
 interface PendingRequest {
   abortController: AbortController;
   cleanup: () => void;
+  priorityState: RequestPriorityState;
   promise: Promise<ParsedTileResult | undefined>;
+}
+
+export interface SourceManagerMetrics {
+  compileCount: number;
+  pendingRequestCount: number;
+  requestCount: number;
+  workerQueueDepth: number;
 }
 
 /**
@@ -54,9 +64,13 @@ interface PendingRequest {
 export class SourceManager {
   private destroyed = false;
   private readonly sourceCaches = new Map<string, TileSourceCache>();
-  private readonly bucketTileDispatcher = createBucketTileDispatcher();
+  private readonly bucketTileDispatcher: BucketTileDispatcher = createBucketTileDispatcher();
   private readonly readyTileBudget?: TileBudget;
   private readonly pendingRequests = new Map<string, PendingRequest>();
+  private readonly metrics = {
+    compileCount: 0,
+    requestCount: 0,
+  };
 
   constructor(options: { readyTileBudget?: TileBudget } = {}) {
     this.readyTileBudget = options.readyTileBudget;
@@ -79,6 +93,19 @@ export class SourceManager {
     options: QuerySourceFeaturesOptions = {},
   ) {
     return querySourceFeaturesFromCache(this.sourceCaches.get(sourceId), options);
+  }
+
+  getMetrics(): SourceManagerMetrics {
+    return {
+      compileCount: this.metrics.compileCount,
+      pendingRequestCount: this.pendingRequests.size,
+      requestCount: this.metrics.requestCount,
+      workerQueueDepth: this.bucketTileDispatcher.getQueueDepth?.() ?? 0,
+    };
+  }
+
+  getWorkerQueueDepth(): number {
+    return this.bucketTileDispatcher.getQueueDepth?.() ?? 0;
   }
 
   getSourceConstraints(sourceId: string): {
@@ -164,11 +191,18 @@ export class SourceManager {
 
     const existingRequest = this.pendingRequests.get(renderTileKey);
     if (existingRequest) {
+      if (priority < existingRequest.priorityState.value) {
+        existingRequest.priorityState.value = priority;
+      }
+
       return existingRequest.promise;
     }
 
     const sourceTileKey = `${sourceId}/${level}/${x}/${y}`;
     const abortController = new AbortController();
+    const priorityState: RequestPriorityState = {
+      value: priority,
+    };
     const abortSourceRequest = () => {
       sourceCache.abortTile?.(sourceTileKey);
     };
@@ -181,13 +215,15 @@ export class SourceManager {
 
     const requestPromise = (async () => {
       try {
+        this.metrics.requestCount += 1;
         const tileData = await sourceCache.requestTile(
           { level, x, y },
-          priority,
+          priorityState,
         );
         if (abortController.signal.aborted || tileData === undefined) {
           return undefined;
         }
+        this.metrics.compileCount += 1;
         const bucketTile = await this.bucketTileDispatcher.compile({
           renderTile,
           style,
@@ -215,6 +251,7 @@ export class SourceManager {
     this.pendingRequests.set(renderTileKey, {
       abortController,
       cleanup,
+      priorityState,
       promise: requestPromise,
     });
 

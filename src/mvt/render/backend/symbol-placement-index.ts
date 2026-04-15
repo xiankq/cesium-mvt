@@ -1,4 +1,4 @@
-import { isSymbolOverlapAllowed } from './symbol-placement-utils';
+import { hasCollisionOverlap, isSymbolOverlapAllowed } from './symbol-placement-utils';
 
 export interface SymbolPlacementIndexCollision {
   blocksOtherSymbols: boolean;
@@ -307,7 +307,7 @@ function isMatchingSymbolPlacement(
     return false;
   }
 
-  if (hasMatchingCollision(candidate, placement)) {
+  if (hasCollisionOverlap(candidate, placement)) {
     return true;
   }
 
@@ -375,27 +375,6 @@ function getOrCreateKeyIndex(
   const nextKeyIndex = new Map<number, PlacementIndexLevel>();
   placementsByKey.set(key, nextKeyIndex);
   return nextKeyIndex;
-}
-
-function hasMatchingCollision(
-  candidate: SymbolPlacementIndexPlacement,
-  placement: SymbolPlacementIndexPlacement,
-): boolean {
-  const candidateCollision = candidate.collision;
-  const placementCollision = placement.collision;
-  if (!candidateCollision || !placementCollision) {
-    return false;
-  }
-
-  const candidateCenterX = candidate.anchorX + candidateCollision.centerOffsetX;
-  const candidateCenterY = candidate.anchorY + candidateCollision.centerOffsetY;
-  const placementCenterX = placement.anchorX + placementCollision.centerOffsetX;
-  const placementCenterY = placement.anchorY + placementCollision.centerOffsetY;
-
-  const deltaX = Math.abs(candidateCenterX - placementCenterX);
-  const deltaY = Math.abs(candidateCenterY - placementCenterY);
-  return deltaX <= candidateCollision.halfWidth + placementCollision.halfWidth
-    && deltaY <= candidateCollision.halfHeight + placementCollision.halfHeight;
 }
 
 function getOrCreateLevelIndex(

@@ -26,6 +26,12 @@ export interface RenderManagerOptions {
   tileWidth?: number;
 }
 
+export interface RenderManagerMetrics {
+  hideCount: number;
+  mountCount: number;
+  removeCount: number;
+}
+
 interface SymbolPlacementTarget {
   coordinate: ReturnType<typeof parseRenderTileCoordinateFromKey>;
   handle: BucketRenderedTileHandle;
@@ -43,6 +49,11 @@ export class RenderManager {
   private layerFamilies: LayerFamily[] = [];
   private featureStateResolver?: FeatureStateResolver;
   private style?: StyleSpecification;
+  private readonly metrics: RenderManagerMetrics = {
+    hideCount: 0,
+    mountCount: 0,
+    removeCount: 0,
+  };
 
   constructor(options: RenderManagerOptions) {
     this.root = options.root;
@@ -86,6 +97,7 @@ export class RenderManager {
     });
 
     mountBucketRenderedTileHandle(this.root, handle);
+    this.metrics.mountCount += 1;
     this.renderedTileHandles.set(key, handle);
     this.reconcileSymbolPlacements();
     return handle;
@@ -109,8 +121,10 @@ export class RenderManager {
       style,
     });
 
+    this.metrics.removeCount += 1;
     destroyBucketRenderedTileHandle(this.root, existingHandle);
     mountBucketRenderedTileHandle(this.root, nextHandle);
+    this.metrics.mountCount += 1;
     if (!wasVisible) {
       setBucketRenderedTileVisibility(nextHandle, false);
     }
@@ -159,6 +173,7 @@ export class RenderManager {
     }
     const changed = setBucketRenderedTileVisibility(handle, false);
     if (changed) {
+      this.metrics.hideCount += 1;
       this.reconcileSymbolPlacements();
     }
     return changed;
@@ -176,6 +191,12 @@ export class RenderManager {
     return Array.from(this.renderedTileHandles.keys());
   }
 
+  getMetrics(): RenderManagerMetrics {
+    return {
+      ...this.metrics,
+    };
+  }
+
   remove(key: string): boolean {
     const handle = this.renderedTileHandles.get(key);
     if (!handle) {
@@ -184,11 +205,13 @@ export class RenderManager {
 
     destroyBucketRenderedTileHandle(this.root, handle);
     this.renderedTileHandles.delete(key);
+    this.metrics.removeCount += 1;
     this.reconcileSymbolPlacements();
     return true;
   }
 
   clear(): void {
+    this.metrics.removeCount += this.renderedTileHandles.size;
     for (const handle of this.renderedTileHandles.values()) {
       destroyBucketRenderedTileHandle(this.root, handle);
     }

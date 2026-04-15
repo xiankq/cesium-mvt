@@ -368,7 +368,7 @@ describe('source-cache', () => {
     );
   });
 
-  it('会把在途 tile 请求的 priority 作为静态值传给调度器', async () => {
+  it('会把在途 tile 请求的 priority state 作为共享状态传给调度器', async () => {
     let resolveTileRequest: (value: ArrayBuffer) => void = () => {};
     const tilePromise = new Promise<ArrayBuffer>((resolve) => {
       resolveTileRequest = resolve;
@@ -378,6 +378,7 @@ describe('source-cache', () => {
       capturedArgs = args;
       return tilePromise;
     });
+    const priorityState = { value: 8 };
     const sourceCache = new SourceCache({
       loadTile,
       source: createVectorSource(),
@@ -388,24 +389,25 @@ describe('source-cache', () => {
       level: 2,
       x: 1,
       y: 3,
-    }, 8);
+    }, priorityState);
 
     await Promise.resolve();
     await Promise.resolve();
 
     expect(loadTile).toHaveBeenCalledTimes(1);
     expect(capturedArgs.length).toBe(3);
-    expect(capturedArgs[2]).toBe(8);
+    expect(capturedArgs[2]).toBe(priorityState);
 
     const secondPromise = sourceCache.requestTile({
       level: 2,
       x: 1,
       y: 3,
-    }, 2);
+    }, { value: 2 });
 
     expect(loadTile).toHaveBeenCalledTimes(1);
     expect(capturedArgs.length).toBe(3);
-    expect(capturedArgs[2]).toBe(8);
+    expect(capturedArgs[2]).toBe(priorityState);
+    expect(priorityState.value).toBe(2);
 
     resolveTileRequest(new Uint8Array([1, 2, 3]).buffer);
 
@@ -540,7 +542,7 @@ describe('source-cache', () => {
     expect(loadTile).toHaveBeenCalledTimes(4);
   });
 
-  it('shares the ready budget with compiled tiles when a shared budget is provided', async () => {
+  it('shares the ready budget with compiled tiles and keeps visible renders ahead of source entries', async () => {
     const sharedBudget = new TileBudget({
       maxBytes: 6,
     });
@@ -573,10 +575,8 @@ describe('source-cache', () => {
       byteLength: 3,
     } as any);
 
-    expect(sourceCache.getEntry('base/1/0/0')).toMatchObject({
-      state: 'ready',
-    });
-    expect(cacheManager.has('render/1')).toBe(false);
+    expect(sourceCache.getEntry('base/1/0/0')).toBeUndefined();
+    expect(cacheManager.has('render/1')).toBe(true);
     expect(cacheManager.has('render/2')).toBe(true);
     expect(loadTile).toHaveBeenCalledTimes(1);
   });

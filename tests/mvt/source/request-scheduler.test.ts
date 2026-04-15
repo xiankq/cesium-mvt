@@ -6,6 +6,17 @@ import {
   scheduleTileRequest,
 } from '@/mvt/source/request-scheduler';
 
+const createdRequests: Array<{
+  cancelFunction?: () => void;
+  priority: number;
+  priorityFunction?: () => number;
+  serverKey?: string;
+  throttle: boolean;
+  throttleByServer: boolean;
+  type: number;
+  url: string;
+}> = [];
+
 vi.mock('cesium', () => {
   const mockFetchArrayBuffer = vi.fn().mockResolvedValue(new ArrayBuffer(10));
 
@@ -38,6 +49,7 @@ vi.mock('cesium', () => {
         this.throttle = options.throttle ?? false;
         this.throttleByServer = options.throttleByServer ?? false;
         this.type = options.type ?? 0;
+        createdRequests.push(this);
       }
     },
     Resource: class Resource {
@@ -73,6 +85,7 @@ vi.mock('cesium', () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  createdRequests.length = 0;
 });
 
 describe('request-scheduler', () => {
@@ -111,6 +124,24 @@ describe('request-scheduler', () => {
         { once: true },
       );
       expect(removeEventListener).toHaveBeenCalledTimes(1);
+    });
+
+    it('会把可变 priority state 绑定到 Request.priorityFunction', async () => {
+      const priorityState = { value: 7 };
+
+      const resultPromise = scheduleTileRequest({
+        priority: priorityState,
+        url: 'https://example.com/tile.pbf',
+      });
+
+      expect(createdRequests).toHaveLength(1);
+      expect(createdRequests[0]?.priority).toBe(7);
+      expect(createdRequests[0]?.priorityFunction?.()).toBe(7);
+
+      priorityState.value = 2;
+      expect(createdRequests[0]?.priorityFunction?.()).toBe(2);
+
+      await expect(resultPromise).resolves.toBeInstanceOf(ArrayBuffer);
     });
   });
 

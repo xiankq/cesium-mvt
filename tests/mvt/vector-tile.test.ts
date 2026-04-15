@@ -54,6 +54,15 @@ describe('vector-tile', () => {
     });
   });
 
+  it('caches parsed vector tiles for the same buffer', () => {
+    const tileBuffer = createTileBuffer();
+
+    const firstTile = parseVectorTile(tileBuffer);
+    const secondTile = parseVectorTile(tileBuffer);
+
+    expect(firstTile).toBe(secondTile);
+  });
+
   it('loads and decodes a vector tile from fetch', async () => {
     const tileBuffer = createTileBuffer();
     vi.stubGlobal('fetch', vi.fn(async () => ({

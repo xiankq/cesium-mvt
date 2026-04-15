@@ -43,8 +43,10 @@ describe('render-object-pool', () => {
         maxSize: 2,
       });
 
-      pool.release(pool.acquire());
-      pool.release(pool.acquire());
+      const first = pool.acquire();
+      const second = pool.acquire();
+      pool.release(first);
+      pool.release(second);
       pool.release(pool.acquire());
 
       expect(pool.size()).toBe(2);

@@ -3,6 +3,7 @@ import { TileCache } from './tile-cache';
 
 export interface TileBudgetOptions {
   maxBytes: number;
+  maximumCacheOverflowBytes?: number;
 }
 
 type OnTileBudgetEvict = (key: string) => void;
@@ -22,16 +23,21 @@ export class TileBudget {
   private readonly cache: TileCache;
 
   constructor(options: TileBudgetOptions) {
-    this.cache = new TileCache({ maxBytes: options.maxBytes });
+    this.cache = new TileCache({
+      maxBytes: options.maxBytes,
+      maximumCacheOverflowBytes: options.maximumCacheOverflowBytes,
+    });
   }
 
   add(
     key: string,
     entry: CacheEntry,
     onEvict?: OnTileBudgetEvict,
+    isVisible?: boolean,
   ): void {
     const normalizedEntry = {
       ...entry,
+      isVisible: isVisible ?? entry.isVisible ?? false,
       // 0 字节条目也要占用最小预算单位，否则空瓦片不会进入淘汰链路。
       byteLength: Math.max(entry.byteLength, 1),
     };
@@ -57,6 +63,15 @@ export class TileBudget {
 
   touch(key: string): void {
     this.cache.touch(key);
+  }
+
+  setVisibility(key: string, isVisible: boolean): void {
+    const entry = this.entries.get(key);
+    if (entry) {
+      entry.isVisible = isVisible;
+    }
+
+    this.cache.setVisibility(key, isVisible);
   }
 
   delete(key: string): void {
