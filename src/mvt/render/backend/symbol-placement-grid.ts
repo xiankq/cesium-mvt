@@ -62,7 +62,12 @@ export function createSymbolPlacementGrid(): SymbolPlacementGrid {
         }
       }
 
-      return Array.from(candidates);
+      const result: SymbolPlacementGridPlacement[] = [];
+      for (const candidate of candidates) {
+        result.push(candidate);
+      }
+
+      return result;
     },
   };
 }

@@ -1,4 +1,4 @@
-import type { StyleSpecification, SymbolLayerSpecification } from '@maplibre/maplibre-gl-style-spec';
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type {
   Bucket,
   SymbolBucketData,
@@ -67,7 +67,7 @@ export interface SymbolPlacement {
 export function createSymbolCollections(
   bucket: Bucket,
   layerId: string,
-  layersById: Map<string, SymbolLayerSpecification>,
+  layersById: ReadonlyMap<string, StyleSpecification['layers'][number]>,
   featureStateResolver: FeatureStateResolver | undefined,
   style: StyleSpecification,
   sourceId: string,
@@ -92,7 +92,7 @@ export function createSymbolCollections(
   }
 
   const layer = layersById.get(layerId);
-  if (!layer) {
+  if (!layer || layer.type !== 'symbol') {
     return {
       collections: [],
       placements: [],

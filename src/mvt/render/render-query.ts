@@ -31,6 +31,14 @@ export interface QueryRenderedFeaturesState {
   getSourceCache: (sourceId: string) => RenderedSourceCache | undefined;
   renderManager: {
     getAllKeys: () => string[];
+    getCoordinate?: (key: string) => {
+      level: number;
+      rawKey: string;
+      sourceId: string;
+      x: number;
+      y: number;
+    } | undefined;
+    getVisibleKeys?: () => string[];
     getHandle: (key: string) => {
       visible: boolean;
       symbols?: {
@@ -46,6 +54,8 @@ interface RenderableLayerEntry {
   layer: SupportedGeometryLayer;
   source?: SourceSpecification;
 }
+
+const RENDERABLE_LAYER_ENTRY_CACHE = new WeakMap<StyleSpecification, Map<string, RenderableLayerEntry[]>>();
 
 interface RenderedSourceCache {
   getEntry?: (key: string) => {
@@ -69,25 +79,34 @@ export function queryRenderedFeaturesFromState(
   const queryFilter = createFeatureFilter(options.filter);
   const renderableLayers = createRenderableLayerEntries(state.style, layerIds);
   const features: RenderedFeature[] = [];
+  const visibleKeys = state.renderManager.getVisibleKeys?.();
+  const renderKeys = visibleKeys && visibleKeys.length > 0
+    ? visibleKeys
+    : state.renderManager.getAllKeys();
 
-  for (const renderTileKey of state.renderManager.getAllKeys()) {
+  for (const renderTileKey of renderKeys) {
     const handle = state.renderManager.getHandle(renderTileKey);
     if (!handle?.visible) {
       continue;
     }
 
-    const coordinate = parseRenderedTileCoordinate(renderTileKey);
+    const coordinate = state.renderManager.getCoordinate?.(renderTileKey)
+      ?? parseRenderedTileCoordinate(renderTileKey);
     if (!coordinate) {
       continue;
     }
 
     const sourceCache = state.getSourceCache(coordinate.sourceId);
-    const entry = sourceCache?.getEntry?.(coordinate.rawKey);
-    if (!entry || !(entry.value instanceof ArrayBuffer)) {
-      continue;
+    let tileData = sourceCache?.peekEntryValue?.(coordinate.rawKey);
+    if (!(tileData instanceof ArrayBuffer)) {
+      const entry = sourceCache?.getEntry?.(coordinate.rawKey);
+      if (!entry || !(entry.value instanceof ArrayBuffer)) {
+        continue;
+      }
+
+      tileData = entry.value;
     }
 
-    const tileData = sourceCache?.peekEntryValue?.(coordinate.rawKey) ?? entry.value;
     const tileIndex = getTileSpatialIndex(tileData);
 
     for (const layerEntry of renderableLayers) {
@@ -169,24 +188,59 @@ function createRenderableLayerEntries(
   style: StyleSpecification,
   layerIds?: Set<string>,
 ): RenderableLayerEntry[] {
-  return style.layers.flatMap((layer) => {
+  const cache = getRenderableLayerEntryCache(style);
+  const cacheKey = createLayerIdsCacheKey(layerIds);
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const renderableLayers: RenderableLayerEntry[] = [];
+  for (const layer of style.layers) {
     if (layerIds && !layerIds.has(layer.id)) {
-      return [];
+      continue;
     }
 
     if (!isSupportedGeometryLayer(layer)) {
-      return [];
+      continue;
     }
 
     const source = style.sources[layer.source];
     if (!source) {
-      return [];
+      continue;
     }
 
-    return [{
+    renderableLayers.push({
       filter: createFeatureFilter(layer.filter),
       layer,
       source,
-    }];
-  });
+    });
+  }
+
+  cache.set(cacheKey, renderableLayers);
+  return renderableLayers;
+}
+
+function getRenderableLayerEntryCache(style: StyleSpecification): Map<string, RenderableLayerEntry[]> {
+  let cache = RENDERABLE_LAYER_ENTRY_CACHE.get(style);
+  if (!cache) {
+    cache = new Map<string, RenderableLayerEntry[]>();
+    RENDERABLE_LAYER_ENTRY_CACHE.set(style, cache);
+  }
+
+  return cache;
+}
+
+function createLayerIdsCacheKey(layerIds?: Set<string>): string {
+  if (!layerIds || layerIds.size === 0) {
+    return 'all';
+  }
+
+  const keys: string[] = [];
+  for (const layerId of layerIds) {
+    keys.push(layerId);
+  }
+
+  keys.sort();
+  return `layers:${JSON.stringify(keys)}`;
 }

@@ -2,6 +2,7 @@ import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { WebMercatorTilingScheme } from 'cesium';
 import type { TileProjectionData } from '../geometry/tile-projection';
 import type { RenderTile } from '../render/render-tile';
+import type { StyleIndex } from '../style/style-manager';
 import type { WorkerLike } from '../utils/worker-dispatcher';
 import type { ParsedTileResult } from './bucket-types';
 import { parseRenderTileCoordinateFromKey } from '../render/render-tile';
@@ -26,6 +27,7 @@ import { compileBucketTileFromData } from './bucket-tile-compiler';
 export interface CompileBucketTileJob {
   renderTile: RenderTile;
   style: StyleSpecification;
+  styleIndex?: StyleIndex;
   signal?: AbortSignal;
   tileData: ArrayBuffer;
   tilingScheme: WebMercatorTilingScheme;
@@ -47,6 +49,7 @@ export interface BucketTileCompileMessage {
   id: number;
   renderTile: RenderTile;
   style: StyleSpecification;
+  styleIndex?: StyleIndex;
   tileData: ArrayBuffer;
   tileProjection: TileProjectionData;
   type: 'compile-bucket-tile';
@@ -90,6 +93,7 @@ export function createBucketTileDispatcher(
           id,
           renderTile: job.renderTile,
           style: job.style,
+          styleIndex: job.styleIndex,
           tileData: job.tileData,
           tileProjection,
           type: 'compile-bucket-tile',
@@ -118,6 +122,7 @@ export function createBucketTileDispatcher(
         return compileBucketTileFromData({
           renderTile: job.renderTile,
           style: job.style,
+          styleIndex: job.styleIndex,
           tileData: job.tileData,
           tileProjection,
         });

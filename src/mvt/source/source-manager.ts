@@ -3,6 +3,7 @@ import type { WebMercatorTilingScheme } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
 import type { BucketTileDispatcher } from '../bucket/bucket-tile-dispatcher';
 import type { RenderTile } from '../render/render-tile';
+import type { StyleIndex } from '../style/style-manager';
 import type { TileBudget } from '../utils/tile-budget';
 import type { RequestPriorityState } from './request-scheduler';
 import type { QueryableSourceCache, QuerySourceFeaturesOptions } from './source-query';
@@ -32,6 +33,7 @@ interface TileSourceCache extends QueryableSourceCache {
   getMinZoom?: () => number | undefined;
   getNextRetryAt?: () => number | undefined;
   isDestroyed: () => boolean;
+  forEachLoadedTileKey?: (visitor: (key: string) => void) => void;
   requestTile: (
     coordinate: TileCoordinate,
     priority?: RequestPriorityState,
@@ -67,6 +69,7 @@ export class SourceManager {
   private readonly bucketTileDispatcher: BucketTileDispatcher = createBucketTileDispatcher();
   private readonly readyTileBudget?: TileBudget;
   private readonly pendingRequests = new Map<string, PendingRequest>();
+  private sourceIdsSnapshot: string[] = [];
   private readonly metrics = {
     compileCount: 0,
     requestCount: 0,
@@ -85,7 +88,11 @@ export class SourceManager {
   }
 
   getSourceIds(): string[] {
-    return Array.from(this.sourceCaches.keys());
+    if (this.sourceIdsSnapshot.length !== this.sourceCaches.size) {
+      this.sourceIdsSnapshot = Array.from(this.sourceCaches.keys());
+    }
+
+    return this.sourceIdsSnapshot;
   }
 
   querySourceFeatures(
@@ -127,11 +134,20 @@ export class SourceManager {
     if (sourceIdOrKeys) {
       let nextRetryAt: number | undefined;
 
-      for (const renderTileKey of sourceIdOrKeys) {
+      for (const token of sourceIdOrKeys) {
+        const directCache = this.sourceCaches.get(token);
+        const directRetryAt = directCache?.getNextRetryAt?.();
+        if (directRetryAt !== undefined) {
+          if (nextRetryAt === undefined || directRetryAt < nextRetryAt) {
+            nextRetryAt = directRetryAt;
+          }
+          continue;
+        }
+
         let sourceKey: string;
         let sourceId: string;
         try {
-          const coordinate = parseRenderTileCoordinateFromKey(renderTileKey);
+          const coordinate = parseRenderTileCoordinateFromKey(token);
           sourceId = coordinate.sourceId;
           sourceKey = createTileKey(
             coordinate.sourceId,
@@ -158,9 +174,14 @@ export class SourceManager {
       return nextRetryAt;
     }
 
+    return this.getNextRetryAtForSourceIds(this.sourceCaches.keys());
+  }
+
+  getNextRetryAtForSourceIds(sourceIds: Iterable<string>): number | undefined {
     let nextRetryAt: number | undefined;
-    for (const cache of this.sourceCaches.values()) {
-      const cacheNextRetryAt = cache.getNextRetryAt?.();
+    for (const sourceId of sourceIds) {
+      const cache = this.sourceCaches.get(sourceId);
+      const cacheNextRetryAt = cache?.getNextRetryAt?.();
       if (cacheNextRetryAt === undefined) {
         continue;
       }
@@ -183,6 +204,7 @@ export class SourceManager {
     renderTile: RenderTile,
     style: StyleSpecification,
     priority = 0,
+    styleIndex?: StyleIndex,
   ): Promise<ParsedTileResult | undefined> {
     const sourceCache = this.sourceCaches.get(sourceId);
     if (!sourceCache) {
@@ -227,6 +249,7 @@ export class SourceManager {
         const bucketTile = await this.bucketTileDispatcher.compile({
           renderTile,
           style,
+          styleIndex,
           signal: abortController.signal,
           tileData,
           tilingScheme,
@@ -312,6 +335,8 @@ export class SourceManager {
       sourceCache.destroy();
       this.sourceCaches.delete(sourceId);
     }
+
+    this.sourceIdsSnapshot = Array.from(this.sourceCaches.keys());
   }
 
   destroy(): void {
@@ -325,6 +350,7 @@ export class SourceManager {
       cache.destroy();
     }
     this.sourceCaches.clear();
+    this.sourceIdsSnapshot = [];
     this.bucketTileDispatcher.destroy();
   }
 }

@@ -7,4 +7,5 @@ export { resolveStyleImage } from './sprite-atlas';
 export type { StyleSet } from './style-loader';
 export { loadStyleSet } from './style-loader';
 export { StyleManager } from './style-manager';
+export type { StyleIndex } from './style-manager';
 export { validateStyle } from './style-validation';

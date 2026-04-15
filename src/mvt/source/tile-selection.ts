@@ -68,7 +68,11 @@ export function resolveTileSelection({
   const readyCoordinates: TileCoordinate[] = [];
   const emptyCoordinates: TileCoordinate[] = [];
   const requestCoordinates: TileCoordinate[] = [];
-  const availabilityByKey = new Map<string, TileAvailability>();
+  const descendantCoverageByAncestorKey = new Map<string, {
+    resolved: number;
+    total: number;
+  }>();
+  const seenCoordinateKeys = new Set<string>();
 
   // 当请求的层级低于数据源最小层级时，需要生成所有对应的子瓦片
   // 例如：level=8 的一个瓦片对应 level=10 的 4 个子瓦片
@@ -97,7 +101,7 @@ export function resolveTileSelection({
 
       for (let dx = 0; dx < count; dx++) {
         for (let dy = 0; dy < count; dy++) {
-          expandedCoordinates.push({
+          appendUniqueCoordinate(expandedCoordinates, seenCoordinateKeys, {
             level: minimumLevel,
             x: baseX + dx,
             y: baseY + dy,
@@ -106,13 +110,32 @@ export function resolveTileSelection({
       }
     }
     else {
-      expandedCoordinates.push(adjustedCoordinate);
+      appendUniqueCoordinate(expandedCoordinates, seenCoordinateKeys, adjustedCoordinate);
     }
   }
 
   for (const adjustedCoordinate of expandedCoordinates) {
     const availability = getAvailability(adjustedCoordinate);
-    availabilityByKey.set(createCoordinateKey(adjustedCoordinate), availability);
+
+    let ancestor = getParentCoordinate(adjustedCoordinate);
+    while (ancestor && ancestor.level >= minimumLevel) {
+      const ancestorKey = createCoordinateKey(ancestor);
+      const coverage = descendantCoverageByAncestorKey.get(ancestorKey);
+      if (coverage) {
+        coverage.total += 1;
+        if (availability !== 'missing') {
+          coverage.resolved += 1;
+        }
+      }
+      else {
+        descendantCoverageByAncestorKey.set(ancestorKey, {
+          resolved: availability !== 'missing' ? 1 : 0,
+          total: 1,
+        });
+      }
+
+      ancestor = getParentCoordinate(ancestor);
+    }
 
     if (availability === 'ready') {
       readyCoordinates.push(adjustedCoordinate);
@@ -141,8 +164,7 @@ export function resolveTileSelection({
     // 只有当当前可见范围内、属于这个祖先的子瓦片都已经 resolved 时，
     // 才能安全移除祖先 fallback；否则会在未就绪的子区域留下白洞。
     if (isFullyCoveredByResolvedVisibleDescendants(
-      expandedCoordinates,
-      availabilityByKey,
+      descendantCoverageByAncestorKey,
       fallbackCoordinate,
     )) {
       continue;
@@ -160,6 +182,20 @@ export function resolveTileSelection({
     readyCoordinates,
     requestCoordinates,
   };
+}
+
+function appendUniqueCoordinate(
+  coordinates: TileCoordinate[],
+  seenCoordinateKeys: Set<string>,
+  coordinate: TileCoordinate,
+): void {
+  const key = createCoordinateKey(coordinate);
+  if (seenCoordinateKeys.has(key)) {
+    return;
+  }
+
+  seenCoordinateKeys.add(key);
+  coordinates.push(coordinate);
 }
 
 /**
@@ -203,49 +239,17 @@ function findFallbackCoordinate({
 
 /**
  * 检查祖先瓦片是否被已解析的后代瓦片完全覆盖
- *
- * @param coordinates - 所有坐标
- * @param availabilityByKey - 可用性映射
- * @param ancestor - 祖先瓦片
- * @returns 如果被完全覆盖则返回 true
+ * 这里直接读聚合后的计数，避免每个 fallback 候选都重新扫一遍 expandedCoordinates。
  */
 function isFullyCoveredByResolvedVisibleDescendants(
-  coordinates: readonly TileCoordinate[],
-  availabilityByKey: ReadonlyMap<string, TileAvailability>,
+  descendantCoverageByAncestorKey: ReadonlyMap<string, {
+    resolved: number;
+    total: number;
+  }>,
   ancestor: TileCoordinate,
 ): boolean {
-  const descendantCoordinates = coordinates.filter((coordinate) => {
-    return isDescendantCoordinate(coordinate, ancestor);
-  });
-
-  if (descendantCoordinates.length === 0) {
-    return false;
-  }
-
-  return descendantCoordinates.every((coordinate) => {
-    const availability = availabilityByKey.get(createCoordinateKey(coordinate));
-    return availability !== 'missing';
-  });
-}
-
-/**
- * 检查坐标是否为祖先坐标的后代
- *
- * @param coordinate - 待检查的坐标
- * @param ancestor - 祖先坐标
- * @returns 如果是后代则返回 true
- */
-function isDescendantCoordinate(
-  coordinate: TileCoordinate,
-  ancestor: TileCoordinate,
-): boolean {
-  if (coordinate.level <= ancestor.level) {
-    return false;
-  }
-
-  const levelDelta = coordinate.level - ancestor.level;
-  return Math.floor(coordinate.x / 2 ** levelDelta) === ancestor.x
-    && Math.floor(coordinate.y / 2 ** levelDelta) === ancestor.y;
+  const coverage = descendantCoverageByAncestorKey.get(createCoordinateKey(ancestor));
+  return Boolean(coverage && coverage.total > 0 && coverage.resolved === coverage.total);
 }
 
 /**

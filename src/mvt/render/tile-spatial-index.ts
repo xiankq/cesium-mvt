@@ -36,6 +36,7 @@ export interface SpatialLayerIndex {
 
 export interface TileSpatialIndex {
   layers: Map<string, SpatialLayerIndex>;
+  sourceLayerNames?: string[];
 }
 
 const SPATIAL_INDEX_CACHE = new WeakMap<ArrayBuffer, TileSpatialIndex>();
@@ -89,8 +90,9 @@ export function querySpatialLayer(
 
 function buildTileSpatialIndex(tile: ParsedTile): TileSpatialIndex {
   const layers = new Map<string, SpatialLayerIndex>();
+  const sourceLayerNames = listSourceLayers(tile);
 
-  for (const sourceLayerName of listSourceLayers(tile)) {
+  for (const sourceLayerName of sourceLayerNames) {
     const sourceLayer = tile.layers[sourceLayerName];
     if (!sourceLayer) {
       continue;
@@ -106,6 +108,7 @@ function buildTileSpatialIndex(tile: ParsedTile): TileSpatialIndex {
 
   return {
     layers,
+    sourceLayerNames,
   };
 }
 
@@ -181,7 +184,13 @@ function collectCandidateIndices(
     }
   }
 
-  return Array.from(candidateIndices).sort((left, right) => left - right);
+  const candidateList: number[] = [];
+  for (const featureIndex of candidateIndices) {
+    candidateList.push(featureIndex);
+  }
+
+  candidateList.sort((left, right) => left - right);
+  return candidateList;
 }
 
 function getCoveredCellKeys(

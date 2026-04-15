@@ -136,7 +136,7 @@ export class FillBucketBuilder {
 
     const { positions: subdividedPositions, triangles: subdividedTriangles } = subdivideTriangleEdges(
       tilePoints,
-      Array.from(indices),
+      indices,
       this.granularity,
       projectPoint,
     );
@@ -178,7 +178,12 @@ export class FillBucketBuilder {
       return ring;
     }
 
-    return ring.slice(0, -1);
+    const normalizedRing: Array<{ x: number; y: number }> = [];
+    for (let index = 0; index < ring.length - 1; index += 1) {
+      normalizedRing.push(ring[index]!);
+    }
+
+    return normalizedRing;
   }
 
   build(): Bucket {

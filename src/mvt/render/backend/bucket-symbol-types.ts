@@ -3,6 +3,7 @@ import type { BillboardCollection, LabelCollection } from 'cesium';
 import type { ParsedTileResult } from '../../bucket/bucket-types';
 import type { FeatureStateResolver } from '../../style/feature-state-store';
 import type { SymbolLayerStyle } from '../../style/layer-style-resolver';
+import type { StyleIndex } from '../../style/style-manager';
 import type { SymbolCollision } from './symbol-render-utils';
 
 export interface BucketSymbolCollectionHandle {
@@ -47,6 +48,7 @@ export interface BucketSymbolTileHandle {
   byteLength: number;
   collections: BucketSymbolCollectionHandle[];
   placements: BucketSymbolPlacementHandle[];
+  visibleSourceIndexesByLayerAndSourceLayer?: Map<string, Map<string, Set<number>>>;
   key: string;
 }
 
@@ -54,5 +56,6 @@ export interface CreateBucketSymbolTileHandleOptions {
   bucketTile: ParsedTileResult;
   featureStateResolver?: FeatureStateResolver;
   tileWidth?: number;
+  styleIndex?: StyleIndex;
   style: StyleSpecification;
 }

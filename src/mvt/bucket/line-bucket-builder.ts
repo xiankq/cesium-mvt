@@ -114,10 +114,15 @@ export class LineBucketBuilder {
       projectedPoints.push(projected);
     }
 
-    const hasValidSegment = projectedPoints.slice(0, -1).some((start, i) => {
-      const end = projectedPoints[i + 1];
-      return Cartesian3.distance(start, end) > MIN_SEGMENT_DISTANCE;
-    });
+    let hasValidSegment = false;
+    for (let index = 0; index < projectedPoints.length - 1; index += 1) {
+      const start = projectedPoints[index];
+      const end = projectedPoints[index + 1];
+      if (Cartesian3.distance(start, end) > MIN_SEGMENT_DISTANCE) {
+        hasValidSegment = true;
+        break;
+      }
+    }
 
     if (!hasValidSegment) {
       return [];
@@ -129,7 +134,8 @@ export class LineBucketBuilder {
 
       const subdivided = subdivideLine(start, end, DEFAULT_MAX_CHORD_ERROR);
 
-      for (const point of subdivided.slice(0, -1)) {
+      for (let index = 0; index < subdivided.length - 1; index += 1) {
+        const point = subdivided[index];
         result.push(point.x, point.y, point.z);
       }
     }

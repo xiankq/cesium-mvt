@@ -29,6 +29,10 @@ export class TileBudget {
     });
   }
 
+  beginFrame(): number {
+    return this.cache.beginFrame();
+  }
+
   add(
     key: string,
     entry: CacheEntry,
@@ -86,5 +90,13 @@ export class TileBudget {
 
   getCurrentBytes(): number {
     return this.cache.getCurrentBytes();
+  }
+
+  getMaxBytes(): number {
+    return this.cache.getMaxBytes();
+  }
+
+  getMaximumCacheOverflowBytes(): number {
+    return this.cache.getMaximumCacheOverflowBytes();
   }
 }

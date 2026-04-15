@@ -10,6 +10,7 @@ import type {
   ParsedTileResult,
 } from '../../bucket/bucket-types';
 import type { FeatureStateResolver } from '../../style/feature-state-store';
+import type { StyleIndex } from '../../style/style-manager';
 import { BufferPolygon, BufferPolygonCollection } from 'cesium';
 import { createFeatureFilter } from '../../style/filter-adapter';
 import { validatePositions } from '../../utils/validation';
@@ -39,6 +40,7 @@ export interface CreateBucketFillTileHandleOptions {
   bucketTile: ParsedTileResult;
   featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
+  styleIndex?: StyleIndex;
   tileWidth?: number;
 }
 
@@ -46,6 +48,7 @@ export function createBucketFillTileHandle({
   bucketTile,
   featureStateResolver,
   style,
+  styleIndex,
   tileWidth,
 }: CreateBucketFillTileHandleOptions): BucketFillTileHandle | undefined {
   const fillBuckets = bucketTile.buckets.filter(isFillBucket);
@@ -54,8 +57,8 @@ export function createBucketFillTileHandle({
   }
 
   const { level: zoom, sourceId } = parseRenderTileCoordinateFromKey(bucketTile.key);
-  const layersById = new Map(
-    style.layers.filter(isFillLayer).map(layer => [layer.id, layer]),
+  const layersById = styleIndex?.layersById ?? new Map(
+    style.layers.map(layer => [layer.id, layer]),
   );
   const collections: BucketFillCollectionHandle[] = [];
 
@@ -78,7 +81,7 @@ export function createBucketFillTileHandle({
     // 每个 layer 仍然保留自己的 filter 和 paint 语义，避免 family 只剩下几何分组。
     for (const layerId of bucket.layerIds) {
       const layer = layersById.get(layerId);
-      if (!layer) {
+      if (!layer || !isFillLayer(layer)) {
         continue;
       }
 

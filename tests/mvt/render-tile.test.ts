@@ -6,6 +6,7 @@ import {
   createRenderTileKey,
 } from '@/mvt/render/render-tile';
 import { createLayerFamilies } from '@/mvt/style/layer-family';
+import { StyleManager } from '@/mvt/style/style-manager';
 
 describe('render-tile', () => {
   it('compiles geometry batches from style order only', () => {
@@ -304,6 +305,76 @@ describe('render-tile', () => {
           order: 1,
         },
       ],
+    });
+  });
+
+  it('accepts a precomputed style index for compilation', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          id: 'background',
+          type: 'background',
+          paint: {
+            'background-color': '#102030',
+          },
+        },
+        {
+          'id': 'land',
+          'type': 'fill',
+          'source': 'base',
+          'source-layer': 'land',
+        },
+        {
+          'id': 'road',
+          'type': 'line',
+          'source': 'base',
+          'source-layer': 'road',
+        },
+      ],
+    };
+    const styleManager = new StyleManager();
+    styleManager.updateStyle({ style });
+    const styleIndex = styleManager.getStyleIndex();
+    const layerFamilies = createLayerFamilies(style);
+    const renderOrder = createRenderOrder(style, layerFamilies);
+
+    expect(compileRenderTile({
+      key: createRenderTileKey('base', 3, 4, 5),
+      layerFamilies,
+      renderOrder,
+      style,
+      styleEpoch: 2,
+      styleIndex: styleIndex!,
+    })).toEqual({
+      epoch: 2,
+      geometryBatches: [
+        {
+          backend: 'fill',
+          familyId: 'base/land/fill/0',
+          layerIds: ['land'],
+          order: 1,
+          sourceId: 'base',
+          sourceLayer: 'land',
+          type: 'fill',
+        },
+        {
+          backend: 'line',
+          familyId: 'base/road/line/1',
+          layerIds: ['road'],
+          order: 2,
+          sourceId: 'base',
+          sourceLayer: 'road',
+          type: 'line',
+        },
+      ],
+      key: 'base/3/4/5@2',
     });
   });
 });

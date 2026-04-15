@@ -1,5 +1,6 @@
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { LayerFamily, SupportedGeometryLayerType } from '../style/layer-family';
+import type { StyleIndex } from '../style/style-manager';
 import type { RenderEntry } from './render-order';
 import { createTileKey } from '../source/tile-request';
 import { isLayerVisibleAtZoom } from '../style/layer-family';
@@ -31,6 +32,7 @@ export interface CompileRenderTileOptions {
   renderOrder: RenderEntry[];
   style: StyleSpecification;
   styleEpoch: number;
+  styleIndex?: StyleIndex;
 }
 
 export { createTileKey as createRenderTileKey };
@@ -48,10 +50,11 @@ export function compileRenderTile({
   renderOrder,
   style,
   styleEpoch,
+  styleIndex,
 }: CompileRenderTileOptions): RenderTile {
   const coordinate = parseRenderTileCoordinateFromKey(key);
-  const familiesById = new Map(layerFamilies.map(family => [family.id, family]));
-  const layersById = new Map(style.layers.map(layer => [layer.id, layer]));
+  const familiesById = styleIndex?.familiesById ?? new Map(layerFamilies.map(family => [family.id, family]));
+  const layersById = styleIndex?.layersById ?? new Map(style.layers.map(layer => [layer.id, layer]));
   const geometryBatchesByFamilyId = new Map<string, GeometryBatch>();
 
   for (const entry of renderOrder) {
@@ -95,22 +98,24 @@ export function compileRenderTile({
 
 export function parseRenderTileCoordinateFromKey(key: string) {
   const scopedKey = stripRenderTileScope(key);
-  const parts = scopedKey.split('/');
-  if (parts.length < 4) {
+  const lastSlash = scopedKey.lastIndexOf('/');
+  const secondLastSlash = scopedKey.lastIndexOf('/', lastSlash - 1);
+  const thirdLastSlash = scopedKey.lastIndexOf('/', secondLastSlash - 1);
+  if (lastSlash === -1 || secondLastSlash === -1 || thirdLastSlash === -1) {
     throw new Error(`Invalid render tile key: ${key}`);
   }
 
-  const level = Number(parts[parts.length - 3]);
+  const level = Number(scopedKey.slice(thirdLastSlash + 1, secondLastSlash));
   if (!Number.isInteger(level)) {
     throw new TypeError(`Invalid render tile key level: ${key}`);
   }
 
-  const x = Number(parts[parts.length - 2]);
+  const x = Number(scopedKey.slice(secondLastSlash + 1, lastSlash));
   if (!Number.isInteger(x)) {
     throw new TypeError(`Invalid render tile key x: ${key}`);
   }
 
-  const y = Number(parts[parts.length - 1]);
+  const y = Number(scopedKey.slice(lastSlash + 1));
   if (!Number.isInteger(y)) {
     throw new TypeError(`Invalid render tile key y: ${key}`);
   }
@@ -119,7 +124,7 @@ export function parseRenderTileCoordinateFromKey(key: string) {
     level,
     x,
     y,
-    sourceId: parts.slice(0, -3).join('/'),
+    sourceId: scopedKey.slice(0, thirdLastSlash),
   };
 }
 

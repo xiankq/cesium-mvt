@@ -125,6 +125,62 @@ describe('source-manager querySourceFeatures', () => {
     });
   });
 
+  it('应该在 peekEntryValue 可用时跳过 getEntry 的克隆路径', () => {
+    const sourceManager = new SourceManager();
+    const peekBuffer = createTileBuffer();
+    const sourceCache = {
+      destroy: vi.fn(),
+      getEntry: vi.fn(() => {
+        throw new Error('should not be called');
+      }),
+      getLoadedTileKeys: vi.fn(() => ['base/0/0/0']),
+      isDestroyed: vi.fn(() => false),
+      peekEntryValue: vi.fn(() => peekBuffer),
+      sourceType: 'vector' as const,
+      updateSource: vi.fn(),
+    };
+
+    (sourceManager as any).sourceCaches.set('base', sourceCache);
+
+    const features = sourceManager.querySourceFeatures('base', {
+      sourceLayer: 'poi',
+    });
+
+    expect(features).toHaveLength(1);
+    expect(sourceCache.peekEntryValue).toHaveBeenCalledTimes(1);
+  });
+
+  it('应该优先使用 loaded-tile 快照迭代器，而不是重新扫描数组', () => {
+    const sourceManager = new SourceManager();
+    const tileBuffer = createTileBuffer();
+    const sourceCache = {
+      destroy: vi.fn(),
+      forEachLoadedTileKey: vi.fn((visitor: (key: string) => void) => {
+        visitor('base/0/0/0');
+      }),
+      getEntry: vi.fn(() => ({
+        state: 'ready',
+        value: tileBuffer,
+      })),
+      getLoadedTileKeys: vi.fn(() => {
+        throw new Error('should not be called');
+      }),
+      isDestroyed: vi.fn(() => false),
+      sourceType: 'vector' as const,
+      updateSource: vi.fn(),
+    };
+
+    (sourceManager as any).sourceCaches.set('base', sourceCache);
+
+    const features = sourceManager.querySourceFeatures('base', {
+      sourceLayer: 'poi',
+    });
+
+    expect(features).toHaveLength(1);
+    expect(sourceCache.forEachLoadedTileKey).toHaveBeenCalledTimes(1);
+    expect(sourceCache.getLoadedTileKeys).not.toHaveBeenCalled();
+  });
+
   it('应该跳过无法解析的 tile key', () => {
     const sourceManager = new SourceManager();
     const tileBuffer = createTileBuffer();

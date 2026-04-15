@@ -607,7 +607,9 @@ function wrapSymbolParagraph(
         textSize,
         textLetterSpacing,
       );
-      lines.push(...brokenTokens.slice(0, -1));
+      for (let index = 0; index < brokenTokens.length - 1; index += 1) {
+        lines.push(brokenTokens[index]!);
+      }
       currentLine = brokenTokens[brokenTokens.length - 1] ?? '';
       continue;
     }
@@ -631,7 +633,9 @@ function wrapSymbolParagraph(
       textSize,
       textLetterSpacing,
     );
-    lines.push(...brokenTokens.slice(0, -1));
+    for (let index = 0; index < brokenTokens.length - 1; index += 1) {
+      lines.push(brokenTokens[index]!);
+    }
     currentLine = brokenTokens[brokenTokens.length - 1] ?? '';
   }
 
@@ -650,15 +654,14 @@ function breakSymbolTextToken(
   textSize: number,
   textLetterSpacing: number,
 ): string[] {
-  const characters = Array.from(token);
-  if (characters.length === 0) {
+  if (token.length === 0) {
     return [''];
   }
 
   const lines: string[] = [];
   let currentLine = '';
 
-  for (const character of characters) {
+  for (const character of token) {
     const candidateLine = currentLine + character;
     if (currentLine.length === 0
       || estimateSymbolTextLineWidth(candidateLine, textSize, textLetterSpacing) <= maxLineWidth) {
@@ -686,7 +689,7 @@ function estimateSymbolTextLineWidth(
     return 0;
   }
 
-  const characterCount = Array.from(line).length;
+  const characterCount = countSymbolCharacters(line);
   if (characterCount === 0) {
     return 0;
   }
@@ -694,6 +697,15 @@ function estimateSymbolTextLineWidth(
   const estimatedWidth = (characterCount * textSize * 0.6)
     + Math.max(0, characterCount - 1) * textLetterSpacing * textSize;
   return Math.max(textSize, estimatedWidth);
+}
+
+function countSymbolCharacters(value: string): number {
+  let count = 0;
+  for (const _character of value) {
+    count += 1;
+  }
+
+  return count;
 }
 
 function clampOpacity(value: number): number {

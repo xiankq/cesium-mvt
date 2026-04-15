@@ -144,7 +144,12 @@ function collectCandidates(
     }
   }
 
-  return Array.from(candidates);
+  const result: SymbolPlacementIndexPlacement[] = [];
+  for (const candidate of candidates) {
+    result.push(candidate);
+  }
+
+  return result;
 }
 
 function getAnchorCellKeys(

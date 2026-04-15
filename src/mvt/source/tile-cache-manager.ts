@@ -10,10 +10,13 @@ export interface TileCacheEntry {
 }
 
 export interface TileCacheManagerMetrics {
+  currentBytes: number;
   entryCount: number;
   evictCount: number;
   hitCount: number;
   missCount: number;
+  maxBytes: number;
+  maximumCacheOverflowBytes: number;
 }
 
 export type OnEvictCallback = (key: string, tile: ParsedTileResult) => void;
@@ -29,7 +32,7 @@ export class TileCacheManager {
   private readonly bucketTiles = new Map<string, ParsedTileResult>();
   private readonly pendingRequests = new Map<string, Promise<ParsedTileResult | undefined>>();
   private onEvict?: OnEvictCallback;
-  private readonly metrics: TileCacheManagerMetrics = {
+  private readonly metrics: Pick<TileCacheManagerMetrics, 'entryCount' | 'evictCount' | 'hitCount' | 'missCount'> = {
     entryCount: 0,
     evictCount: 0,
     hitCount: 0,
@@ -42,6 +45,10 @@ export class TileCacheManager {
       maxBytes,
       maximumCacheOverflowBytes: options.maximumCacheOverflowBytes,
     });
+  }
+
+  beginFrame(): number {
+    return this.bucketTileBudget.beginFrame();
   }
 
   setOnEvict(callback: OnEvictCallback): void {
@@ -109,6 +116,9 @@ export class TileCacheManager {
     this.metrics.entryCount = this.bucketTiles.size;
     return {
       ...this.metrics,
+      currentBytes: this.bucketTileBudget.getCurrentBytes(),
+      maxBytes: this.bucketTileBudget.getMaxBytes(),
+      maximumCacheOverflowBytes: this.bucketTileBudget.getMaximumCacheOverflowBytes(),
     };
   }
 

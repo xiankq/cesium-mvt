@@ -2,11 +2,10 @@ import type { Feature, FeatureState, GlobalProperties, ICanonicalTileID, StyleEx
 import {
   Color,
   Formatted,
-  normalizePropertyExpression,
-
   ResolvedImage,
 
 } from '@maplibre/maplibre-gl-style-spec';
+import { StyleExpressionCache } from './style-expression-cache';
 
 export type {
   Color,
@@ -127,9 +126,20 @@ const STRING_ARRAY_SPEC: StylePropertySpecification = {
   'value': 'string',
 } as StylePropertySpecification;
 
+const sharedStyleExpressionCache = new StyleExpressionCache({ maxSize: 512 });
+
 interface StyleExpressionLike {
   evaluate: (...args: unknown[]) => unknown;
   evaluateWithoutErrorHandling?: (...args: unknown[]) => unknown;
+  kind?: string;
+}
+
+function compileStyleExpression(
+  expression: unknown,
+  type: string,
+  spec: StylePropertySpecification,
+): StyleExpressionLike {
+  return sharedStyleExpressionCache.getOrCreate(expression, type, spec) as StyleExpressionLike;
 }
 
 function evaluateStyleExpression(
@@ -167,7 +177,7 @@ export function createColorPropertyEvaluator(
   value: unknown,
   defaultValue?: string,
 ): StylePropertyEvaluator<string> {
-  const expression = normalizePropertyExpression(value as any, COLOR_SPEC);
+  const expression = compileStyleExpression(value, 'color', COLOR_SPEC);
 
   return (context: StylePropertyContext): string => {
     const evaluated = evaluateStyleExpression(expression, context);
@@ -192,7 +202,7 @@ export function createNumberPropertyEvaluator(
   value: unknown,
   defaultValue?: number,
 ): StylePropertyEvaluator<number> {
-  const expression = normalizePropertyExpression(value as any, NUMBER_SPEC);
+  const expression = compileStyleExpression(value, 'number', NUMBER_SPEC);
   const evaluator: StylePropertyEvaluator<number> = (context: StylePropertyContext): number => {
     const evaluated = evaluateStyleExpression(expression, context);
 
@@ -213,7 +223,7 @@ export function createNumberArrayPropertyEvaluator(
     allowNegative?: boolean;
   },
 ): StylePropertyEvaluator<number[] | undefined> {
-  const expression = normalizePropertyExpression(value as any, NUMBER_ARRAY_SPEC);
+  const expression = compileStyleExpression(value, 'array', NUMBER_ARRAY_SPEC);
   const allowNegative = options?.allowNegative ?? false;
 
   return (context: StylePropertyContext): number[] | undefined => {
@@ -232,7 +242,7 @@ export function createBooleanPropertyEvaluator(
   value: unknown,
   defaultValue?: boolean,
 ): StylePropertyEvaluator<boolean> {
-  const expression = normalizePropertyExpression(value as any, BOOLEAN_SPEC);
+  const expression = compileStyleExpression(value, 'boolean', BOOLEAN_SPEC);
 
   return (context: StylePropertyContext): boolean => {
     const evaluated = evaluateStyleExpression(expression, context);
@@ -268,7 +278,7 @@ export function createStringPropertyEvaluator(
   value: unknown,
   defaultValue?: string,
 ): StylePropertyEvaluator<string> {
-  const expression = normalizePropertyExpression(value as any, STRING_SPEC);
+  const expression = compileStyleExpression(value, 'string', STRING_SPEC);
 
   return (context: StylePropertyContext): string => {
     const evaluated = evaluateStyleExpression(expression, context);
@@ -284,7 +294,7 @@ export function createStringPropertyEvaluator(
 export function createFormattedPropertyEvaluator(
   value: unknown,
 ): StylePropertyEvaluator<string | Formatted | undefined> {
-  const expression = normalizePropertyExpression(value as any, FORMATTED_SPEC);
+  const expression = compileStyleExpression(value, 'formatted', FORMATTED_SPEC);
 
   return (context: StylePropertyContext): string | Formatted | undefined => {
     const evaluated = evaluateStyleExpression(expression, context);
@@ -304,7 +314,7 @@ export function createFormattedPropertyEvaluator(
 export function createResolvedImagePropertyEvaluator(
   value: unknown,
 ): StylePropertyEvaluator<string | ResolvedImage | undefined> {
-  const expression = normalizePropertyExpression(value as any, RESOLVED_IMAGE_SPEC);
+  const expression = compileStyleExpression(value, 'resolvedImage', RESOLVED_IMAGE_SPEC);
 
   return (context: StylePropertyContext): string | ResolvedImage | undefined => {
     const evaluated = evaluateStyleExpression(expression, context);
@@ -324,7 +334,7 @@ export function createResolvedImagePropertyEvaluator(
 export function createStringArrayPropertyEvaluator(
   value: unknown,
 ): StylePropertyEvaluator<string[] | undefined> {
-  const expression = normalizePropertyExpression(value as any, STRING_ARRAY_SPEC);
+  const expression = compileStyleExpression(value, 'string[]', STRING_ARRAY_SPEC);
 
   return (context: StylePropertyContext): string[] | undefined => {
     const evaluated = evaluateStyleExpression(expression, context);

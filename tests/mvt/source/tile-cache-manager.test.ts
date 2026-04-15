@@ -18,10 +18,13 @@ describe('tile-cache-manager', () => {
 
     manager.set('tile/2', createTile('tile/2'));
 
-    expect(manager.getMetrics()).toEqual({
+    expect(manager.getMetrics()).toMatchObject({
+      currentBytes: 3,
       entryCount: 1,
       evictCount: 1,
       hitCount: 1,
+      maxBytes: 3,
+      maximumCacheOverflowBytes: 0,
       missCount: 1,
     });
   });
@@ -56,6 +59,19 @@ describe('tile-cache-manager', () => {
       evictCount: 1,
       hitCount: 0,
       missCount: 0,
+    });
+  });
+
+  it('应该暴露当前缓存字节压力', () => {
+    const manager = new TileCacheManager({
+      maxBytes: 6,
+    });
+
+    manager.set('tile/1', createTile('tile/1'));
+
+    expect(manager.getMetrics()).toMatchObject({
+      currentBytes: 3,
+      entryCount: 1,
     });
   });
 });

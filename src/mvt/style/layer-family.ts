@@ -129,7 +129,17 @@ function stableSerialize(value: unknown): string {
     // layout 兼容性必须忽略 key 顺序，
     // 否则语义相同的对象会被错误拆成多个 family，造成重复工作。
     const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right));
+      .sort(([left], [right]) => {
+        if (left < right) {
+          return -1;
+        }
+
+        if (left > right) {
+          return 1;
+        }
+
+        return 0;
+      });
     return `{${entries.map(([key, entryValue]) => `${key}:${stableSerialize(entryValue)}`).join(',')}}`;
   }
 

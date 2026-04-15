@@ -151,6 +151,43 @@ describe('geojson-source-cache', () => {
     expect(getTileSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('应该为热路径暴露已加载瓦片快照迭代器', async () => {
+    const loadData = vi.fn(async () => ({
+      features: [
+        {
+          geometry: {
+            coordinates: [0, 0],
+            type: 'Point',
+          } as Point,
+          properties: {
+            name: 'poi',
+          },
+          type: 'Feature',
+        },
+      ],
+      type: 'FeatureCollection',
+    } satisfies FeatureCollection));
+    const sourceCache = new GeojsonSourceCache({
+      loadData,
+      source: createGeojsonSource(),
+      sourceId: 'places',
+    });
+
+    await sourceCache.requestTile({
+      level: 2,
+      x: 1,
+      y: 3,
+    });
+
+    const keys: string[] = [];
+    sourceCache.forEachLoadedTileKey?.((key) => {
+      keys.push(key);
+    });
+
+    expect(keys).toEqual(['places/2/1/3']);
+    expect(sourceCache.getLoadedTileKeys()).toEqual(['places/2/1/3']);
+  });
+
   it('evicts the least recently used ready tile when the cache budget is exceeded', async () => {
     const data: FeatureCollection = {
       features: [

@@ -27,6 +27,12 @@ const FILTER_SPEC: StylePropertySpecification = {
   'type': 'boolean',
 } as StylePropertySpecification;
 
+const SHARED_FILTER_CACHE_MAX_SIZE = 512;
+const sharedFeatureFilterCache = new Map<
+  string,
+  (context: FeatureFilterContext) => boolean
+>();
+
 export interface FeatureFilterContext {
   feature?: Feature;
   featureState?: FeatureState;
@@ -52,15 +58,22 @@ export function createFeatureFilter(
     return () => false;
   }
 
+  const normalizedFilter = normalizeFilterSpec(filterSpec);
+  const key = JSON.stringify(normalizedFilter);
+  const cached = sharedFeatureFilterCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
   const filter = createExpression(
-    convertFilter(normalizeFilterSpec(filterSpec)),
+    convertFilter(normalizedFilter),
     FILTER_SPEC,
   );
   if (filter.result === 'error') {
     throw new Error(filter.value.map(err => `${err.key}: ${err.message}`).join(', '));
   }
 
-  return (context: FeatureFilterContext): boolean => {
+  const compiled = (context: FeatureFilterContext): boolean => {
     const globals: GlobalProperties = {
       zoom: context.zoom,
     };
@@ -82,6 +95,16 @@ export function createFeatureFilter(
       return false;
     }
   };
+
+  if (sharedFeatureFilterCache.size >= SHARED_FILTER_CACHE_MAX_SIZE) {
+    const firstKey = sharedFeatureFilterCache.keys().next().value;
+    if (firstKey !== undefined) {
+      sharedFeatureFilterCache.delete(firstKey);
+    }
+  }
+
+  sharedFeatureFilterCache.set(key, compiled);
+  return compiled;
 }
 
 function normalizeFilterSpec(

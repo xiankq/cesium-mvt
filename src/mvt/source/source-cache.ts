@@ -68,11 +68,14 @@ const DEFAULT_SOURCE_CACHE_SIZE = 64 * 1024 * 1024;
 const INITIAL_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30_000;
 
-export class SourceCache<TValue = ArrayBuffer> {
+export class SourceCache<TValue extends ArrayBuffer = ArrayBuffer> {
   readonly sourceType: SourceSpecification['type'];
 
   private destroyed = false;
   private readonly entries = new Map<string, SourceEntryRecord<TValue>>();
+  private readonly readyTileKeys = new Set<string>();
+  private readonly activeRequestKeys = new Set<string>();
+  private readonly failedRetryAtByKey = new Map<string, number>();
   private readonly readyTileBudget: TileBudget;
   private readonly loadTile: (
     request: TileRequest,
@@ -92,6 +95,12 @@ export class SourceCache<TValue = ArrayBuffer> {
   private tileJsonAbortController?: AbortController;
   private tileJsonPromise?: Promise<TileJson>;
   private cachedTileJson?: TileJson;
+  private failedRetryMin?: {
+    key: string;
+    value: number;
+  };
+
+  private failedRetryMinDirty = false;
 
   constructor(options: SourceCacheOptions<TValue>) {
     this.loadTile
@@ -155,7 +164,9 @@ export class SourceCache<TValue = ArrayBuffer> {
     entry.abortController = abortController;
     entry.error = undefined;
     entry.state = 'requesting';
-    entry.promise = this.resolveTileRequest(coordinate, priorityState)
+    this.activeRequestKeys.add(key);
+
+    const requestPromise = this.resolveTileRequest(coordinate, priorityState)
       .then((request) => {
         if (this.destroyed) {
           throw createAbortError();
@@ -172,21 +183,21 @@ export class SourceCache<TValue = ArrayBuffer> {
           throw createAbortError();
         }
 
-        const cachedValue = cloneValue(value);
-        entry.abortController = undefined;
-        entry.promise = undefined;
         entry.state = 'ready';
-        entry.value = cachedValue;
+        entry.value = value;
+        entry.error = undefined;
+        entry.failureCount = 0;
+        entry.nextRetryAt = undefined;
+        this.readyTileKeys.add(key);
+        this.clearFailedRetryAt(key);
         this.readyTileBudget.add(key, {
-          byteLength: getValueByteLength(cachedValue),
+          byteLength: getValueByteLength(value),
         }, (evictedKey) => {
-          this.entries.delete(evictedKey);
+          this.removeEntry(evictedKey);
         });
-        return cloneValue(cachedValue);
+        return value;
       })
       .catch((error) => {
-        entry.abortController = undefined;
-        entry.promise = undefined;
         if (
           this.destroyed
           || abortController.signal.aborted
@@ -197,6 +208,8 @@ export class SourceCache<TValue = ArrayBuffer> {
           entry.state = 'idle';
           entry.failureCount = 0;
           entry.nextRetryAt = undefined;
+          this.readyTileKeys.delete(key);
+          this.clearFailedRetryAt(key);
           return undefined as TValue | undefined;
         }
 
@@ -204,13 +217,23 @@ export class SourceCache<TValue = ArrayBuffer> {
         entry.state = 'failed';
         entry.failureCount += 1;
         entry.nextRetryAt = Date.now() + calculateRetryDelay(entry.failureCount);
+        this.readyTileKeys.delete(key);
+        this.markFailed(key, entry.nextRetryAt);
         throw error;
+      })
+      .finally(() => {
+        entry.abortController = undefined;
+        entry.promise = undefined;
+        this.activeRequestKeys.delete(key);
       });
 
-    return entry.promise;
+    entry.promise = requestPromise;
+
+    return requestPromise.then(v => v === undefined ? undefined : cloneValue(v)) as Promise<TValue | undefined>;
   }
 
   abortTile(key: string) {
+    this.activeRequestKeys.delete(key);
     this.entries.get(key)?.abortController?.abort();
     if (!this.hasActiveTileRequests()) {
       this.tileJsonAbortController?.abort();
@@ -218,18 +241,11 @@ export class SourceCache<TValue = ArrayBuffer> {
   }
 
   getNextRetryAt(): number | undefined {
-    let nextRetryAt: number | undefined;
-    for (const entry of this.entries.values()) {
-      if (entry.state !== 'failed' || entry.nextRetryAt === undefined) {
-        continue;
-      }
-
-      if (nextRetryAt === undefined || entry.nextRetryAt < nextRetryAt) {
-        nextRetryAt = entry.nextRetryAt;
-      }
+    if (this.failedRetryMinDirty) {
+      this.recomputeFailedRetryMin();
     }
 
-    return nextRetryAt;
+    return this.failedRetryMin?.value;
   }
 
   getEntry(key: string): SourceEntry<TValue> | undefined {
@@ -260,9 +276,13 @@ export class SourceCache<TValue = ArrayBuffer> {
   }
 
   getLoadedTileKeys(): string[] {
-    return Array.from(this.entries.entries())
-      .filter(([, entry]) => entry.state === 'ready' && entry.value !== undefined)
-      .map(([key]) => key);
+    return Array.from(this.readyTileKeys);
+  }
+
+  forEachLoadedTileKey(visitor: (key: string) => void): void {
+    for (const key of this.readyTileKeys) {
+      visitor(key);
+    }
   }
 
   updateSource(source: SourceSpecification) {
@@ -290,16 +310,7 @@ export class SourceCache<TValue = ArrayBuffer> {
   }
 
   private hasActiveTileRequests(): boolean {
-    for (const entry of this.entries.values()) {
-      if (
-        entry.state === 'requesting'
-        && !entry.abortController?.signal.aborted
-      ) {
-        return true;
-      }
-    }
-
-    return false;
+    return this.activeRequestKeys.size > 0;
   }
 
   private createEntry(key: string) {
@@ -318,6 +329,64 @@ export class SourceCache<TValue = ArrayBuffer> {
       && Date.now() < entry.nextRetryAt;
   }
 
+  private markFailed(key: string, nextRetryAt: number): void {
+    this.failedRetryAtByKey.set(key, nextRetryAt);
+    if (!this.failedRetryMin || nextRetryAt < this.failedRetryMin.value) {
+      this.failedRetryMin = {
+        key,
+        value: nextRetryAt,
+      };
+      this.failedRetryMinDirty = false;
+      return;
+    }
+
+    if (this.failedRetryMin.key === key) {
+      if (nextRetryAt > this.failedRetryMin.value) {
+        this.failedRetryMin.value = nextRetryAt;
+        this.failedRetryMinDirty = true;
+      }
+      else {
+        this.failedRetryMin.value = nextRetryAt;
+      }
+    }
+  }
+
+  private clearFailedRetryAt(key: string): void {
+    if (!this.failedRetryAtByKey.delete(key)) {
+      return;
+    }
+
+    if (this.failedRetryMin?.key === key) {
+      this.failedRetryMinDirty = true;
+    }
+  }
+
+  private recomputeFailedRetryMin(): void {
+    let nextRetryAt: {
+      key: string;
+      value: number;
+    } | undefined;
+
+    for (const [key, value] of this.failedRetryAtByKey) {
+      if (!nextRetryAt || value < nextRetryAt.value) {
+        nextRetryAt = {
+          key,
+          value,
+        };
+      }
+    }
+
+    this.failedRetryMin = nextRetryAt;
+    this.failedRetryMinDirty = false;
+  }
+
+  private removeEntry(key: string): void {
+    this.readyTileKeys.delete(key);
+    this.activeRequestKeys.delete(key);
+    this.clearFailedRetryAt(key);
+    this.entries.delete(key);
+  }
+
   private reset() {
     this.tileJsonAbortController?.abort();
     this.tileJsonAbortController = undefined;
@@ -330,6 +399,11 @@ export class SourceCache<TValue = ArrayBuffer> {
       entry.abortController?.abort();
     }
     this.entries.clear();
+    this.readyTileKeys.clear();
+    this.activeRequestKeys.clear();
+    this.failedRetryAtByKey.clear();
+    this.failedRetryMin = undefined;
+    this.failedRetryMinDirty = false;
   }
 
   private async resolveTileRequest(

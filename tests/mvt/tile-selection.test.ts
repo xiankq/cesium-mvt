@@ -103,4 +103,28 @@ describe('tile-selection', () => {
       { level: 1, x: 0, y: 0 },
     ]);
   });
+
+  it('should deduplicate repeated coordinates before expanding lower zoom tiles', () => {
+    const selection = resolveTileSelection({
+      coordinates: [
+        { level: 8, x: 100, y: 100 },
+        { level: 8, x: 100, y: 100 },
+      ],
+      getAvailability: (coordinate) => {
+        if (coordinate.level !== 10) {
+          return 'missing';
+        }
+
+        return 'ready';
+      },
+      minimumLevel: 10,
+    });
+
+    expect(selection.requestCoordinates).toEqual([]);
+    expect(selection.emptyCoordinates).toEqual([]);
+    expect(selection.readyCoordinates).toHaveLength(16);
+    expect(new Set(selection.readyCoordinates.map(coordinate =>
+      `${coordinate.level}/${coordinate.x}/${coordinate.y}`,
+    )).size).toBe(16);
+  });
 });

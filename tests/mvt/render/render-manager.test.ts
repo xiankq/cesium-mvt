@@ -3,7 +3,7 @@ import type { ParsedTileResult } from '@/mvt/bucket/bucket-types';
 import type { BucketRenderedTileHandle } from '@/mvt/render/bucket-rendered-tile';
 import { BillboardCollection, Cartesian3, LabelCollection, PrimitiveCollection, VerticalOrigin } from 'cesium';
 import { describe, expect, it, vi } from 'vitest';
-import { createMockLineBucketTile } from '../../helpers/bucket-helpers';
+import { createMockCircleBucketTile, createMockLineBucketTile } from '../../helpers/bucket-helpers';
 
 const ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nqkAAAAASUVORK5CYII=';
 
@@ -103,6 +103,80 @@ describe('render-manager', () => {
       mountCount: 1,
       removeCount: 1,
     });
+  });
+
+  it('应该只把每个 tile 挂载到 root 一次', async () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const addSpy = vi.spyOn(root, 'add');
+    const removeSpy = vi.spyOn(root, 'remove');
+    const manager = new RenderManager({
+      root,
+    });
+    const style = createSymbolStyle(true);
+
+    const handle = manager.mount(
+      'source/15/0/0',
+      createSymbolBucketTile(
+        'source/15/0/0',
+        'Museum',
+        Cartesian3.fromDegrees(120, 30, 0),
+        ICON_DATA_URI,
+      ),
+      style,
+    );
+
+    expect(handle.collections.length).toBeGreaterThan(1);
+    expect(addSpy).toHaveBeenCalledTimes(1);
+
+    manager.destroy();
+
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshSourceLayer 只应该刷新命中的 sourceLayer 瓦片', async () => {
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const manager = new RenderManager({
+      root,
+    });
+    const style = createLayeredCircleStyle();
+    const roadsKey = 'source/0/0/0';
+    const poiKey = 'source/0/0/1';
+    const roadsTile = createMockCircleBucketTile({
+      layerId: 'roads',
+      sourceName: 'source',
+      tileKey: roadsKey,
+    });
+    const poiTile = createMockCircleBucketTile({
+      layerId: 'poi',
+      sourceName: 'source',
+      tileKey: poiKey,
+    });
+    (roadsTile.buckets[0] as any).sourceLayer = 'roads';
+    (poiTile.buckets[0] as any).sourceLayer = 'poi';
+
+    const roadsHandle = manager.mount(roadsKey, roadsTile, style);
+    const poiHandle = manager.mount(poiKey, poiTile, style);
+    const refreshSpy = vi.spyOn(manager, 'refresh');
+
+    (manager as any).refreshSourceLayer(
+      'source',
+      'roads',
+      (key: string) => (key === roadsKey ? roadsTile : poiTile),
+      style,
+    );
+
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    expect(refreshSpy).toHaveBeenCalledWith(roadsKey, roadsTile, style, undefined);
+    expect(manager.getHandle(roadsKey)).not.toBe(roadsHandle);
+    expect(manager.getHandle(poiKey)).toBe(poiHandle);
+
+    manager.destroy();
   });
 
   it('应该让跨 tile 的相同符号只保留一个实例', async () => {
@@ -920,6 +994,32 @@ function createDashedLineStyle(): StyleSpecification {
         'source': 'source',
         'source-layer': 'layer',
         'type': 'line',
+      },
+    ],
+  };
+}
+
+function createLayeredCircleStyle(): StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      source: {
+        type: 'vector',
+        tiles: ['https://example.com/{z}/{x}/{y}.pbf'],
+      },
+    },
+    layers: [
+      {
+        'id': 'roads',
+        'source': 'source',
+        'source-layer': 'roads',
+        'type': 'circle',
+      },
+      {
+        'id': 'poi',
+        'source': 'source',
+        'source-layer': 'poi',
+        'type': 'circle',
       },
     ],
   };

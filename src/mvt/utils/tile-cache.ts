@@ -6,6 +6,7 @@ export interface TileCacheOptions {
 export interface CacheEntry {
   byteLength: number;
   isVisible?: boolean;
+  lastTouchedFrame?: number;
   [key: string]: any;
 }
 
@@ -25,6 +26,7 @@ export class TileCache {
   private maxBytes: number;
   private maximumCacheOverflowBytes: number;
   private currentBytes: number = 0;
+  private currentFrame = 0;
   private cache: Map<string, CacheNode> = new Map();
   private head: CacheNode | null = null;
   private tail: CacheNode | null = null;
@@ -34,11 +36,17 @@ export class TileCache {
     this.maximumCacheOverflowBytes = options.maximumCacheOverflowBytes ?? 0;
   }
 
+  beginFrame(): number {
+    this.currentFrame += 1;
+    return this.currentFrame;
+  }
+
   add(key: string, entry: CacheEntry): EvictedCacheEntry[] {
     const evictedEntries: EvictedCacheEntry[] = [];
     const normalizedEntry: CacheEntry = {
       ...entry,
       isVisible: entry.isVisible ?? false,
+      lastTouchedFrame: entry.lastTouchedFrame ?? this.currentFrame,
     };
     this.delete(key);
 
@@ -120,6 +128,9 @@ export class TileCache {
     }
 
     node.entry.isVisible = isVisible;
+    if (isVisible) {
+      node.entry.lastTouchedFrame = this.currentFrame;
+    }
   }
 
   clear(): EvictedCacheEntry[] {
@@ -144,6 +155,8 @@ export class TileCache {
       return;
     }
 
+    node.entry.lastTouchedFrame = this.currentFrame;
+
     // 如果节点已经在尾部，无需移动
     if (node === this.tail) {
       return;
@@ -163,6 +176,14 @@ export class TileCache {
 
   getCurrentBytes(): number {
     return this.currentBytes;
+  }
+
+  getMaxBytes(): number {
+    return this.maxBytes;
+  }
+
+  getMaximumCacheOverflowBytes(): number {
+    return this.maximumCacheOverflowBytes;
   }
 
   private detachNode(node: CacheNode): void {
@@ -185,18 +206,39 @@ export class TileCache {
   }
 
   private findEvictionCandidate(): CacheNode | undefined {
+    const invisibleStaleCandidate = this.findEvictionCandidateMatching((node) => {
+      return node.entry.isVisible !== true
+        && node.entry.lastTouchedFrame !== this.currentFrame;
+    });
+    if (invisibleStaleCandidate) {
+      return invisibleStaleCandidate;
+    }
+
     const invisibleCandidate = this.findInvisibleEvictionCandidate();
     if (invisibleCandidate) {
       return invisibleCandidate;
+    }
+
+    const visibleStaleCandidate = this.findEvictionCandidateMatching((node) => {
+      return node.entry.lastTouchedFrame !== this.currentFrame;
+    });
+    if (visibleStaleCandidate) {
+      return visibleStaleCandidate;
     }
 
     return this.head ?? undefined;
   }
 
   private findInvisibleEvictionCandidate(): CacheNode | undefined {
+    return this.findEvictionCandidateMatching(node => node.entry.isVisible !== true);
+  }
+
+  private findEvictionCandidateMatching(
+    predicate: (node: CacheNode) => boolean,
+  ): CacheNode | undefined {
     let node = this.head;
     while (node) {
-      if (node.entry.isVisible !== true) {
+      if (predicate(node)) {
         return node;
       }
 

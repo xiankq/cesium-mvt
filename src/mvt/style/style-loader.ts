@@ -22,7 +22,7 @@ export function normalizeStyle(
   style: StyleSpecification,
   styleUrl?: string,
 ): StyleSet {
-  const normalizedStyle = cloneStyle(style);
+  const normalizedStyle = deepClone(style);
 
   if (styleUrl) {
     normalizeAssetUrls(normalizedStyle, styleUrl);
@@ -77,10 +77,6 @@ export async function loadStyleSet(
   }
 
   return styleSet;
-}
-
-function cloneStyle(style: StyleSpecification): StyleSpecification {
-  return deepClone(style);
 }
 
 function normalizeAssetUrls(style: StyleSpecification, styleUrl: string) {

@@ -11,6 +11,7 @@ import type {
   ParsedTileResult,
 } from '../../bucket/bucket-types';
 import type { FeatureStateResolver } from '../../style/feature-state-store';
+import type { StyleIndex } from '../../style/style-manager';
 import {
   Cartesian3 as CesiumCartesian3,
   GeometryInstance,
@@ -53,6 +54,7 @@ export interface CreateBucketFillExtrusionTileHandleOptions {
   bucketTile: ParsedTileResult;
   featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
+  styleIndex?: StyleIndex;
   tileWidth?: number;
 }
 
@@ -62,6 +64,7 @@ export function createBucketFillExtrusionTileHandle({
   bucketTile,
   featureStateResolver,
   style,
+  styleIndex,
   tileWidth,
 }: CreateBucketFillExtrusionTileHandleOptions): BucketFillExtrusionTileHandle | undefined {
   const extrusionBuckets = bucketTile.buckets.filter(isFillExtrusionBucket);
@@ -70,8 +73,8 @@ export function createBucketFillExtrusionTileHandle({
   }
 
   const { level: zoom, sourceId } = parseRenderTileCoordinateFromKey(bucketTile.key);
-  const layersById = new Map(
-    style.layers.filter(isFillExtrusionLayer).map(layer => [layer.id, layer]),
+  const layersById = styleIndex?.layersById ?? new Map(
+    style.layers.map(layer => [layer.id, layer]),
   );
   const collections: BucketFillExtrusionCollectionHandle[] = [];
 
@@ -89,7 +92,7 @@ export function createBucketFillExtrusionTileHandle({
 
     for (const layerId of bucket.layerIds) {
       const layer = layersById.get(layerId);
-      if (!layer) {
+      if (!layer || !isFillExtrusionLayer(layer)) {
         continue;
       }
 
@@ -239,8 +242,14 @@ function createPolygonHierarchy(
       : undefined;
   }
 
-  const ringStarts = [0, ...Array.from(holeOffsets)];
-  const ringEnds = [...Array.from(holeOffsets), vertexCount];
+  const ringStarts: number[] = [0];
+  const ringEnds: number[] = [];
+  for (let index = 0; index < holeOffsets.length; index += 1) {
+    const holeOffset = holeOffsets[index]!;
+    ringStarts.push(holeOffset);
+    ringEnds.push(holeOffset);
+  }
+  ringEnds.push(vertexCount);
 
   if (ringStarts.some(start => start < 0 || start >= vertexCount)) {
     return undefined;

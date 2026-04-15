@@ -9,6 +9,7 @@ import type {
   ParsedTileResult,
 } from '../../bucket/bucket-types';
 import type { FeatureStateResolver } from '../../style/feature-state-store';
+import type { StyleIndex } from '../../style/style-manager';
 import {
   BufferPolyline,
   BufferPolylineCollection,
@@ -42,11 +43,13 @@ export interface CreateBucketLineTileHandleOptions {
   bucketTile: ParsedTileResult;
   featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
+  styleIndex?: StyleIndex;
 }
 
 export function createBucketLineTileHandle({
   bucketTile,
   featureStateResolver,
+  styleIndex,
   style,
 }: CreateBucketLineTileHandleOptions): BucketLineTileHandle | undefined {
   const lineBuckets = bucketTile.buckets.filter(isLineBucket);
@@ -55,8 +58,8 @@ export function createBucketLineTileHandle({
   }
 
   const { level: zoom, sourceId } = parseRenderTileCoordinateFromKey(bucketTile.key);
-  const layersById = new Map(
-    style.layers.filter(isLineLayer).map(layer => [layer.id, layer]),
+  const layersById = styleIndex?.layersById ?? new Map(
+    style.layers.map(layer => [layer.id, layer]),
   );
 
   const collections: BucketLineCollectionHandle[] = [];
@@ -97,7 +100,7 @@ export function createBucketLineTileHandle({
 function createLineCollection(
   bucket: Bucket,
   layerId: string,
-  layersById: Map<string, LineLayerSpecification>,
+  layersById: ReadonlyMap<string, StyleSpecification['layers'][number]>,
   featureStateResolver: FeatureStateResolver | undefined,
   style: StyleSpecification,
   sourceId: string,
@@ -115,7 +118,7 @@ function createLineCollection(
   }
 
   const layer = layersById.get(layerId);
-  if (!layer) {
+  if (!layer || !isLineLayer(layer)) {
     return undefined;
   }
 
@@ -138,12 +141,11 @@ function createLineCollection(
       });
 
   const flyweight = usesPolylineCollection ? undefined : new BufferPolyline();
-  const vertexCounts = Array.from(data.vertexCounts);
   let vertexOffset = 0;
   let polylineCount = 0;
 
-  for (let index = 0; index < vertexCounts.length; index += 1) {
-    const vertexCount = vertexCounts[index]!;
+  for (let index = 0; index < data.vertexCounts.length; index += 1) {
+    const vertexCount = data.vertexCounts[index]!;
     if (vertexCount < 2) {
       vertexOffset += vertexCount;
       continue;
@@ -240,10 +242,10 @@ function extractPositions(
 ): Float64Array {
   const start = offset * 3;
   const end = start + count * 3;
-  if (end > positions.length) {
+  if (start >= positions.length || end > positions.length) {
     return new Float64Array(0);
   }
-  return positions.slice(start, end);
+  return positions.subarray(start, end);
 }
 
 function extractCartesianPositions(

@@ -82,7 +82,11 @@ function createParsedTileResult(key: string) {
   };
 }
 
-function createFeatureStateCircleTile(key: string): ParsedTileResult {
+function createFeatureStateCircleTile(
+  key: string,
+  layerId = 'poi',
+  sourceLayer = 'poi',
+): ParsedTileResult {
   return {
     buckets: [
       {
@@ -90,7 +94,7 @@ function createFeatureStateCircleTile(key: string): ParsedTileResult {
           featureIds: new Float32Array([0]),
           positions: new Float64Array([0, 0, 0]),
         },
-        familyId: 'base/poi/circle/0' as never,
+        familyId: `base/${sourceLayer}/circle/0` as never,
         featureIndex: {
           byteLength: 200,
           entries: [
@@ -101,8 +105,8 @@ function createFeatureStateCircleTile(key: string): ParsedTileResult {
             },
           ],
         },
-        layerIds: ['poi'],
-        sourceLayer: 'poi',
+        layerIds: [layerId],
+        sourceLayer,
         stats: {
           byteLength: 24,
           featureCount: 1,
@@ -201,6 +205,21 @@ describe('cesiumVectorTileCoordinator', () => {
     expect(updateSpy).toHaveBeenCalled();
   });
 
+  it('每帧开始时应该标记共享缓存的 frame 边界', async () => {
+    const coordinator = await createCoordinator();
+    coordinator.updateStyle(createStyle());
+
+    const cacheManager = (coordinator as any).cacheManager;
+    const beginFrameSpy = vi.spyOn(cacheManager, 'beginFrame');
+
+    coordinator.update({
+      camera: {},
+      viewportWidth: 100,
+    });
+
+    expect(beginFrameSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('更新样式后应该在新帧中排队请求重新渲染', async () => {
     const coordinator = await createCoordinator();
 
@@ -226,10 +245,12 @@ describe('cesiumVectorTileCoordinator', () => {
 
     expect(coordinator.getMetrics()).toMatchObject({
       cache: {
+        currentBytes: 0,
         entryCount: 0,
         evictCount: 0,
         hitCount: 0,
         missCount: 0,
+        maxBytes: expect.any(Number),
       },
       render: {
         hideCount: 0,
@@ -277,6 +298,36 @@ describe('cesiumVectorTileCoordinator', () => {
     expect(removeSpy).not.toHaveBeenCalled();
     expect(clearSpy).toHaveBeenCalledTimes(1);
     expect(renderManager.getHandle(renderKey)).toBeUndefined();
+  });
+
+  it('hideInvisibleTiles 不应该因为遍历快照被修改而漏掉瓦片', async () => {
+    const coordinator = await createCoordinator();
+    const renderKeys = ['base/0/0/0', 'base/0/1/0'];
+    const renderManager = {
+      getAllKeys: vi.fn(() => renderKeys),
+      getVisibleKeys: vi.fn(() => renderKeys),
+      hide: vi.fn((key: string) => {
+        const index = renderKeys.indexOf(key);
+        if (index >= 0) {
+          renderKeys.splice(index, 1);
+        }
+        return true;
+      }),
+      remove: vi.fn(() => true),
+    };
+    const cacheManager = {
+      has: vi.fn(() => false),
+      setVisibility: vi.fn(),
+    };
+
+    (coordinator as any).renderManager = renderManager;
+    (coordinator as any).cacheManager = cacheManager;
+
+    (coordinator as any).hideInvisibleTiles(new Set<string>());
+
+    expect(cacheManager.setVisibility).toHaveBeenCalledTimes(2);
+    expect(renderManager.hide).toHaveBeenCalledTimes(2);
+    expect(renderManager.remove).toHaveBeenCalledTimes(2);
   });
 
   it('queryRenderedFeatures 会读取可见渲染瓦片', async () => {
@@ -717,6 +768,78 @@ describe('cesiumVectorTileCoordinator', () => {
     expect(refreshedMaterial.color.blue).toBeCloseTo(0, 4);
   });
 
+  it('feature-state 指定 sourceLayer 时只会刷新对应 sourceLayer 的渲染瓦片', async () => {
+    const coordinator = await createCoordinator();
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'poi',
+          'paint': {
+            'circle-color': ['case', ['==', ['feature-state', 'selected'], true], '#ff0000', '#0000ff'],
+            'circle-radius': 5,
+          },
+          'source': 'base',
+          'source-layer': 'poi',
+          'type': 'circle',
+        },
+        {
+          'id': 'roads',
+          'paint': {
+            'circle-color': ['case', ['==', ['feature-state', 'selected'], true], '#ff0000', '#0000ff'],
+            'circle-radius': 5,
+          },
+          'source': 'base',
+          'source-layer': 'roads',
+          'type': 'circle',
+        },
+      ],
+    };
+
+    coordinator.updateStyle(style);
+
+    const renderManager = (coordinator as any).renderManager;
+    const cacheManager = (coordinator as any).cacheManager;
+    const styleEpoch = (coordinator as any).styleManager.getStyleEpoch();
+    const poiKey = `${styleEpoch}:base/0/0/0`;
+    const roadsKey = `${styleEpoch}:base/0/0/1`;
+    const poiTile = createFeatureStateCircleTile(poiKey, 'poi', 'poi');
+    const roadsTile = createFeatureStateCircleTile(roadsKey, 'roads', 'roads');
+    const refreshSourceSpy = vi.spyOn(renderManager, 'refreshSource');
+    const refreshSourceLayerSpy = vi.spyOn(renderManager, 'refreshSourceLayer');
+
+    renderManager.mount(poiKey, poiTile, style);
+    renderManager.mount(roadsKey, roadsTile, style);
+    cacheManager.set(poiKey, poiTile);
+    cacheManager.set(roadsKey, roadsTile);
+
+    coordinator.setFeatureState({
+      id: 1,
+      sourceId: 'base',
+      sourceLayer: 'poi',
+    }, {
+      selected: true,
+    });
+
+    expect(refreshSourceLayerSpy).toHaveBeenCalledTimes(1);
+    expect(refreshSourceLayerSpy).toHaveBeenCalledWith(
+      'base',
+      'poi',
+      expect.any(Function),
+      style,
+      expect.anything(),
+    );
+    expect(refreshSourceSpy).not.toHaveBeenCalled();
+    expect(renderManager.getHandle(poiKey)).toBeDefined();
+    expect(renderManager.getHandle(roadsKey)).toBeDefined();
+  });
+
   it('视图变化时应该取消过期的待处理请求', async () => {
     const coordinator = await createCoordinator();
     (coordinator as any).sourceManager = createAbortableSourceManager();
@@ -737,6 +860,38 @@ describe('cesiumVectorTileCoordinator', () => {
     const renderKey = `${(coordinator as any).styleManager.getStyleEpoch()}:base/0/0/0`;
     expect(sourceManager.abort).toHaveBeenCalledWith(renderKey);
     expect((coordinator as any).renderManager.getHandle(renderKey)).toBeUndefined();
+  });
+
+  it('同一帧内重复选中的瓦片只会发起一次请求', async () => {
+    const coordinator = await createCoordinator();
+    coordinator.updateStyle(createStyle());
+
+    const sourceManager = {
+      abort: vi.fn(),
+      abortAll: vi.fn(),
+      destroy: vi.fn(),
+      getNextRetryAt: vi.fn(() => undefined),
+      getSourceConstraints: vi.fn(() => ({})),
+      getSourceIds: vi.fn(() => ['base']),
+      isDestroyed: vi.fn(() => false),
+      reconcileSources: vi.fn(),
+      requestTile: vi.fn(() => new Promise<void>(() => {})),
+    };
+    (coordinator as any).sourceManager = sourceManager;
+    sourceManager.reconcileSources(createStyle().sources as Record<string, SourceSpecification>);
+
+    const processTileSelection = (coordinator as any).processTileSelection.bind(coordinator);
+    processTileSelection([
+      { level: 0, x: 0, y: 0 },
+      { level: 0, x: 0, y: 0 },
+      { level: 0, x: 1, y: 0 },
+    ]);
+
+    expect(sourceManager.requestTile).toHaveBeenCalledTimes(2);
+    expect(sourceManager.requestTile.mock.calls.map((call: any[]) => call.slice(1, 4))).toEqual([
+      [0, 0, 0],
+      [0, 1, 0],
+    ]);
   });
 
   it('取消请求不应该打印错误日志', async () => {

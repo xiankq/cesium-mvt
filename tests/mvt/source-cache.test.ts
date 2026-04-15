@@ -470,6 +470,29 @@ describe('source-cache', () => {
     expect(loadTile).toHaveBeenCalledTimes(1);
   });
 
+  it('应该为热路径暴露已加载瓦片快照迭代器', async () => {
+    const loadTile = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer);
+    const sourceCache = new SourceCache({
+      loadTile,
+      source: createVectorSource(),
+      sourceId: 'base',
+    });
+
+    await sourceCache.requestTile({
+      level: 1,
+      x: 0,
+      y: 0,
+    });
+
+    const keys: string[] = [];
+    sourceCache.forEachLoadedTileKey?.((key) => {
+      keys.push(key);
+    });
+
+    expect(keys).toEqual(['base/1/0/0']);
+    expect(sourceCache.getLoadedTileKeys()).toEqual(['base/1/0/0']);
+  });
+
   it('caches an empty ArrayBuffer instead of reloading it', async () => {
     const loadTile = vi.fn(async () => new ArrayBuffer(0));
     const sourceCache = new SourceCache({

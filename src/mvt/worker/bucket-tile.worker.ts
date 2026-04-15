@@ -13,6 +13,7 @@ self.addEventListener('message', (event: MessageEvent<BucketTileWorkerMessage>) 
       const bucketTile = compileBucketTileFromData({
         renderTile: compileMessage.renderTile,
         style: compileMessage.style,
+        styleIndex: compileMessage.styleIndex,
         tileData: compileMessage.tileData,
         tileProjection: compileMessage.tileProjection,
       });

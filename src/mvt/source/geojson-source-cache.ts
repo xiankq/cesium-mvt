@@ -61,6 +61,9 @@ export class GeojsonSourceCache {
 
   private destroyed = false;
   private readonly entries = new Map<string, SourceEntryRecord>();
+  private readonly readyTileKeys = new Set<string>();
+  private readonly activeRequestKeys = new Set<string>();
+  private readonly failedRetryAtByKey = new Map<string, number>();
   private readonly readyTileBudget: TileBudget;
   private readonly loadData: (
     source: GeoJSONSourceSpecification,
@@ -73,6 +76,12 @@ export class GeojsonSourceCache {
   private readonly sourceId: string;
   private tileIndexAbortController?: AbortController;
   private tileIndexPromise?: Promise<GeoJSONVT>;
+  private failedRetryMin?: {
+    key: string;
+    value: number;
+  };
+
+  private failedRetryMinDirty = false;
 
   constructor(options: GeojsonSourceCacheOptions) {
     if (options.source.type !== 'geojson') {
@@ -132,7 +141,9 @@ export class GeojsonSourceCache {
     entry.abortController = abortController;
     entry.error = undefined;
     entry.state = 'requesting';
-    entry.promise = this.waitForTileIndex(abortController.signal, priorityState)
+    this.activeRequestKeys.add(key);
+
+    const requestPromise = this.waitForTileIndex(abortController.signal, priorityState)
       .then((tileIndex) => {
         if (this.destroyed) {
           throw createAbortError();
@@ -145,21 +156,21 @@ export class GeojsonSourceCache {
           throw createAbortError();
         }
 
-        const cachedValue = cloneValue(value);
-        entry.abortController = undefined;
-        entry.promise = undefined;
         entry.state = 'ready';
-        entry.value = cachedValue;
+        entry.value = value;
+        entry.error = undefined;
+        entry.failureCount = 0;
+        entry.nextRetryAt = undefined;
+        this.readyTileKeys.add(key);
+        this.clearFailedRetryAt(key);
         this.readyTileBudget.add(key, {
-          byteLength: cachedValue.byteLength,
+          byteLength: value.byteLength,
         }, (evictedKey) => {
-          this.entries.delete(evictedKey);
+          this.removeEntry(evictedKey);
         });
-        return cloneValue(cachedValue);
+        return value;
       })
       .catch((error) => {
-        entry.abortController = undefined;
-        entry.promise = undefined;
         if (
           this.destroyed
           || abortController.signal.aborted
@@ -170,6 +181,8 @@ export class GeojsonSourceCache {
           entry.state = 'idle';
           entry.failureCount = 0;
           entry.nextRetryAt = undefined;
+          this.readyTileKeys.delete(key);
+          this.clearFailedRetryAt(key);
           return undefined;
         }
 
@@ -177,16 +190,26 @@ export class GeojsonSourceCache {
         entry.state = 'failed';
         entry.failureCount += 1;
         entry.nextRetryAt = Date.now() + calculateRetryDelay(entry.failureCount);
+        this.readyTileKeys.delete(key);
+        this.markFailed(key, entry.nextRetryAt);
         throw error;
+      })
+      .finally(() => {
+        entry.abortController = undefined;
+        entry.promise = undefined;
+        this.activeRequestKeys.delete(key);
       });
 
-    return entry.promise;
+    entry.promise = requestPromise;
+
+    return requestPromise.then(v => v === undefined ? undefined : cloneValue(v));
   }
 
   abortTile(key: string) {
+    this.activeRequestKeys.delete(key);
     const entry = this.entries.get(key);
     entry?.abortController?.abort();
-    if (!this.hasActiveTileRequests(key)) {
+    if (!this.hasActiveTileRequests()) {
       this.tileIndexAbortController?.abort();
     }
   }
@@ -240,9 +263,13 @@ export class GeojsonSourceCache {
   }
 
   getLoadedTileKeys(): string[] {
-    return Array.from(this.entries.entries())
-      .filter(([, entry]) => entry.state === 'ready' && entry.value !== undefined)
-      .map(([key]) => key);
+    return Array.from(this.readyTileKeys);
+  }
+
+  forEachLoadedTileKey(visitor: (key: string) => void): void {
+    for (const key of this.readyTileKeys) {
+      visitor(key);
+    }
   }
 
   getMaxZoom(): number | undefined {
@@ -254,19 +281,11 @@ export class GeojsonSourceCache {
   }
 
   getNextRetryAt(): number | undefined {
-    let nextRetryAt: number | undefined;
-
-    for (const entry of this.entries.values()) {
-      if (entry.state !== 'failed' || entry.nextRetryAt === undefined) {
-        continue;
-      }
-
-      if (nextRetryAt === undefined || entry.nextRetryAt < nextRetryAt) {
-        nextRetryAt = entry.nextRetryAt;
-      }
+    if (this.failedRetryMinDirty) {
+      this.recomputeFailedRetryMin();
     }
 
-    return nextRetryAt;
+    return this.failedRetryMin?.value;
   }
 
   destroy() {
@@ -356,21 +375,8 @@ export class GeojsonSourceCache {
     });
   }
 
-  private hasActiveTileRequests(excludedKey?: string): boolean {
-    for (const [key, entry] of this.entries) {
-      if (key === excludedKey) {
-        continue;
-      }
-
-      if (
-        entry.state === 'requesting'
-        && !entry.abortController?.signal.aborted
-      ) {
-        return true;
-      }
-    }
-
-    return false;
+  private hasActiveTileRequests(): boolean {
+    return this.activeRequestKeys.size > 0;
   }
 
   private reset() {
@@ -384,6 +390,69 @@ export class GeojsonSourceCache {
       entry.abortController?.abort();
     }
     this.entries.clear();
+    this.readyTileKeys.clear();
+    this.activeRequestKeys.clear();
+    this.failedRetryAtByKey.clear();
+    this.failedRetryMin = undefined;
+    this.failedRetryMinDirty = false;
+  }
+
+  private markFailed(key: string, nextRetryAt: number): void {
+    this.failedRetryAtByKey.set(key, nextRetryAt);
+    if (!this.failedRetryMin || nextRetryAt < this.failedRetryMin.value) {
+      this.failedRetryMin = {
+        key,
+        value: nextRetryAt,
+      };
+      this.failedRetryMinDirty = false;
+      return;
+    }
+
+    if (this.failedRetryMin.key === key) {
+      if (nextRetryAt > this.failedRetryMin.value) {
+        this.failedRetryMin.value = nextRetryAt;
+        this.failedRetryMinDirty = true;
+      }
+      else {
+        this.failedRetryMin.value = nextRetryAt;
+      }
+    }
+  }
+
+  private clearFailedRetryAt(key: string): void {
+    if (!this.failedRetryAtByKey.delete(key)) {
+      return;
+    }
+
+    if (this.failedRetryMin?.key === key) {
+      this.failedRetryMinDirty = true;
+    }
+  }
+
+  private recomputeFailedRetryMin(): void {
+    let nextRetryAt: {
+      key: string;
+      value: number;
+    } | undefined;
+
+    for (const [key, value] of this.failedRetryAtByKey) {
+      if (!nextRetryAt || value < nextRetryAt.value) {
+        nextRetryAt = {
+          key,
+          value,
+        };
+      }
+    }
+
+    this.failedRetryMin = nextRetryAt;
+    this.failedRetryMinDirty = false;
+  }
+
+  private removeEntry(key: string): void {
+    this.entries.delete(key);
+    this.readyTileKeys.delete(key);
+    this.activeRequestKeys.delete(key);
+    this.clearFailedRetryAt(key);
   }
 }
 

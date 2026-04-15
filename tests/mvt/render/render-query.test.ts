@@ -36,6 +36,57 @@ function createTileBuffer() {
   ) as ArrayBuffer;
 }
 
+function createCollisionTileBuffer() {
+  const allData: FeatureCollection<Point, { kind: string }> = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        id: 1,
+        geometry: {
+          type: 'Point',
+          coordinates: [0, 0],
+        },
+        properties: {
+          kind: 'all',
+        },
+      },
+    ],
+  };
+
+  const otherData: FeatureCollection<Point, { kind: string }> = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        id: 2,
+        geometry: {
+          type: 'Point',
+          coordinates: [0, 0],
+        },
+        properties: {
+          kind: 'other',
+        },
+      },
+    ],
+  };
+
+  const allTile = new GeoJSONVT(allData).getTile(0, 0, 0);
+  const otherTile = new GeoJSONVT(otherData).getTile(0, 0, 0);
+  if (!allTile || !otherTile) {
+    throw new Error('Expected fixture tile to exist.');
+  }
+
+  const encoded = fromGeojsonVt({
+    __all__: allTile,
+    other: otherTile,
+  } as Parameters<typeof fromGeojsonVt>[0]);
+  return encoded.buffer.slice(
+    encoded.byteOffset,
+    encoded.byteOffset + encoded.byteLength,
+  ) as ArrayBuffer;
+}
+
 function createSpatialTileBuffer() {
   const data: FeatureCollection<Point, { kind: string }> = {
     type: 'FeatureCollection',
@@ -168,6 +219,157 @@ describe('render-query', () => {
     expect(renderedFeatures[0]?.geometry).toMatchObject({
       type: 'Point',
     });
+  });
+
+  it('应该优先使用 visible key 快照和缓存的坐标信息', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'poi',
+          'type': 'circle',
+          'source': 'base',
+          'source-layer': 'poi',
+        },
+      ],
+    };
+
+    const tileBuffer = createTileBuffer();
+    const renderedFeatures = queryRenderedFeaturesFromState({
+      getSourceCache: vi.fn(() => ({
+        getEntry: vi.fn(() => ({
+          state: 'ready',
+          value: tileBuffer,
+        })),
+      })),
+      renderManager: {
+        getCoordinate: vi.fn(() => ({
+          level: 0,
+          rawKey: 'base/0/0/0',
+          sourceId: 'base',
+          x: 0,
+          y: 0,
+        })),
+        getHandle: vi.fn(() => ({
+          visible: true,
+        })),
+        getVisibleKeys: vi.fn(() => ['0:base/0/0/0']),
+        getAllKeys: vi.fn(() => {
+          throw new Error('should not be called');
+        }),
+      },
+      style,
+    }, {
+      filter: ['==', ['get', 'kind'], 'cafe'],
+    });
+
+    expect(renderedFeatures).toHaveLength(1);
+  });
+
+  it('应该区分 all-layers 查询和明确的 layer id 缓存键', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': '__all__',
+          'type': 'circle',
+          'source': 'base',
+          'source-layer': '__all__',
+        },
+        {
+          'id': 'other-layer',
+          'type': 'circle',
+          'source': 'base',
+          'source-layer': 'other',
+        },
+      ],
+    };
+
+    const tileBuffer = createCollisionTileBuffer();
+    const state = {
+      getSourceCache: vi.fn(() => ({
+        getEntry: vi.fn(() => ({
+          state: 'ready',
+          value: tileBuffer,
+        })),
+      })),
+      renderManager: {
+        getAllKeys: vi.fn(() => ['0:base/0/0/0']),
+        getHandle: vi.fn(() => ({
+          visible: true,
+        })),
+      },
+      style,
+    };
+
+    expect(queryRenderedFeaturesFromState(state)).toHaveLength(2);
+
+    const filteredFeatures = queryRenderedFeaturesFromState(state, {
+      layers: ['__all__'],
+    });
+
+    expect(filteredFeatures).toHaveLength(1);
+    expect(filteredFeatures[0]).toMatchObject({
+      layerId: '__all__',
+      properties: {
+        kind: 'all',
+      },
+    });
+  });
+
+  it('应该在 peekEntryValue 可用时跳过 getEntry 的克隆路径', () => {
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'poi',
+          'type': 'circle',
+          'source': 'base',
+          'source-layer': 'poi',
+        },
+      ],
+    };
+
+    const tileBuffer = createTileBuffer();
+    const getEntry = vi.fn(() => {
+      throw new Error('should not be called');
+    });
+    const renderedFeatures = queryRenderedFeaturesFromState({
+      getSourceCache: vi.fn(() => ({
+        getEntry,
+        peekEntryValue: vi.fn(() => tileBuffer),
+      })),
+      renderManager: {
+        getAllKeys: vi.fn(() => ['0:base/0/0/0']),
+        getHandle: vi.fn(() => ({
+          visible: true,
+        })),
+      },
+      style,
+    }, {
+      filter: ['==', ['get', 'kind'], 'cafe'],
+    });
+
+    expect(renderedFeatures).toHaveLength(1);
+    expect(getEntry).not.toHaveBeenCalled();
   });
 
   it('应该在 queryRenderedFeatures 中读取 feature-state', () => {

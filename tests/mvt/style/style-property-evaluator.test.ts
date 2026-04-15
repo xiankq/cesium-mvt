@@ -1,10 +1,22 @@
 import type { StylePropertyContext } from '@/mvt/style/style-property-evaluator';
+import { normalizePropertyExpression } from '@maplibre/maplibre-gl-style-spec';
+
 import { describe, expect, it, vi } from 'vitest';
 import {
   createColorPropertyEvaluator,
   createNumberArrayPropertyEvaluator,
   createNumberPropertyEvaluator,
 } from '@/mvt/style/style-property-evaluator';
+
+vi.mock('@maplibre/maplibre-gl-style-spec', async () => {
+  const actual = await vi.importActual<typeof import('@maplibre/maplibre-gl-style-spec')>(
+    '@maplibre/maplibre-gl-style-spec',
+  );
+  return {
+    ...actual,
+    normalizePropertyExpression: vi.fn(actual.normalizePropertyExpression),
+  };
+});
 
 function createContext(overrides: Partial<StylePropertyContext> = {}): StylePropertyContext {
   return {
@@ -118,6 +130,34 @@ describe('style-property-evaluator', () => {
       expect(warnSpy).not.toHaveBeenCalled();
 
       warnSpy.mockRestore();
+    });
+
+    it('应该复用相同 property expression 的编译结果', () => {
+      const normalizeSpy = vi.mocked(normalizePropertyExpression);
+      normalizeSpy.mockClear();
+
+      const expression = [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        1.234567,
+        7.891011,
+        12.131415,
+        16.171819,
+      ];
+
+      createNumberPropertyEvaluator(expression);
+      createNumberPropertyEvaluator([
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        1.234567,
+        7.891011,
+        12.131415,
+        16.171819,
+      ]);
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

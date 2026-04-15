@@ -405,6 +405,37 @@ describe('sourceManager', () => {
       ]))).toBe(labelsRetryAt);
     });
 
+    it('应该支持按 sourceId 快照查询最早重试时间', async () => {
+      const { SourceManager } = await import('@/mvt/source/source-manager');
+
+      const sourceManager = new SourceManager();
+      const baseRetryAt = Date.parse('2026-04-13T00:00:05Z');
+      const labelsRetryAt = Date.parse('2026-04-13T00:00:03Z');
+      (sourceManager as any).sourceCaches.set('base', {
+        destroy: vi.fn(),
+        getMaxZoom: vi.fn(() => undefined),
+        getMinZoom: vi.fn(() => undefined),
+        getNextRetryAt: vi.fn(() => baseRetryAt),
+        isDestroyed: vi.fn(() => false),
+        requestTile: vi.fn(),
+        sourceType: 'vector' as const,
+        updateSource: vi.fn(),
+      });
+      (sourceManager as any).sourceCaches.set('labels', {
+        destroy: vi.fn(),
+        getMaxZoom: vi.fn(() => undefined),
+        getMinZoom: vi.fn(() => undefined),
+        getNextRetryAt: vi.fn(() => labelsRetryAt),
+        isDestroyed: vi.fn(() => false),
+        requestTile: vi.fn(),
+        sourceType: 'vector' as const,
+        updateSource: vi.fn(),
+      });
+
+      expect(sourceManager.getNextRetryAtForSourceIds(new Set(['base', 'labels']))).toBe(labelsRetryAt);
+      expect(sourceManager.getNextRetryAtForSourceIds(new Set(['base']))).toBe(baseRetryAt);
+    });
+
     it('应该优先使用 source 上直接声明的 minzoom/maxzoom', async () => {
       const { SourceManager } = await import('@/mvt/source/source-manager');
 

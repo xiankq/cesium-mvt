@@ -42,6 +42,19 @@ describe('feature-filter', () => {
       const filter = createFeatureFilter(false);
       expect(filter(createContext())).toBe(false);
     });
+
+    it('应该复用相同 filter 的编译结果', () => {
+      const filterSpec: FilterSpecification = ['==', ['get', 'cache-key'], 'value'];
+
+      const compiled1 = createFeatureFilter(filterSpec);
+      const compiled2 = createFeatureFilter([
+        '==',
+        ['get', 'cache-key'],
+        'value',
+      ] as FilterSpecification);
+
+      expect(compiled1).toBe(compiled2);
+    });
   });
 
   describe('比较过滤器', () => {

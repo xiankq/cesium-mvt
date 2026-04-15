@@ -1,4 +1,3 @@
-import type { StyleSpecification, SymbolLayerSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type {
   Bucket,
   SymbolBucketData,
@@ -23,6 +22,7 @@ export function createBucketSymbolTileHandle({
   bucketTile,
   featureStateResolver,
   tileWidth = 256,
+  styleIndex,
   style,
 }: CreateBucketSymbolTileHandleOptions): BucketSymbolTileHandle | undefined {
   const symbolBuckets = bucketTile.buckets.filter(isSymbolBucket);
@@ -37,8 +37,8 @@ export function createBucketSymbolTileHandle({
     coordinate.y,
     zoom,
   );
-  const layersById = new Map(
-    style.layers.filter(isSymbolLayer).map(layer => [layer.id, layer]),
+  const layersById = styleIndex?.layersById ?? new Map(
+    style.layers.map(layer => [layer.id, layer]),
   );
 
   const collections: BucketSymbolCollectionHandle[] = [];
@@ -87,10 +87,4 @@ function isSymbolBucket(bucket: Bucket): bucket is Bucket & {
   stats: SymbolBucketStats;
 } {
   return bucket.type === 'symbol';
-}
-
-function isSymbolLayer(
-  layer: StyleSpecification['layers'][number],
-): layer is SymbolLayerSpecification {
-  return layer.type === 'symbol';
 }

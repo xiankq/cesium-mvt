@@ -2,6 +2,7 @@ import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { SymbolBucketStats } from '@/mvt/bucket/bucket-types';
 import type { ParsedTile } from '@/mvt/source/vector-tile';
 import { describe, expect, it } from 'vitest';
+import { StyleManager } from '@/mvt/style/style-manager';
 import { createMockStyle } from '../../helpers/style-helpers';
 
 describe('bucket-tile-compiler', () => {
@@ -58,6 +59,37 @@ describe('bucket-tile-compiler', () => {
         tileProjection,
       } as any);
 
+      expect(result.buckets).toHaveLength(1);
+      expect(result.buckets[0].type).toBe('fill');
+    });
+
+    it('should compile bucket tile with a precomputed style index', async () => {
+      const { compileBucketTile } = await import('@/mvt/bucket/bucket-tile-compiler');
+      const { WebMercatorTilingScheme } = await import('cesium');
+
+      const tilingScheme = new WebMercatorTilingScheme();
+      const rect = tilingScheme.tileXYToNativeRectangle(0, 0, 0);
+      const tileProjection = {
+        west: rect.west,
+        south: rect.south,
+        east: rect.east,
+        north: rect.north,
+      };
+      const renderTile = createMockRenderTile('fill');
+      const tile = createMockParsedTile() as unknown as ParsedTile;
+      const style = createMockStyle('fill');
+      const styleManager = new StyleManager();
+      styleManager.updateStyle({ style });
+
+      const result = compileBucketTile({
+        renderTile,
+        style,
+        tile,
+        tileProjection,
+        styleIndex: styleManager.getStyleIndex()!,
+      } as any);
+
+      expect(result.buckets).toBeDefined();
       expect(result.buckets).toHaveLength(1);
       expect(result.buckets[0].type).toBe('fill');
     });

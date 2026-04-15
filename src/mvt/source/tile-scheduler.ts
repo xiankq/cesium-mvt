@@ -71,18 +71,13 @@ export class TileScheduler {
     getAvailability: GetAvailability,
     constraints: SourceConstraints,
   ): SourceTileSelection {
-    const selection = resolveTileSelection({
+    return resolveTileSelection({
       coordinates,
       getAvailability: coord =>
         getAvailability(sourceId, coord.level, coord.x, coord.y),
       maximumLevel: constraints.maxZoom,
       minimumLevel: constraints.minZoom ?? this.minimumLevel,
     });
-
-    return {
-      ...selection,
-      requestCoordinates: sortRequestCoordinates(selection.requestCoordinates),
-    };
   }
 
   shouldUpdate(tileSelection: ScheduleResult | null): boolean {
@@ -108,48 +103,4 @@ export class TileScheduler {
   invalidate(): void {
     this.lastViewSelectionKey = undefined;
   }
-}
-
-function sortRequestCoordinates(
-  coordinates: readonly TileCoordinate[],
-): TileCoordinate[] {
-  if (coordinates.length < 2) {
-    return [...coordinates];
-  }
-
-  const firstCoordinate = coordinates[0]!;
-  let minX = firstCoordinate.x;
-  let maxX = firstCoordinate.x;
-  let minY = firstCoordinate.y;
-  let maxY = firstCoordinate.y;
-
-  for (let index = 1; index < coordinates.length; index += 1) {
-    const coordinate = coordinates[index]!;
-    minX = Math.min(minX, coordinate.x);
-    maxX = Math.max(maxX, coordinate.x);
-    minY = Math.min(minY, coordinate.y);
-    maxY = Math.max(maxY, coordinate.y);
-  }
-
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-
-  return [...coordinates].sort((left, right) => {
-    const leftDistance = Math.abs(left.x - centerX) + Math.abs(left.y - centerY);
-    const rightDistance = Math.abs(right.x - centerX) + Math.abs(right.y - centerY);
-
-    if (leftDistance !== rightDistance) {
-      return leftDistance - rightDistance;
-    }
-
-    if (left.level !== right.level) {
-      return right.level - left.level;
-    }
-
-    if (left.y !== right.y) {
-      return left.y - right.y;
-    }
-
-    return left.x - right.x;
-  });
 }

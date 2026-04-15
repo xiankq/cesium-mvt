@@ -16,6 +16,7 @@ export interface QueryableSourceCache {
     value?: ArrayBuffer;
   } | undefined;
   getLoadedTileKeys: () => string[];
+  forEachLoadedTileKey?: (visitor: (key: string) => void) => void;
   peekEntryValue?: (key: string) => ArrayBuffer | undefined;
   readonly sourceType: SourceSpecification['type'];
 }
@@ -31,16 +32,20 @@ export function querySourceFeaturesFromCache(
   const filter = createFeatureFilter(options.filter);
   const features: Feature[] = [];
 
-  for (const tileKey of cache.getLoadedTileKeys()) {
-    const entry = cache.getEntry?.(tileKey);
-    if (!entry) {
-      continue;
+  const visitTileKey = (tileKey: string) => {
+    // 优先读取未克隆的原始 buffer，保证 source 查询与渲染查询共享同一份解析快照。
+    let tileData = cache.peekEntryValue?.(tileKey);
+    if (!(tileData instanceof ArrayBuffer)) {
+      const entry = cache.getEntry?.(tileKey);
+      if (!entry) {
+        return;
+      }
+
+      tileData = entry.value;
     }
 
-    // 优先读取未克隆的原始 buffer，保证 source 查询与渲染查询共享同一份解析快照。
-    const tileData = cache.peekEntryValue?.(tileKey) ?? entry.value;
     if (!(tileData instanceof ArrayBuffer)) {
-      continue;
+      return;
     }
 
     let coordinate: ReturnType<typeof parseRenderTileCoordinateFromKey> | undefined;
@@ -48,10 +53,10 @@ export function querySourceFeaturesFromCache(
       coordinate = parseRenderTileCoordinateFromKey(tileKey);
     }
     catch {
-      continue;
+      return;
     }
     if (!coordinate) {
-      continue;
+      return;
     }
     const tile = parseVectorTile(tileData);
     const layerNames = cache.sourceType === 'geojson'
@@ -90,6 +95,15 @@ export function querySourceFeaturesFromCache(
         );
       }
     }
+  };
+
+  if (cache.forEachLoadedTileKey) {
+    cache.forEachLoadedTileKey(visitTileKey);
+    return features;
+  }
+
+  for (const tileKey of cache.getLoadedTileKeys()) {
+    visitTileKey(tileKey);
   }
 
   return features;

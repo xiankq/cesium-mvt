@@ -3,6 +3,7 @@ import type { PrimitiveCollection } from 'cesium';
 import type { ParsedTileResult } from '../bucket';
 import type { FeatureStateResolver } from '../style/feature-state-store';
 import type { LayerFamily } from '../style/layer-family';
+import type { StyleIndex } from '../style/style-manager';
 import type {
   BucketSymbolPlacementHandle,
   BucketSymbolPlacementPartHandle,
@@ -18,7 +19,7 @@ import {
   setBucketRenderedTileVisibility,
 } from './bucket-rendered-tile';
 import { createRenderOrder } from './render-order';
-import { parseRenderTileCoordinateFromKey } from './render-tile';
+import { parseRenderTileCoordinateFromKey, stripRenderTileScope } from './render-tile';
 
 export interface RenderManagerOptions {
   root: PrimitiveCollection;
@@ -45,6 +46,16 @@ export class RenderManager {
   private readonly tileWidth: number;
   private readonly crossSourceCollisions: boolean;
   private readonly renderedTileHandles = new Map<string, BucketRenderedTileHandle>();
+  private readonly allKeys = new Set<string>();
+  private readonly visibleKeys = new Set<string>();
+  private readonly keysBySourceId = new Map<string, Set<string>>();
+  private readonly allKeySnapshot: string[] = [];
+  private readonly visibleKeySnapshot: string[] = [];
+  private readonly keysBySourceIdSnapshot = new Map<string, string[]>();
+  private readonly coordinateByKey = new Map<string, ReturnType<typeof parseRenderTileCoordinateFromKey> & {
+    rawKey: string;
+  }>();
+
   private renderOrder: RenderEntry[] = [];
   private layerFamilies: LayerFamily[] = [];
   private featureStateResolver?: FeatureStateResolver;
@@ -61,10 +72,14 @@ export class RenderManager {
     this.crossSourceCollisions = options.crossSourceCollisions ?? true;
   }
 
-  updateLayerFamilies(style: StyleSpecification, layerFamilies: LayerFamily[]): void {
+  updateLayerFamilies(
+    style: StyleSpecification,
+    layerFamilies: LayerFamily[],
+    renderOrder?: RenderEntry[],
+  ): void {
     this.style = style;
     this.layerFamilies = layerFamilies;
-    this.renderOrder = createRenderOrder(style, layerFamilies);
+    this.renderOrder = renderOrder ?? createRenderOrder(style, layerFamilies);
   }
 
   getRenderOrder(): RenderEntry[] {
@@ -83,7 +98,12 @@ export class RenderManager {
     this.featureStateResolver = resolver;
   }
 
-  mount(key: string, bucketTile: ParsedTileResult, style: StyleSpecification): BucketRenderedTileHandle {
+  mount(
+    key: string,
+    bucketTile: ParsedTileResult,
+    style: StyleSpecification,
+    styleIndex?: StyleIndex,
+  ): BucketRenderedTileHandle {
     const existingHandle = this.renderedTileHandles.get(key);
     if (existingHandle) {
       return existingHandle;
@@ -94,11 +114,13 @@ export class RenderManager {
       featureStateResolver: this.featureStateResolver,
       tileWidth: this.tileWidth,
       style,
+      styleIndex,
     });
 
     mountBucketRenderedTileHandle(this.root, handle);
     this.metrics.mountCount += 1;
     this.renderedTileHandles.set(key, handle);
+    this.addKeySnapshot(key, handle);
     this.reconcileSymbolPlacements();
     return handle;
   }
@@ -107,10 +129,11 @@ export class RenderManager {
     key: string,
     bucketTile: ParsedTileResult,
     style: StyleSpecification,
+    styleIndex?: StyleIndex,
   ): BucketRenderedTileHandle {
     const existingHandle = this.renderedTileHandles.get(key);
     if (!existingHandle) {
-      return this.mount(key, bucketTile, style);
+      return this.mount(key, bucketTile, style, styleIndex);
     }
 
     const wasVisible = existingHandle.visible;
@@ -119,6 +142,7 @@ export class RenderManager {
       featureStateResolver: this.featureStateResolver,
       tileWidth: this.tileWidth,
       style,
+      styleIndex,
     });
 
     this.metrics.removeCount += 1;
@@ -130,6 +154,8 @@ export class RenderManager {
     }
 
     this.renderedTileHandles.set(key, nextHandle);
+    this.updateVisibilitySnapshot(key, nextHandle.visible);
+    this.addKeySnapshot(key, nextHandle);
     this.reconcileSymbolPlacements();
     return nextHandle;
   }
@@ -138,20 +164,25 @@ export class RenderManager {
     sourceId: string,
     getBucketTile: (key: string) => ParsedTileResult | undefined,
     style: StyleSpecification,
+    styleIndex?: StyleIndex,
   ): void {
-    for (const key of this.getAllKeys()) {
-      const renderTileCoordinate = parseRenderTileCoordinateFromKey(key);
-      if (renderTileCoordinate.sourceId !== sourceId) {
-        continue;
-      }
+    this.refreshSourceKeys(sourceId, getBucketTile, style, styleIndex);
+  }
 
-      const bucketTile = getBucketTile(key);
-      if (!bucketTile) {
-        continue;
-      }
-
-      this.refresh(key, bucketTile, style);
-    }
+  refreshSourceLayer(
+    sourceId: string,
+    sourceLayer: string,
+    getBucketTile: (key: string) => ParsedTileResult | undefined,
+    style: StyleSpecification,
+    styleIndex?: StyleIndex,
+  ): void {
+    this.refreshSourceKeys(
+      sourceId,
+      getBucketTile,
+      style,
+      styleIndex,
+      sourceLayer,
+    );
   }
 
   show(key: string): boolean {
@@ -161,6 +192,7 @@ export class RenderManager {
     }
     const changed = setBucketRenderedTileVisibility(handle, true);
     if (changed) {
+      this.updateVisibilitySnapshot(key, true);
       this.reconcileSymbolPlacements();
     }
     return changed;
@@ -174,6 +206,7 @@ export class RenderManager {
     const changed = setBucketRenderedTileVisibility(handle, false);
     if (changed) {
       this.metrics.hideCount += 1;
+      this.updateVisibilitySnapshot(key, false);
       this.reconcileSymbolPlacements();
     }
     return changed;
@@ -188,7 +221,21 @@ export class RenderManager {
   }
 
   getAllKeys(): string[] {
-    return Array.from(this.renderedTileHandles.keys());
+    return this.allKeySnapshot;
+  }
+
+  getVisibleKeys(): string[] {
+    return this.visibleKeySnapshot;
+  }
+
+  getCoordinate(key: string): (ReturnType<typeof parseRenderTileCoordinateFromKey> & {
+    rawKey: string;
+  }) | undefined {
+    return this.coordinateByKey.get(key);
+  }
+
+  getKeysForSource(sourceId: string): string[] {
+    return this.keysBySourceIdSnapshot.get(sourceId) ?? [];
   }
 
   getMetrics(): RenderManagerMetrics {
@@ -205,6 +252,7 @@ export class RenderManager {
 
     destroyBucketRenderedTileHandle(this.root, handle);
     this.renderedTileHandles.delete(key);
+    this.removeKeySnapshot(key);
     this.metrics.removeCount += 1;
     this.reconcileSymbolPlacements();
     return true;
@@ -216,6 +264,13 @@ export class RenderManager {
       destroyBucketRenderedTileHandle(this.root, handle);
     }
     this.renderedTileHandles.clear();
+    this.allKeys.clear();
+    this.visibleKeys.clear();
+    this.keysBySourceId.clear();
+    this.allKeySnapshot.length = 0;
+    this.visibleKeySnapshot.length = 0;
+    this.keysBySourceIdSnapshot.clear();
+    this.coordinateByKey.clear();
     this.reconcileSymbolPlacements();
   }
 
@@ -224,20 +279,27 @@ export class RenderManager {
   }
 
   private reconcileSymbolPlacements(): void {
-    const symbolPlacements = Array.from(this.renderedTileHandles.values())
-      .filter(handle => handle.visible && handle.symbols?.placements.length)
-      .flatMap((handle) => {
-        const coordinate = parseRenderTileCoordinateFromKey(handle.key);
-        return handle.symbols!.placements.flatMap((placement) => {
-          return placement.collisionParts.map((part, partIndex) => ({
+    const symbolPlacements: SymbolPlacementTarget[] = [];
+    for (const key of this.visibleKeys) {
+      const handle = this.renderedTileHandles.get(key);
+      if (!handle?.symbols?.placements.length) {
+        continue;
+      }
+
+      const coordinate = this.coordinateByKey.get(key)
+        ?? parseRenderTileCoordinateFromKey(key);
+      for (const placement of handle.symbols.placements) {
+        for (const [partIndex, part] of placement.collisionParts.entries()) {
+          symbolPlacements.push({
             coordinate,
             handle,
             part,
             partIndex,
             placement,
-          }));
-        });
-      });
+          });
+        }
+      }
+    }
 
     if (symbolPlacements.length === 0) {
       return;
@@ -247,6 +309,7 @@ export class RenderManager {
 
     if (this.crossSourceCollisions) {
       this.reconcileSymbolPlacementsForTargets(symbolPlacements);
+      this.syncVisibleSymbolSourceIndexes();
       return;
     }
 
@@ -265,6 +328,8 @@ export class RenderManager {
     for (const targets of targetsBySourceId.values()) {
       this.reconcileSymbolPlacementsForTargets(targets);
     }
+
+    this.syncVisibleSymbolSourceIndexes();
   }
 
   private reconcileSymbolPlacementsForTargets(
@@ -316,6 +381,173 @@ export class RenderManager {
       renderable.collection.get(renderable.index).show = visible;
     }
   }
+
+  private syncVisibleSymbolSourceIndexes(): void {
+    for (const handle of this.renderedTileHandles.values()) {
+      const symbols = handle.symbols;
+      if (!symbols) {
+        continue;
+      }
+
+      if (!handle.visible) {
+        symbols.visibleSourceIndexesByLayerAndSourceLayer = undefined;
+        continue;
+      }
+
+      const visibleSourceIndexesByLayerAndSourceLayer = new Map<string, Map<string, Set<number>>>();
+      for (const placement of symbols.placements) {
+        if (!placement.renderables.some(renderable => renderable.collection.get(renderable.index).show !== false)) {
+          continue;
+        }
+
+        const sourceLayerKey = placement.sourceLayer ?? '';
+        let sourceLayerIndexes = visibleSourceIndexesByLayerAndSourceLayer.get(placement.layerId);
+        if (!sourceLayerIndexes) {
+          sourceLayerIndexes = new Map<string, Set<number>>();
+          visibleSourceIndexesByLayerAndSourceLayer.set(placement.layerId, sourceLayerIndexes);
+        }
+
+        let sourceIndexes = sourceLayerIndexes.get(sourceLayerKey);
+        if (!sourceIndexes) {
+          sourceIndexes = new Set<number>();
+          sourceLayerIndexes.set(sourceLayerKey, sourceIndexes);
+        }
+
+        sourceIndexes.add(placement.sourceIndex);
+      }
+
+      symbols.visibleSourceIndexesByLayerAndSourceLayer = visibleSourceIndexesByLayerAndSourceLayer;
+    }
+  }
+
+  private refreshSourceKeys(
+    sourceId: string,
+    getBucketTile: (key: string) => ParsedTileResult | undefined,
+    style: StyleSpecification,
+    styleIndex?: StyleIndex,
+    sourceLayer?: string,
+  ): void {
+    for (const key of this.getKeysForSource(sourceId)) {
+      if (sourceLayer && !this.handleMatchesSourceLayer(key, sourceLayer)) {
+        continue;
+      }
+
+      const bucketTile = getBucketTile(key);
+      if (!bucketTile) {
+        continue;
+      }
+
+      this.refresh(key, bucketTile, style, styleIndex);
+    }
+  }
+
+  private handleMatchesSourceLayer(key: string, sourceLayer: string): boolean {
+    const handle = this.renderedTileHandles.get(key);
+    if (!handle) {
+      return false;
+    }
+
+    if (handle.sourceLayers.length === 0) {
+      return true;
+    }
+
+    return handle.sourceLayers.includes(sourceLayer);
+  }
+
+  private addKeySnapshot(key: string, handle: BucketRenderedTileHandle): void {
+    if (!this.allKeys.has(key)) {
+      this.allKeys.add(key);
+      this.allKeySnapshot.push(key);
+      const coordinate = {
+        ...parseRenderTileCoordinateFromKey(key),
+        rawKey: stripRenderTileScope(key),
+      };
+      this.coordinateByKey.set(key, coordinate);
+
+      const sourceKeys = this.keysBySourceId.get(coordinate.sourceId);
+      if (sourceKeys) {
+        sourceKeys.add(key);
+      }
+      else {
+        this.keysBySourceId.set(coordinate.sourceId, new Set([key]));
+      }
+
+      const sourceKeySnapshot = this.keysBySourceIdSnapshot.get(coordinate.sourceId);
+      if (sourceKeySnapshot) {
+        sourceKeySnapshot.push(key);
+      }
+      else {
+        this.keysBySourceIdSnapshot.set(coordinate.sourceId, [key]);
+      }
+    }
+
+    this.updateVisibilitySnapshot(key, handle.visible);
+  }
+
+  private updateVisibilitySnapshot(key: string, visible: boolean): void {
+    if (visible) {
+      if (this.visibleKeys.has(key)) {
+        return;
+      }
+
+      this.visibleKeys.add(key);
+      this.visibleKeySnapshot.push(key);
+      return;
+    }
+
+    if (!this.visibleKeys.delete(key)) {
+      return;
+    }
+
+    removeKeyFromSnapshot(this.visibleKeySnapshot, key);
+  }
+
+  private removeKeySnapshot(key: string): void {
+    this.updateVisibilitySnapshot(key, false);
+    if (!this.allKeys.delete(key)) {
+      return;
+    }
+
+    removeKeyFromSnapshot(this.allKeySnapshot, key);
+
+    const coordinate = this.coordinateByKey.get(key);
+    if (!coordinate) {
+      return;
+    }
+
+    this.coordinateByKey.delete(key);
+    const sourceKeys = this.keysBySourceId.get(coordinate.sourceId);
+    if (!sourceKeys) {
+      return;
+    }
+
+    sourceKeys.delete(key);
+    if (sourceKeys.size === 0) {
+      this.keysBySourceId.delete(coordinate.sourceId);
+      const sourceKeySnapshot = this.keysBySourceIdSnapshot.get(coordinate.sourceId);
+      if (sourceKeySnapshot) {
+        removeKeyFromSnapshot(sourceKeySnapshot, key);
+      }
+      this.keysBySourceIdSnapshot.delete(coordinate.sourceId);
+      return;
+    }
+
+    const sourceKeySnapshot = this.keysBySourceIdSnapshot.get(coordinate.sourceId);
+    if (!sourceKeySnapshot) {
+      return;
+    }
+
+    removeKeyFromSnapshot(sourceKeySnapshot, key);
+  }
+}
+
+function removeKeyFromSnapshot(snapshot: string[], key: string): void {
+  const index = snapshot.indexOf(key);
+  if (index === -1) {
+    return;
+  }
+
+  snapshot.splice(index, 1);
 }
 
 function compareSymbolPlacementTargets(
@@ -347,5 +579,13 @@ function compareSymbolPlacementTargets(
     return left.partIndex - right.partIndex;
   }
 
-  return left.handle.key.localeCompare(right.handle.key);
+  if (left.handle.key < right.handle.key) {
+    return -1;
+  }
+
+  if (left.handle.key > right.handle.key) {
+    return 1;
+  }
+
+  return 0;
 }

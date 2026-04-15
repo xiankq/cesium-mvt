@@ -9,6 +9,7 @@ import type {
   ParsedTileResult,
 } from '../../bucket/bucket-types';
 import type { FeatureStateResolver } from '../../style/feature-state-store';
+import type { StyleIndex } from '../../style/style-manager';
 import { BufferPoint, BufferPointCollection, Cartesian3 } from 'cesium';
 import { createFeatureFilter } from '../../style/filter-adapter';
 import { isValidTypedArray } from '../../utils/validation';
@@ -36,11 +37,13 @@ export interface CreateBucketCircleTileHandleOptions {
   bucketTile: ParsedTileResult;
   featureStateResolver?: FeatureStateResolver;
   style: StyleSpecification;
+  styleIndex?: StyleIndex;
 }
 
 export function createBucketCircleTileHandle({
   bucketTile,
   featureStateResolver,
+  styleIndex,
   style,
 }: CreateBucketCircleTileHandleOptions): BucketCircleTileHandle | undefined {
   const circleBuckets = bucketTile.buckets.filter(isCircleBucket);
@@ -49,8 +52,8 @@ export function createBucketCircleTileHandle({
   }
 
   const { level: zoom, sourceId } = parseRenderTileCoordinateFromKey(bucketTile.key);
-  const layersById = new Map(
-    style.layers.filter(isCircleLayer).map(layer => [layer.id, layer]),
+  const layersById = styleIndex?.layersById ?? new Map(
+    style.layers.map(layer => [layer.id, layer]),
   );
 
   const collections: BucketCircleCollectionHandle[] = [];
@@ -91,7 +94,7 @@ export function createBucketCircleTileHandle({
 function createCircleCollection(
   bucket: Bucket,
   layerId: string,
-  layersById: Map<string, CircleLayerSpecification>,
+  layersById: ReadonlyMap<string, StyleSpecification['layers'][number]>,
   featureStateResolver: FeatureStateResolver | undefined,
   style: StyleSpecification,
   sourceId: string,
@@ -109,7 +112,7 @@ function createCircleCollection(
   }
 
   const layer = layersById.get(layerId);
-  if (!layer) {
+  if (!layer || !isCircleLayer(layer)) {
     return undefined;
   }
 

@@ -57,18 +57,35 @@ export function resolveSourceLayerNames(
     return [GEOJSON_SOURCE_LAYER];
   }
 
-  return Array.from(tileIndex.layers.keys());
+  if (tileIndex.sourceLayerNames?.length) {
+    return tileIndex.sourceLayerNames;
+  }
+
+  const sourceLayerNames: string[] = [];
+  for (const sourceLayerName of tileIndex.layers.keys()) {
+    sourceLayerNames.push(sourceLayerName);
+  }
+
+  return sourceLayerNames;
 }
 
 export function getVisibleSymbolSourceIndexes(
   handle: {
     symbols?: {
       placements: RenderedSymbolPlacement[];
+      visibleSourceIndexesByLayerAndSourceLayer?: Map<string, Map<string, Set<number>>>;
     };
   },
   layerId: string,
   sourceLayerName: string,
 ): Set<number> {
+  const cachedVisibleSourceIndexes = handle.symbols?.visibleSourceIndexesByLayerAndSourceLayer
+    ?.get(layerId)
+    ?.get(sourceLayerName);
+  if (cachedVisibleSourceIndexes) {
+    return cachedVisibleSourceIndexes;
+  }
+
   const placements = handle.symbols?.placements;
   if (!placements?.length) {
     return new Set();
