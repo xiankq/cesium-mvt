@@ -4,26 +4,30 @@ import type { ParsedTileResult } from '../bucket';
 import type { FeatureStateResolver } from '../style/feature-state-store';
 import type { LayerFamily } from '../style/layer-family';
 import type { StyleIndex } from '../style/style-manager';
-import type {
-  BucketSymbolPlacementHandle,
-  BucketSymbolPlacementPartHandle,
-} from './backend/bucket-symbol-types';
+import type { BucketSymbolPlacementHandle, BucketSymbolPlacementPartHandle, BucketSymbolTileHandle, CreateBucketSymbolTileHandleOptions } from './backend/bucket-symbol-types';
 import type { SymbolPlacementIndexPlacement } from './backend/symbol-placement-index';
 import type { BucketRenderedTileHandle } from './bucket-rendered-tile';
 import type { RenderEntry } from './render-order';
+import { createBucketSymbolTileHandlePlan } from './backend/bucket-symbol-backend';
+import { materializeSymbolCollections } from './backend/bucket-symbol-collection-builder';
 import { createSymbolPlacementIndex } from './backend/symbol-placement-index';
 import {
+  attachBucketRenderedTileSymbols,
   createBucketRenderedTileHandle,
   destroyBucketRenderedTileHandle,
   mountBucketRenderedTileHandle,
   setBucketRenderedTileVisibility,
 } from './bucket-rendered-tile';
-import { createRenderOrder } from './render-order';
+import {
+  createRenderOrder,
+} from './render-order';
 import { parseRenderTileCoordinateFromKey, stripRenderTileScope } from './render-tile';
 
 export interface RenderManagerOptions {
   root: PrimitiveCollection;
   crossSourceCollisions?: boolean;
+  symbolMaterializationChunkSize?: number;
+  symbolMaterializationBudgetMs?: number;
   tileWidth?: number;
 }
 
@@ -31,6 +35,20 @@ export interface RenderManagerMetrics {
   hideCount: number;
   mountCount: number;
   removeCount: number;
+}
+
+export interface RenderManagerProfilingMetrics {
+  symbolChunkMaterializationCount: number;
+  symbolChunkMaterializationTimeMs: number;
+  symbolDescriptorBuildCount: number;
+  symbolDescriptorBuildTimeMs: number;
+  symbolMaterializationCount: number;
+  symbolMaterializationTimeMs: number;
+  symbolPlanBuildCount: number;
+  symbolPlanBuildTimeMs: number;
+  symbolQueueWaitTimeMs: number;
+  symbolReconcileCount: number;
+  symbolReconcileTimeMs: number;
 }
 
 interface SymbolPlacementTarget {
@@ -41,10 +59,28 @@ interface SymbolPlacementTarget {
   partIndex: number;
 }
 
+interface PendingSymbolMaterializationTask {
+  enqueuedAt: number;
+  handle: BucketRenderedTileHandle;
+  key: string;
+  priority: number;
+  request: CreateBucketSymbolTileHandleOptions;
+  sequence: number;
+  symbolHandle?: BucketSymbolTileHandle;
+  version: number;
+}
+
+export interface SymbolMaterializationDrainResult {
+  processedCount: number;
+  remainingCount: number;
+}
+
 export class RenderManager {
   private readonly root: PrimitiveCollection;
   private readonly tileWidth: number;
   private readonly crossSourceCollisions: boolean;
+  private readonly symbolMaterializationChunkSize: number;
+  private readonly symbolMaterializationBudgetMs: number;
   private readonly renderedTileHandles = new Map<string, BucketRenderedTileHandle>();
   private readonly allKeys = new Set<string>();
   private readonly visibleKeys = new Set<string>();
@@ -56,6 +92,13 @@ export class RenderManager {
     rawKey: string;
   }>();
 
+  private readonly pendingSymbolMaterializationTasks: PendingSymbolMaterializationTask[] = [];
+  private readonly pendingSymbolMaterializationVersionsByKey = new Map<string, number>();
+  private nextSymbolMaterializationSequence = 0;
+
+  private symbolReconcileBatchDepth = 0;
+  private symbolReconcilePending = false;
+
   private renderOrder: RenderEntry[] = [];
   private layerFamilies: LayerFamily[] = [];
   private featureStateResolver?: FeatureStateResolver;
@@ -66,10 +109,29 @@ export class RenderManager {
     removeCount: 0,
   };
 
+  private readonly profilingMetrics: RenderManagerProfilingMetrics = {
+    symbolChunkMaterializationCount: 0,
+    symbolChunkMaterializationTimeMs: 0,
+    symbolReconcileCount: 0,
+    symbolReconcileTimeMs: 0,
+    symbolDescriptorBuildCount: 0,
+    symbolDescriptorBuildTimeMs: 0,
+    symbolMaterializationCount: 0,
+    symbolMaterializationTimeMs: 0,
+    symbolPlanBuildCount: 0,
+    symbolPlanBuildTimeMs: 0,
+    symbolQueueWaitTimeMs: 0,
+  };
+
   constructor(options: RenderManagerOptions) {
     this.root = options.root;
     this.tileWidth = options.tileWidth ?? 256;
     this.crossSourceCollisions = options.crossSourceCollisions ?? true;
+    this.symbolMaterializationChunkSize = Math.max(
+      1,
+      Math.trunc(options.symbolMaterializationChunkSize ?? 32),
+    );
+    this.symbolMaterializationBudgetMs = options.symbolMaterializationBudgetMs ?? Number.POSITIVE_INFINITY;
   }
 
   updateLayerFamilies(
@@ -103,6 +165,8 @@ export class RenderManager {
     bucketTile: ParsedTileResult,
     style: StyleSpecification,
     styleIndex?: StyleIndex,
+    symbolPriority = 0,
+    styleEpoch = 0,
   ): BucketRenderedTileHandle {
     const existingHandle = this.renderedTileHandles.get(key);
     if (existingHandle) {
@@ -113,6 +177,8 @@ export class RenderManager {
       bucketTile,
       featureStateResolver: this.featureStateResolver,
       tileWidth: this.tileWidth,
+      symbolPriority,
+      styleEpoch,
       style,
       styleIndex,
     });
@@ -121,7 +187,8 @@ export class RenderManager {
     this.metrics.mountCount += 1;
     this.renderedTileHandles.set(key, handle);
     this.addKeySnapshot(key, handle);
-    this.reconcileSymbolPlacements();
+    this.enqueuePendingSymbolMaterialization(key, handle);
+    this.maybeDrainPendingSymbolMaterialization();
     return handle;
   }
 
@@ -130,6 +197,8 @@ export class RenderManager {
     bucketTile: ParsedTileResult,
     style: StyleSpecification,
     styleIndex?: StyleIndex,
+    symbolPriority = 0,
+    styleEpoch = 0,
   ): BucketRenderedTileHandle {
     const existingHandle = this.renderedTileHandles.get(key);
     if (!existingHandle) {
@@ -141,6 +210,8 @@ export class RenderManager {
       bucketTile,
       featureStateResolver: this.featureStateResolver,
       tileWidth: this.tileWidth,
+      symbolPriority,
+      styleEpoch,
       style,
       styleIndex,
     });
@@ -156,7 +227,12 @@ export class RenderManager {
     this.renderedTileHandles.set(key, nextHandle);
     this.updateVisibilitySnapshot(key, nextHandle.visible);
     this.addKeySnapshot(key, nextHandle);
-    this.reconcileSymbolPlacements();
+    const shouldRequestSymbolReconcile = !nextHandle.symbolRequest;
+    this.enqueuePendingSymbolMaterialization(key, nextHandle);
+    this.maybeDrainPendingSymbolMaterialization();
+    if (shouldRequestSymbolReconcile) {
+      this.requestSymbolReconcile();
+    }
     return nextHandle;
   }
 
@@ -165,8 +241,11 @@ export class RenderManager {
     getBucketTile: (key: string) => ParsedTileResult | undefined,
     style: StyleSpecification,
     styleIndex?: StyleIndex,
+    styleEpoch = 0,
   ): void {
-    this.refreshSourceKeys(sourceId, getBucketTile, style, styleIndex);
+    this.runBatchedMutations(() => {
+      this.refreshSourceKeys(sourceId, getBucketTile, style, styleIndex, undefined, styleEpoch);
+    });
   }
 
   refreshSourceLayer(
@@ -175,14 +254,18 @@ export class RenderManager {
     getBucketTile: (key: string) => ParsedTileResult | undefined,
     style: StyleSpecification,
     styleIndex?: StyleIndex,
+    styleEpoch = 0,
   ): void {
-    this.refreshSourceKeys(
-      sourceId,
-      getBucketTile,
-      style,
-      styleIndex,
-      sourceLayer,
-    );
+    this.runBatchedMutations(() => {
+      this.refreshSourceKeys(
+        sourceId,
+        getBucketTile,
+        style,
+        styleIndex,
+        sourceLayer,
+        styleEpoch,
+      );
+    });
   }
 
   show(key: string): boolean {
@@ -193,7 +276,7 @@ export class RenderManager {
     const changed = setBucketRenderedTileVisibility(handle, true);
     if (changed) {
       this.updateVisibilitySnapshot(key, true);
-      this.reconcileSymbolPlacements();
+      this.requestSymbolReconcile();
     }
     return changed;
   }
@@ -207,7 +290,7 @@ export class RenderManager {
     if (changed) {
       this.metrics.hideCount += 1;
       this.updateVisibilitySnapshot(key, false);
-      this.reconcileSymbolPlacements();
+      this.requestSymbolReconcile();
     }
     return changed;
   }
@@ -244,6 +327,116 @@ export class RenderManager {
     };
   }
 
+  getProfilingMetrics(): RenderManagerProfilingMetrics {
+    return {
+      ...this.profilingMetrics,
+    };
+  }
+
+  drainPendingSymbolTasks(
+    timeBudgetMs: number = this.symbolMaterializationBudgetMs,
+  ): SymbolMaterializationDrainResult {
+    const startedAt = now();
+    let processedCount = 0;
+    const taskCount = this.pendingSymbolMaterializationTasks.length;
+    if (taskCount === 0) {
+      return {
+        processedCount: 0,
+        remainingCount: 0,
+      };
+    }
+
+    const pendingTasks = this.pendingSymbolMaterializationTasks.splice(0, taskCount);
+    const remainingTasks: PendingSymbolMaterializationTask[] = [];
+
+    for (let index = 0; index < pendingTasks.length; index += 1) {
+      if (Number.isFinite(timeBudgetMs) && now() - startedAt >= timeBudgetMs) {
+        remainingTasks.push(...pendingTasks.slice(index));
+        break;
+      }
+
+      const task = pendingTasks[index]!;
+      const currentVersion = this.pendingSymbolMaterializationVersionsByKey.get(task.key);
+      if (currentVersion !== task.version) {
+        continue;
+      }
+
+      const handle = this.renderedTileHandles.get(task.key);
+      if (!handle || handle !== task.handle || handle.tileCollection.isDestroyed()) {
+        continue;
+      }
+
+      let symbols = task.symbolHandle;
+      if (!symbols) {
+        const descriptorStartedAt = now();
+        symbols = createBucketSymbolTileHandlePlan(task.request);
+        const descriptorElapsedMs = now() - descriptorStartedAt;
+        this.profilingMetrics.symbolDescriptorBuildCount += 1;
+        this.profilingMetrics.symbolDescriptorBuildTimeMs += descriptorElapsedMs;
+        this.profilingMetrics.symbolPlanBuildCount += 1;
+        this.profilingMetrics.symbolPlanBuildTimeMs += descriptorElapsedMs;
+        this.profilingMetrics.symbolQueueWaitTimeMs += now() - task.enqueuedAt;
+        handle.symbolRequest = undefined;
+        task.symbolHandle = symbols;
+
+        if (!symbols) {
+          continue;
+        }
+
+        attachBucketRenderedTileSymbols(handle, symbols);
+      }
+
+      const materializationStartedAt = now();
+      const chunkProcessedCount = materializeSymbolCollections(
+        symbols,
+        handle.visible,
+        this.symbolMaterializationChunkSize,
+      );
+      const materializationElapsedMs = now() - materializationStartedAt;
+      this.profilingMetrics.symbolMaterializationCount += chunkProcessedCount;
+      this.profilingMetrics.symbolMaterializationTimeMs += materializationElapsedMs;
+      this.profilingMetrics.symbolChunkMaterializationCount += chunkProcessedCount;
+      this.profilingMetrics.symbolChunkMaterializationTimeMs += materializationElapsedMs;
+      processedCount += chunkProcessedCount;
+
+      if (symbols.materializationCursor < symbols.placements.length) {
+        remainingTasks.push(task);
+        continue;
+      }
+
+      task.symbolHandle = undefined;
+    }
+
+    this.pendingSymbolMaterializationTasks.push(...remainingTasks);
+
+    if (processedCount > 0) {
+      this.requestSymbolReconcile();
+    }
+
+    return {
+      processedCount,
+      remainingCount: this.pendingSymbolMaterializationTasks.length,
+    };
+  }
+
+  runBatchedMutations<T>(mutate: () => T): T {
+    this.symbolReconcileBatchDepth += 1;
+
+    try {
+      return mutate();
+    }
+    finally {
+      this.symbolReconcileBatchDepth -= 1;
+      if (this.symbolReconcileBatchDepth === 0) {
+        this.maybeDrainPendingSymbolMaterialization();
+      }
+      if (this.symbolReconcileBatchDepth === 0 && this.symbolReconcilePending) {
+        this.symbolReconcilePending = false;
+        this.reconcileSymbolPlacements();
+      }
+    }
+  }
+
   remove(key: string): boolean {
     const handle = this.renderedTileHandles.get(key);
     if (!handle) {
@@ -254,7 +447,8 @@ export class RenderManager {
     this.renderedTileHandles.delete(key);
     this.removeKeySnapshot(key);
     this.metrics.removeCount += 1;
-    this.reconcileSymbolPlacements();
+    this.cancelPendingSymbolMaterialization(key);
+    this.requestSymbolReconcile();
     return true;
   }
 
@@ -271,7 +465,8 @@ export class RenderManager {
     this.visibleKeySnapshot.length = 0;
     this.keysBySourceIdSnapshot.clear();
     this.coordinateByKey.clear();
-    this.reconcileSymbolPlacements();
+    this.pendingSymbolMaterializationTasks.length = 0;
+    this.pendingSymbolMaterializationVersionsByKey.clear();
   }
 
   destroy(): void {
@@ -279,57 +474,150 @@ export class RenderManager {
   }
 
   private reconcileSymbolPlacements(): void {
-    const symbolPlacements: SymbolPlacementTarget[] = [];
-    for (const key of this.visibleKeys) {
-      const handle = this.renderedTileHandles.get(key);
-      if (!handle?.symbols?.placements.length) {
+    const startedAt = Date.now();
+    this.profilingMetrics.symbolReconcileCount += 1;
+    try {
+      const symbolPlacements: SymbolPlacementTarget[] = [];
+      for (const key of this.visibleKeys) {
+        const handle = this.renderedTileHandles.get(key);
+        if (!handle?.symbols?.placements.length) {
+          continue;
+        }
+
+        const coordinate = this.coordinateByKey.get(key)
+          ?? parseRenderTileCoordinateFromKey(key);
+        for (const placement of handle.symbols.placements) {
+          if (placement.renderables.length === 0) {
+            continue;
+          }
+          for (const [partIndex, part] of placement.collisionParts.entries()) {
+            symbolPlacements.push({
+              coordinate,
+              handle,
+              part,
+              partIndex,
+              placement,
+            });
+          }
+        }
+      }
+
+      if (symbolPlacements.length === 0) {
+        return;
+      }
+
+      symbolPlacements.sort(compareSymbolPlacementTargets);
+
+      if (this.crossSourceCollisions) {
+        this.reconcileSymbolPlacementsForTargets(symbolPlacements);
+        this.syncVisibleSymbolSourceIndexes();
+        return;
+      }
+
+      // 关闭 crossSourceCollisions 时，source 之间不共享碰撞预算，但同一 source 内仍然要按空间关系隐藏重叠符号。
+      const targetsBySourceId = new Map<string, SymbolPlacementTarget[]>();
+      for (const target of symbolPlacements) {
+        const sourceTargets = targetsBySourceId.get(target.coordinate.sourceId);
+        if (sourceTargets) {
+          sourceTargets.push(target);
+        }
+        else {
+          targetsBySourceId.set(target.coordinate.sourceId, [target]);
+        }
+      }
+
+      for (const targets of targetsBySourceId.values()) {
+        this.reconcileSymbolPlacementsForTargets(targets);
+      }
+
+      this.syncVisibleSymbolSourceIndexes();
+    }
+    finally {
+      this.profilingMetrics.symbolReconcileTimeMs += Date.now() - startedAt;
+    }
+  }
+
+  private requestSymbolReconcile(): void {
+    if (this.symbolReconcileBatchDepth > 0) {
+      this.symbolReconcilePending = true;
+      return;
+    }
+
+    this.reconcileSymbolPlacements();
+  }
+
+  private enqueuePendingSymbolMaterialization(
+    key: string,
+    handle: BucketRenderedTileHandle,
+  ): void {
+    const request = handle.symbolRequest;
+    if (!request) {
+      return;
+    }
+
+    this.cancelPendingSymbolMaterialization(key);
+
+    const version = (this.pendingSymbolMaterializationVersionsByKey.get(key) ?? 0) + 1;
+    this.pendingSymbolMaterializationVersionsByKey.set(key, version);
+    const task: PendingSymbolMaterializationTask = {
+      enqueuedAt: now(),
+      handle,
+      key,
+      priority: request.priority ?? handle.symbolPriority ?? 0,
+      request,
+      sequence: ++this.nextSymbolMaterializationSequence,
+      version,
+    };
+    this.insertPendingSymbolMaterializationTask(task);
+  }
+
+  private cancelPendingSymbolMaterialization(key: string): void {
+    this.pendingSymbolMaterializationVersionsByKey.delete(key);
+    this.removePendingSymbolTasksByKey(key);
+  }
+
+  private maybeDrainPendingSymbolMaterialization(): void {
+    if (this.symbolMaterializationBudgetMs !== Number.POSITIVE_INFINITY) {
+      return;
+    }
+
+    if (this.symbolReconcileBatchDepth > 0 || this.pendingSymbolMaterializationTasks.length === 0) {
+      return;
+    }
+
+    while (this.pendingSymbolMaterializationTasks.length > 0) {
+      const result = this.drainPendingSymbolTasks(Number.POSITIVE_INFINITY);
+      if (result.processedCount === 0) {
+        break;
+      }
+    }
+  }
+
+  private removePendingSymbolTasksByKey(key: string): void {
+    if (this.pendingSymbolMaterializationTasks.length === 0) {
+      return;
+    }
+
+    for (let index = this.pendingSymbolMaterializationTasks.length - 1; index >= 0; index -= 1) {
+      if (this.pendingSymbolMaterializationTasks[index]?.key !== key) {
         continue;
       }
 
-      const coordinate = this.coordinateByKey.get(key)
-        ?? parseRenderTileCoordinateFromKey(key);
-      for (const placement of handle.symbols.placements) {
-        for (const [partIndex, part] of placement.collisionParts.entries()) {
-          symbolPlacements.push({
-            coordinate,
-            handle,
-            part,
-            partIndex,
-            placement,
-          });
-        }
-      }
+      this.pendingSymbolMaterializationTasks.splice(index, 1);
     }
+  }
 
-    if (symbolPlacements.length === 0) {
+  private insertPendingSymbolMaterializationTask(task: PendingSymbolMaterializationTask): void {
+    const insertIndex = this.pendingSymbolMaterializationTasks.findIndex(existing =>
+      comparePendingSymbolMaterializationTasks(task, existing) < 0,
+    );
+
+    if (insertIndex === -1) {
+      this.pendingSymbolMaterializationTasks.push(task);
       return;
     }
 
-    symbolPlacements.sort(compareSymbolPlacementTargets);
-
-    if (this.crossSourceCollisions) {
-      this.reconcileSymbolPlacementsForTargets(symbolPlacements);
-      this.syncVisibleSymbolSourceIndexes();
-      return;
-    }
-
-    // 关闭 crossSourceCollisions 时，source 之间不共享碰撞预算，但同一 source 内仍然要按空间关系隐藏重叠符号。
-    const targetsBySourceId = new Map<string, SymbolPlacementTarget[]>();
-    for (const target of symbolPlacements) {
-      const sourceTargets = targetsBySourceId.get(target.coordinate.sourceId);
-      if (sourceTargets) {
-        sourceTargets.push(target);
-      }
-      else {
-        targetsBySourceId.set(target.coordinate.sourceId, [target]);
-      }
-    }
-
-    for (const targets of targetsBySourceId.values()) {
-      this.reconcileSymbolPlacementsForTargets(targets);
-    }
-
-    this.syncVisibleSymbolSourceIndexes();
+    this.pendingSymbolMaterializationTasks.splice(insertIndex, 0, task);
   }
 
   private reconcileSymbolPlacementsForTargets(
@@ -378,7 +666,12 @@ export class RenderManager {
     visible: boolean,
   ): void {
     for (const renderable of part.renderables) {
-      renderable.collection.get(renderable.index).show = visible;
+      if (renderable.visible === visible) {
+        continue;
+      }
+
+      renderable.visible = visible;
+      renderable.item.show = visible;
     }
   }
 
@@ -396,7 +689,7 @@ export class RenderManager {
 
       const visibleSourceIndexesByLayerAndSourceLayer = new Map<string, Map<string, Set<number>>>();
       for (const placement of symbols.placements) {
-        if (!placement.renderables.some(renderable => renderable.collection.get(renderable.index).show !== false)) {
+        if (!placement.renderables.some(renderable => renderable.visible !== false)) {
           continue;
         }
 
@@ -426,6 +719,7 @@ export class RenderManager {
     style: StyleSpecification,
     styleIndex?: StyleIndex,
     sourceLayer?: string,
+    styleEpoch = 0,
   ): void {
     for (const key of this.getKeysForSource(sourceId)) {
       if (sourceLayer && !this.handleMatchesSourceLayer(key, sourceLayer)) {
@@ -437,7 +731,7 @@ export class RenderManager {
         continue;
       }
 
-      this.refresh(key, bucketTile, style, styleIndex);
+      this.refresh(key, bucketTile, style, styleIndex, 0, styleEpoch);
     }
   }
 
@@ -550,6 +844,21 @@ function removeKeyFromSnapshot(snapshot: string[], key: string): void {
   snapshot.splice(index, 1);
 }
 
+function comparePendingSymbolMaterializationTasks(
+  left: PendingSymbolMaterializationTask,
+  right: PendingSymbolMaterializationTask,
+): number {
+  if (left.priority !== right.priority) {
+    return left.priority - right.priority;
+  }
+
+  if (left.sequence !== right.sequence) {
+    return left.sequence - right.sequence;
+  }
+
+  return left.enqueuedAt - right.enqueuedAt;
+}
+
 function compareSymbolPlacementTargets(
   left: SymbolPlacementTarget,
   right: SymbolPlacementTarget,
@@ -588,4 +897,12 @@ function compareSymbolPlacementTargets(
   }
 
   return 0;
+}
+
+function now(): number {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+
+  return Date.now();
 }

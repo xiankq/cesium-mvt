@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getVisibleSymbolSourceIndexes, resolveSourceLayerNames } from '@/mvt/render/render-query-utils';
+import {
+  getVisibleSymbolSourceIndexes,
+  isSymbolPlacementVisible,
+  resolveSourceLayerNames,
+} from '@/mvt/render/render-query-utils';
 
 describe('render-query-utils', () => {
   it('应该优先使用 TileSpatialIndex 缓存的 sourceLayerNames', () => {
@@ -60,5 +64,29 @@ describe('render-query-utils', () => {
     const result = getVisibleSymbolSourceIndexes(handle, 'poi-layer', 'layer');
 
     expect(result).toBe(visibleSourceIndexes);
+  });
+
+  it('应该优先使用直接持有的 item 可见性状态', () => {
+    const placement = {
+      layerId: 'poi-layer',
+      renderables: [
+        {
+          collection: {
+            get() {
+              throw new Error('should not be called');
+            },
+          },
+          index: 0,
+          item: {
+            show: true,
+          },
+          visible: true,
+        },
+      ],
+      sourceIndex: 0,
+      sourceLayer: 'layer',
+    } as any;
+
+    expect(isSymbolPlacementVisible(placement)).toBe(true);
   });
 });

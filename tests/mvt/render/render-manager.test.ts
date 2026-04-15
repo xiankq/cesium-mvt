@@ -105,6 +105,211 @@ describe('render-manager', () => {
     });
   });
 
+  it('runBatchedMutations 应该把一轮批量变更收敛成一次符号重排', async () => {
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const manager = new RenderManager({
+      root,
+    });
+    const style = createDashedLineStyle();
+    const reconcileSpy = vi.spyOn(manager as any, 'reconcileSymbolPlacements');
+    const firstTile = createMockLineBucketTile({
+      tileKey: 'source/0/0/0',
+    });
+    const secondTile = createMockLineBucketTile({
+      tileKey: 'source/0/0/1',
+    });
+
+    (manager as any).runBatchedMutations(() => {
+      manager.mount('source/0/0/0', firstTile, style);
+      manager.mount('source/0/0/1', secondTile, style);
+      manager.hide('source/0/0/0');
+      manager.remove('source/0/0/1');
+    });
+
+    expect(reconcileSpy).toHaveBeenCalledTimes(1);
+    expect(manager.getProfilingMetrics()).toMatchObject({
+      symbolReconcileCount: 1,
+    });
+  });
+
+  it('应该先挂载瓦片壳子，再在队列刷新后补上符号', async () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const manager = new RenderManager({
+      root,
+      symbolMaterializationBudgetMs: 0,
+    });
+    const style = createSymbolStyle();
+
+    const handle = manager.mount(
+      'source/15/0/0',
+      createSymbolBucketTile(
+        'source/15/0/0',
+        'Museum',
+        Cartesian3.fromDegrees(120, 30, 0),
+      ),
+      style,
+    );
+
+    expect(handle.symbols).toBeUndefined();
+    expect(getLabel(handle)).toBeUndefined();
+
+    const drainResult = manager.drainPendingSymbolTasks(10);
+
+    expect(drainResult).toEqual({
+      processedCount: 1,
+      remainingCount: 0,
+    });
+    expect(getLabel(handle)?.text).toBe('Museum');
+
+    manager.destroy();
+  });
+
+  it('应该按 chunk 逐步补齐同一个 tile 的符号', async () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const manager = new RenderManager({
+      root,
+      symbolMaterializationBudgetMs: 0,
+      symbolMaterializationChunkSize: 1,
+    } as any);
+    const style = createSymbolStyle(false, {
+      textAllowOverlap: true,
+    });
+    const key = 'source/15/0/0';
+
+    const handle = manager.mount(
+      key,
+      createSymbolBucketTile(
+        key,
+        ['Museum', 'Cafe', 'Park'],
+        [
+          Cartesian3.fromDegrees(120, 30, 0),
+          Cartesian3.fromDegrees(120.0005, 30, 0),
+          Cartesian3.fromDegrees(120.001, 30, 0),
+        ],
+      ),
+      style,
+    );
+
+    expect(handle.symbols).toBeUndefined();
+
+    expect(manager.drainPendingSymbolTasks(10)).toEqual({
+      processedCount: 1,
+      remainingCount: 1,
+    });
+    expect(handle.symbols).toBeDefined();
+    expect(countVisibleRenderables(handle)).toBe(1);
+
+    expect(manager.drainPendingSymbolTasks(10)).toEqual({
+      processedCount: 1,
+      remainingCount: 1,
+    });
+    expect(countVisibleRenderables(handle)).toBe(2);
+
+    expect(manager.drainPendingSymbolTasks(10)).toEqual({
+      processedCount: 1,
+      remainingCount: 0,
+    });
+    expect(countVisibleRenderables(handle)).toBe(3);
+
+    manager.destroy();
+  });
+
+  it('应该优先补齐更高优先级的符号任务', async () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const manager = new RenderManager({
+      root,
+      symbolMaterializationBudgetMs: 0,
+      symbolMaterializationChunkSize: 1,
+    });
+    const style = createSymbolStyle(false, {
+      textAllowOverlap: true,
+    });
+    const lowKey = 'source/15/0/0';
+    const highKey = 'source/15/0/1';
+
+    const lowHandle = manager.mount(
+      lowKey,
+      createSymbolBucketTile(
+        lowKey,
+        'Low',
+        Cartesian3.fromDegrees(120, 30, 0),
+      ),
+      style,
+      undefined,
+      10,
+    );
+    const highHandle = manager.mount(
+      highKey,
+      createSymbolBucketTile(
+        highKey,
+        'High',
+        Cartesian3.fromDegrees(120, 30, 0),
+      ),
+      style,
+      undefined,
+      0,
+    );
+
+    expect(lowHandle.symbols).toBeUndefined();
+    expect(highHandle.symbols).toBeUndefined();
+
+    expect((manager as any).pendingSymbolMaterializationTasks.map((task: { key: string }) => task.key)).toEqual([
+      highKey,
+      lowKey,
+    ]);
+
+    manager.destroy();
+  });
+
+  it('在瓦片被移除后不应该再补回延迟的符号', async () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const { RenderManager } = await import('@/mvt/render/render-manager');
+
+    const root = new PrimitiveCollection();
+    const manager = new RenderManager({
+      root,
+      symbolMaterializationBudgetMs: 0,
+    });
+    const style = createSymbolStyle();
+
+    const key = 'source/15/0/0';
+    const handle = manager.mount(
+      key,
+      createSymbolBucketTile(
+        key,
+        'Museum',
+        Cartesian3.fromDegrees(120, 30, 0),
+      ),
+      style,
+    );
+
+    expect(handle.symbols).toBeUndefined();
+
+    expect(manager.remove(key)).toBe(true);
+    expect(manager.drainPendingSymbolTasks(10)).toEqual({
+      processedCount: 0,
+      remainingCount: 0,
+    });
+    expect(handle.symbols).toBeUndefined();
+
+    manager.destroy();
+  });
+
   it('应该只把每个 tile 挂载到 root 一次', async () => {
     vi.stubGlobal('document', createDocumentStub());
 
@@ -172,7 +377,7 @@ describe('render-manager', () => {
     );
 
     expect(refreshSpy).toHaveBeenCalledTimes(1);
-    expect(refreshSpy).toHaveBeenCalledWith(roadsKey, roadsTile, style, undefined);
+    expect(refreshSpy).toHaveBeenCalledWith(roadsKey, roadsTile, style, undefined, 0, 0);
     expect(manager.getHandle(roadsKey)).not.toBe(roadsHandle);
     expect(manager.getHandle(poiKey)).toBe(poiHandle);
 

@@ -834,10 +834,127 @@ describe('cesiumVectorTileCoordinator', () => {
       expect.any(Function),
       style,
       expect.anything(),
+      1,
     );
     expect(refreshSourceSpy).not.toHaveBeenCalled();
     expect(renderManager.getHandle(poiKey)).toBeDefined();
     expect(renderManager.getHandle(roadsKey)).toBeDefined();
+  });
+
+  it('feature-state 刷新多个同 sourceLayer 瓦片时应该只重排一次符号', async () => {
+    const coordinator = await createCoordinator();
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'poi',
+          'paint': {
+            'circle-color': ['case', ['==', ['feature-state', 'selected'], true], '#ff0000', '#0000ff'],
+            'circle-radius': 5,
+          },
+          'source': 'base',
+          'source-layer': 'poi',
+          'type': 'circle',
+        },
+      ],
+    };
+
+    coordinator.updateStyle(style);
+
+    const renderManager = (coordinator as any).renderManager;
+    const cacheManager = (coordinator as any).cacheManager;
+    const styleEpoch = (coordinator as any).styleManager.getStyleEpoch();
+    const firstKey = `${styleEpoch}:base/0/0/0`;
+    const secondKey = `${styleEpoch}:base/0/0/1`;
+    const firstTile = createFeatureStateCircleTile(firstKey, 'poi', 'poi');
+    const secondTile = createFeatureStateCircleTile(secondKey, 'poi', 'poi');
+
+    renderManager.mount(firstKey, firstTile, style);
+    renderManager.mount(secondKey, secondTile, style);
+    cacheManager.set(firstKey, firstTile);
+    cacheManager.set(secondKey, secondTile);
+
+    const beforeMetrics = renderManager.getProfilingMetrics();
+
+    coordinator.setFeatureState({
+      id: 1,
+      sourceId: 'base',
+      sourceLayer: 'poi',
+    }, {
+      selected: true,
+    });
+
+    const afterMetrics = renderManager.getProfilingMetrics();
+    expect(afterMetrics.symbolReconcileCount - beforeMetrics.symbolReconcileCount).toBe(1);
+  });
+
+  it('processTileSelection 同时展示和隐藏瓦片时应该只重排一次符号', async () => {
+    const coordinator = await createCoordinator();
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        base: {
+          type: 'vector',
+          tiles: ['https://tiles.example.com/{z}/{x}/{y}.pbf'],
+        },
+      },
+      layers: [
+        {
+          'id': 'poi',
+          'paint': {
+            'circle-color': '#0000ff',
+            'circle-radius': 5,
+          },
+          'source': 'base',
+          'source-layer': 'poi',
+          'type': 'circle',
+        },
+      ],
+    };
+
+    coordinator.updateStyle(style);
+
+    const renderManager = (coordinator as any).renderManager;
+    const cacheManager = (coordinator as any).cacheManager;
+    const scheduler = (coordinator as any).scheduler;
+    const sourceManager = (coordinator as any).sourceManager;
+    const styleEpoch = (coordinator as any).styleManager.getStyleEpoch();
+    const visibleKey = `${styleEpoch}:base/0/0/1`;
+    const hiddenKey = `${styleEpoch}:base/0/0/0`;
+    const visibleTile = createFeatureStateCircleTile(visibleKey, 'poi', 'poi');
+    const hiddenTile = createFeatureStateCircleTile(hiddenKey, 'poi', 'poi');
+
+    renderManager.mount(visibleKey, visibleTile, style);
+    renderManager.mount(hiddenKey, hiddenTile, style);
+    cacheManager.set(visibleKey, visibleTile);
+    cacheManager.set(hiddenKey, hiddenTile);
+    renderManager.hide(hiddenKey);
+
+    const showSpy = vi.spyOn(renderManager, 'show');
+    const hideSpy = vi.spyOn(renderManager, 'hide');
+    const beforeMetrics = renderManager.getProfilingMetrics();
+
+    vi.spyOn(scheduler, 'resolveSourceTiles').mockReturnValue({
+      fallbackCoordinates: [],
+      readyCoordinates: [{ level: 0, x: 0, y: 0 }],
+      requestCoordinates: [],
+    } as any);
+    vi.spyOn(sourceManager, 'getSourceIds').mockReturnValue(['base']);
+    vi.spyOn(sourceManager, 'getSourceConstraints').mockReturnValue({});
+    vi.spyOn(sourceManager, 'getNextRetryAt').mockReturnValue(undefined);
+
+    const processTileSelection = (coordinator as any).processTileSelection.bind(coordinator);
+    processTileSelection([{ level: 0, x: 0, y: 0 }]);
+
+    expect(showSpy).toHaveBeenCalledTimes(1);
+    expect(hideSpy).toHaveBeenCalledTimes(1);
+    expect(renderManager.getProfilingMetrics().symbolReconcileCount - beforeMetrics.symbolReconcileCount).toBe(1);
   });
 
   it('视图变化时应该取消过期的待处理请求', async () => {

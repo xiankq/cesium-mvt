@@ -3,11 +3,13 @@ import { BillboardCollection, Cartesian2, HorizontalOrigin, LabelCollection, Ver
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SymbolBucketBuilder } from '@/mvt/bucket/symbol-bucket-builder';
 import { createBucketSymbolTileHandle, resolveSymbolRenderDecision } from '@/mvt/render/backend/bucket-symbol-backend';
+import * as symbolRenderUtils from '@/mvt/render/backend/symbol-render-utils';
 
 const ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nqkAAAAASUVORK5CYII=';
 
 describe('bucket-symbol-backend', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -152,6 +154,65 @@ describe('bucket-symbol-backend', () => {
     const secondBillboard = billboardCollection.get(1);
     expect(firstBillboard.image).toBe(ICON_DATA_URI);
     expect(secondBillboard.image).toBe(ICON_DATA_URI);
+  });
+
+  it('应该复用重复 formatted 文本的布局计算', () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const bucketTile = createDuplicateFormattedSymbolBucketTile();
+    const style = createFormattedSymbolStyle();
+    const layoutSpy = vi.spyOn(symbolRenderUtils, 'layoutFormattedSymbolContent');
+
+    const handle = createBucketSymbolTileHandle({
+      bucketTile,
+      style,
+    });
+
+    expect(handle).toBeDefined();
+    expect(layoutSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('应该在不同 tile 之间复用重复 formatted 文本的布局计算', () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const style = createFormattedSymbolStyle();
+    const layoutSpy = vi.spyOn(symbolRenderUtils, 'layoutFormattedSymbolContent');
+
+    const firstHandle = createBucketSymbolTileHandle({
+      bucketTile: createDuplicateFormattedSymbolBucketTile('source/0/0/0'),
+      style,
+    });
+    const secondHandle = createBucketSymbolTileHandle({
+      bucketTile: createDuplicateFormattedSymbolBucketTile('source/0/0/1'),
+      style,
+    });
+
+    expect(firstHandle).toBeDefined();
+    expect(secondHandle).toBeDefined();
+    expect(layoutSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('应该在 styleEpoch 变化时重新计算 formatted 文本布局', () => {
+    vi.stubGlobal('document', createDocumentStub());
+
+    const bucketTile = createDuplicateFormattedSymbolBucketTile();
+    const style = createFormattedSymbolStyle();
+    const layoutSpy = vi.spyOn(symbolRenderUtils, 'layoutFormattedSymbolContent');
+
+    const firstHandle = createBucketSymbolTileHandle({
+      bucketTile,
+      style,
+      styleEpoch: 1,
+    } as any);
+    const secondHandle = createBucketSymbolTileHandle({
+      bucketTile: createDuplicateFormattedSymbolBucketTile('source/0/0/1'),
+      style,
+      styleEpoch: 2,
+    } as any);
+
+    expect(firstHandle).toBeDefined();
+    expect(secondHandle).toBeDefined();
+    expect(layoutSpy).toHaveBeenCalledTimes(2);
   });
 
   it('应该按照 symbol-sort-key 排序同层符号', () => {
@@ -879,6 +940,56 @@ function createBucketOptions(
       south: rect.south,
       west: rect.west,
     },
+  };
+}
+
+function createDuplicateFormattedSymbolBucketTile(key = 'source/0/0/0') {
+  const builder = new SymbolBucketBuilder(createBucketOptions());
+  for (const [id, x] of [[7, 512], [8, 1536]] as const) {
+    builder.addFeature({
+      id,
+      loadGeometry: () => [[{ x, y: 512 }]],
+      properties: {
+        icon: ICON_DATA_URI,
+        name: 'Museum',
+      },
+      type: 1,
+    } as any, 0);
+  }
+
+  const bucket = builder.build();
+  return {
+    buckets: [bucket],
+    byteLength: bucket.stats.byteLength,
+    epoch: 1,
+    key,
+  };
+}
+
+function createFormattedSymbolStyle(): StyleSpecification {
+  return {
+    version: 8,
+    sources: {},
+    layers: [
+      {
+        'id': 'poi-layer',
+        'type': 'symbol',
+        'source': 'source',
+        'source-layer': 'layer',
+        'layout': {
+          'icon-image': ['get', 'icon'],
+          'text-field': [
+            'format',
+            ['get', 'name'],
+            {
+              'font-scale': 1.2,
+              'text-font': ['literal', ['Open Sans Regular', 'Arial Unicode MS Regular']],
+            },
+          ],
+          'text-size': 18,
+        },
+      },
+    ],
   };
 }
 

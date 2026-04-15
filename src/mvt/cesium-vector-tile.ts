@@ -84,11 +84,11 @@ export class CesiumVectorTile extends PrimitiveCollection {
   }
 
   update(frameState: any): void {
-    super.update(frameState);
-
     if (this.destroyed) {
       return;
     }
+
+    super.update(frameState);
 
     this.coordinator.update({
       camera: frameState.camera,
@@ -150,8 +150,8 @@ export class CesiumVectorTile extends PrimitiveCollection {
       return this;
     }
 
-    this.coordinator.destroy();
     this.destroyed = true;
+    this.coordinator.destroy();
     super.destroy();
     return this;
   }

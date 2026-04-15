@@ -314,6 +314,29 @@ describe('cesiumVectorTile', () => {
     vectorTile.destroy();
   });
 
+  it('销毁后再次 update 不应该再调用父类 update', () => {
+    const vectorTile = new CesiumVectorTile();
+    const coordinator = {
+      destroy: vi.fn(),
+      update: vi.fn(),
+    };
+    (vectorTile as any).coordinator = coordinator;
+    const superUpdateSpy = vi.spyOn(PrimitiveCollection.prototype, 'update');
+
+    vectorTile.destroy();
+
+    vectorTile.update({
+      camera: {},
+      context: {
+        drawingBufferWidth: 0,
+      },
+    });
+
+    expect(superUpdateSpy).not.toHaveBeenCalled();
+    expect(coordinator.update).not.toHaveBeenCalled();
+    superUpdateSpy.mockRestore();
+  });
+
   it('销毁时清理所有资源', () => {
     const vectorTile = new CesiumVectorTile();
 

@@ -9,6 +9,7 @@ import type {
   BucketSymbolCollectionHandle,
   BucketSymbolPlacementHandle,
   BucketSymbolPlacementPartHandle,
+  BucketSymbolRenderableDescriptor,
   BucketSymbolRenderableHandle,
 } from './bucket-symbol-types';
 import type { SymbolPlacementGrid, SymbolPlacementGridPlacement } from './symbol-placement-grid';
@@ -24,7 +25,7 @@ import {
 } from 'cesium';
 import { createFeatureFilter } from '../../style/filter-adapter';
 import { createSymbolLayerStyleResolver } from '../../style/layer-style-resolver';
-import { resolveStyleImage } from '../../style/sprite-atlas';
+import { resolveStyleImage, resolveStyleImageName } from '../../style/sprite-atlas';
 import { isValidTypedArray } from '../../utils/validation';
 import {
   createPrimitiveStyleContext,
@@ -59,10 +60,23 @@ import {
 export interface SymbolPlacement {
   position: Cartesian3;
   lineAngle?: number;
+  featureIdentity?: number | string;
   sourceIndex: number;
   symbolStyle: SymbolLayerStyle;
   viewportLatitude?: number;
 }
+
+interface SymbolLayoutCacheEntry {
+  formattedLayout?: ReturnType<typeof layoutFormattedSymbolContent>;
+  iconFit?: {
+    height: number;
+    width: number;
+  };
+  iconImage?: ReturnType<typeof resolveStyleImage>;
+  renderedText: string;
+}
+
+const symbolLayoutCacheByStyle = new WeakMap<StyleSpecification, Map<number, Map<string, SymbolLayoutCacheEntry>>>();
 
 export function createSymbolCollections(
   bucket: Bucket,
@@ -73,6 +87,7 @@ export function createSymbolCollections(
   sourceId: string,
   zoom: number,
   tileCoordinate: TileCoordinate,
+  styleEpoch: number,
   tileWidth: number,
   tileRectangle: TileNativeRectangle,
   placementGrid: SymbolPlacementGrid,
@@ -138,6 +153,7 @@ export function createSymbolCollections(
     const symbolStyle = resolveStyle(context);
     const position = Cartesian3.fromElements(x, y, z);
     placements.push({
+      featureIdentity: featureIndex?.id ?? index,
       position,
       lineAngle: data.lineAngles?.[index],
       sourceIndex: index,
@@ -157,6 +173,18 @@ export function createSymbolCollections(
 
   const labelCollection = new LabelCollection();
   const billboardCollection = new BillboardCollection();
+  const labelCollectionHandle: BucketSymbolCollectionHandle = {
+    byteLength: 0,
+    collection: labelCollection,
+    itemCount: 0,
+    layerId,
+  };
+  const billboardCollectionHandle: BucketSymbolCollectionHandle = {
+    byteLength: 0,
+    collection: billboardCollection,
+    itemCount: 0,
+    layerId,
+  };
   let labelCount = 0;
   let billboardCount = 0;
 
@@ -166,14 +194,37 @@ export function createSymbolCollections(
       symbolStyle.textField,
       symbolStyle.textTransform,
     );
-    const formattedLayout = symbolText.sections?.length
-      ? layoutFormattedSymbolContent(
-          symbolStyle,
-          symbolText.sections,
-          image => resolveStyleImage(style, image ?? undefined),
-        )
-      : undefined;
-    const renderedSymbolText = resolveSymbolRenderedText(symbolStyle, symbolText.text);
+    const layoutCacheKey = createSymbolLayoutCacheKey(
+      layerId,
+      symbolStyle,
+      symbolText,
+    );
+    const layoutState = getSymbolLayoutCacheEntry(style, styleEpoch, layoutCacheKey, () => {
+      const iconImage = symbolStyle.iconImage
+        ? resolveStyleImage(style, symbolStyle.iconImage)
+        : undefined;
+      const formattedLayout = symbolText.sections?.length
+        ? layoutFormattedSymbolContent(
+            symbolStyle,
+            symbolText.sections,
+            image => resolveStyleImage(style, image ?? undefined),
+          )
+        : undefined;
+      return {
+        formattedLayout,
+        iconFit: iconImage
+          ? resolveIconTextFitDimensions(symbolStyle, symbolText, iconImage, formattedLayout)
+          : undefined,
+        iconImage,
+        renderedText: resolveSymbolRenderedText(symbolStyle, symbolText.text),
+      };
+    });
+    const {
+      formattedLayout,
+      iconFit,
+      iconImage,
+      renderedText: renderedSymbolText,
+    } = layoutState;
     const textTranslatePlacement = resolveTranslatedSymbolPosition(
       placement.position,
       symbolStyle.textTranslate,
@@ -192,12 +243,6 @@ export function createSymbolCollections(
       ? textTranslatePlacement.position
       : iconTranslatePlacement.position;
     const anchor = getSymbolMatchAnchor(matchPosition);
-    const iconImage = symbolStyle.iconImage
-      ? resolveStyleImage(style, symbolStyle.iconImage)
-      : undefined;
-    const iconFit = iconImage
-      ? resolveIconTextFitDimensions(symbolStyle, symbolText, iconImage, formattedLayout)
-      : undefined;
     const fittedIconImage = iconFit && iconImage
       ? {
           ...iconImage,
@@ -274,41 +319,40 @@ export function createSymbolCollections(
     );
 
     if (shouldRenderIcon && fittedIconImage && iconPlacement) {
-      const renderables: BucketSymbolRenderableHandle[] = [];
-      billboardCollection.add({
-        color: resolveColor(
-          symbolStyle.iconColor,
-          symbolStyle.iconOpacity,
-          CesiumColor.WHITE,
-        ),
-        horizontalOrigin: convertHorizontalOrigin(
-          iconPlacement.iconAnchor,
-        ),
-        image: fittedIconImage.image,
-        height: iconFit?.height,
-        rotation: toCesiumRotation(symbolStyle.iconRotate),
-        pixelOffset: iconPlacement.iconOffset
-          ? new Cartesian2(iconPlacement.iconOffset[0], iconPlacement.iconOffset[1])
-          : undefined,
-        disableDepthTestDistance: 0,
-        position: iconTranslatePlacement.position,
-        scale: iconFit ? 1 : (symbolStyle.iconSize ?? 1),
-        show: true,
-        width: iconFit?.width,
-        verticalOrigin: convertVerticalOrigin(
-          iconPlacement.iconAnchor,
-        ),
-      });
-      renderables.push({
+      const renderableDescriptors: BucketSymbolRenderableDescriptor[] = [{
         collection: billboardCollection,
-        index: billboardCount,
-      });
+        collectionHandle: billboardCollectionHandle,
+        options: {
+          color: resolveColor(
+            symbolStyle.iconColor,
+            symbolStyle.iconOpacity,
+            CesiumColor.WHITE,
+          ),
+          disableDepthTestDistance: 0,
+          height: iconFit?.height,
+          horizontalOrigin: convertHorizontalOrigin(
+            iconPlacement.iconAnchor,
+          ),
+          image: fittedIconImage.image,
+          pixelOffset: iconPlacement.iconOffset
+            ? new Cartesian2(iconPlacement.iconOffset[0], iconPlacement.iconOffset[1])
+            : undefined,
+          position: iconTranslatePlacement.position,
+          rotation: toCesiumRotation(symbolStyle.iconRotate),
+          scale: iconFit ? 1 : (symbolStyle.iconSize ?? 1),
+          verticalOrigin: convertVerticalOrigin(
+            iconPlacement.iconAnchor,
+          ),
+          width: iconFit?.width,
+        },
+      }];
       billboardCount += 1;
       appendPlacementPart(bucketPlacement, collisionParts, placementGrid, {
         collision: iconPlacement.collision,
         groupKey: placementGroupKey,
         kind: 'icon',
-        renderables,
+        renderableDescriptors,
+        renderables: [],
         textAnchor: iconPlacement.iconAnchor,
         textOffset: iconPlacement.iconOffset,
       }, {
@@ -323,7 +367,7 @@ export function createSymbolCollections(
     }
 
     if (shouldRenderText && textPlacement) {
-      const renderables: BucketSymbolRenderableHandle[] = [];
+      const renderableDescriptors: BucketSymbolRenderableDescriptor[] = [];
       if (formattedLayout) {
         const groupOffset = resolveFormattedGroupPixelOffset(
           textPlacement.textAnchor,
@@ -339,21 +383,20 @@ export function createSymbolCollections(
           );
 
           if (section.kind === 'image' && section.image) {
-            billboardCollection.add({
-              horizontalOrigin: CesiumHorizontalOrigin.LEFT,
-              image: section.image.image,
-              height: section.height,
-              pixelOffset,
-              disableDepthTestDistance: 0,
-              position: textTranslatePlacement.position,
-              scale: 1,
-              show: true,
-              width: section.width,
-              verticalOrigin: CesiumVerticalOrigin.TOP,
-            });
-            renderables.push({
+            renderableDescriptors.push({
               collection: billboardCollection,
-              index: billboardCount,
+              collectionHandle: billboardCollectionHandle,
+              options: {
+                disableDepthTestDistance: 0,
+                height: section.height,
+                horizontalOrigin: CesiumHorizontalOrigin.LEFT,
+                image: section.image.image,
+                pixelOffset,
+                position: textTranslatePlacement.position,
+                scale: 1,
+                verticalOrigin: CesiumVerticalOrigin.TOP,
+                width: section.width,
+              },
             });
             billboardCount += 1;
             continue;
@@ -364,55 +407,53 @@ export function createSymbolCollections(
           }
 
           const sectionFontSize = (symbolStyle.textSize ?? 16) * section.scale;
-          labelCollection.add({
-            fillColor: resolveColor(
-              section.textColor ?? symbolStyle.textColor,
-              symbolStyle.textOpacity,
-              CesiumColor.BLACK,
-            ),
-            outlineColor: resolveTextHaloColor(symbolStyle),
-            outlineWidth: resolveTextHaloWidth(symbolStyle),
-            font: resolveLabelFont(symbolStyle, section.fontStack, sectionFontSize),
-            horizontalOrigin: CesiumHorizontalOrigin.LEFT,
-            pixelOffset,
-            disableDepthTestDistance: 0,
-            position: textTranslatePlacement.position,
-            scale: 1,
-            show: true,
-            text: section.text,
-            verticalOrigin: CesiumVerticalOrigin.TOP,
-          });
-          renderables.push({
+          renderableDescriptors.push({
             collection: labelCollection,
-            index: labelCount,
+            collectionHandle: labelCollectionHandle,
+            options: {
+              disableDepthTestDistance: 0,
+              fillColor: resolveColor(
+                section.textColor ?? symbolStyle.textColor,
+                symbolStyle.textOpacity,
+                CesiumColor.BLACK,
+              ),
+              font: resolveLabelFont(symbolStyle, section.fontStack, sectionFontSize),
+              horizontalOrigin: CesiumHorizontalOrigin.LEFT,
+              outlineColor: resolveTextHaloColor(symbolStyle),
+              outlineWidth: resolveTextHaloWidth(symbolStyle),
+              pixelOffset,
+              position: textTranslatePlacement.position,
+              scale: 1,
+              text: section.text,
+              verticalOrigin: CesiumVerticalOrigin.TOP,
+            },
           });
           labelCount += 1;
         }
       }
       else {
-        labelCollection.add({
-          fillColor: resolveColor(
-            symbolStyle.textColor,
-            symbolStyle.textOpacity,
-            CesiumColor.BLACK,
-          ),
-          outlineColor: resolveTextHaloColor(symbolStyle),
-          outlineWidth: resolveTextHaloWidth(symbolStyle),
-          font: resolveLabelFont(symbolStyle),
-          horizontalOrigin: convertHorizontalOrigin(textPlacement.textAnchor),
-          pixelOffset: textPlacement.textOffset
-            ? new Cartesian2(textPlacement.textOffset[0], textPlacement.textOffset[1])
-            : undefined,
-          disableDepthTestDistance: 0,
-          position: textTranslatePlacement.position,
-          scale: 1,
-          show: true,
-          text: renderedSymbolText,
-          verticalOrigin: convertVerticalOrigin(textPlacement.textAnchor),
-        });
-        renderables.push({
+        renderableDescriptors.push({
           collection: labelCollection,
-          index: labelCount,
+          collectionHandle: labelCollectionHandle,
+          options: {
+            disableDepthTestDistance: 0,
+            fillColor: resolveColor(
+              symbolStyle.textColor,
+              symbolStyle.textOpacity,
+              CesiumColor.BLACK,
+            ),
+            font: resolveLabelFont(symbolStyle),
+            horizontalOrigin: convertHorizontalOrigin(textPlacement.textAnchor),
+            outlineColor: resolveTextHaloColor(symbolStyle),
+            outlineWidth: resolveTextHaloWidth(symbolStyle),
+            pixelOffset: textPlacement.textOffset
+              ? new Cartesian2(textPlacement.textOffset[0], textPlacement.textOffset[1])
+              : undefined,
+            position: textTranslatePlacement.position,
+            scale: 1,
+            text: renderedSymbolText,
+            verticalOrigin: convertVerticalOrigin(textPlacement.textAnchor),
+          },
         });
         labelCount += 1;
       }
@@ -421,7 +462,8 @@ export function createSymbolCollections(
         collision: textPlacement.collision,
         groupKey: placementGroupKey,
         kind: 'text',
-        renderables,
+        renderableDescriptors,
+        renderables: [],
         textAnchor: textPlacement.textAnchor,
         textOffset: textPlacement.textOffset,
       }, {
@@ -435,7 +477,7 @@ export function createSymbolCollections(
       });
     }
 
-    if (bucketPlacement.renderables.length > 0) {
+    if (bucketPlacement.collisionParts.length > 0) {
       bucketPlacements.push(bucketPlacement);
     }
   }
@@ -443,24 +485,16 @@ export function createSymbolCollections(
   const collections: BucketSymbolCollectionHandle[] = [];
 
   if (billboardCount > 0) {
-    collections.push({
-      byteLength: billboardCount * 100,
-      collection: billboardCollection,
-      itemCount: billboardCount,
-      layerId,
-    });
+    billboardCollectionHandle.byteLength = billboardCount * 100;
+    collections.push(billboardCollectionHandle);
   }
   else {
     billboardCollection.destroy();
   }
 
   if (labelCount > 0) {
-    collections.push({
-      byteLength: labelCount * 100,
-      collection: labelCollection,
-      itemCount: labelCount,
-      layerId,
-    });
+    labelCollectionHandle.byteLength = labelCount * 100;
+    collections.push(labelCollectionHandle);
   }
   else {
     labelCollection.destroy();
@@ -479,7 +513,7 @@ function appendPlacementPart(
   part: BucketSymbolPlacementPartHandle,
   gridPlacement: SymbolPlacementGridPlacement,
 ): void {
-  if (part.renderables.length === 0) {
+  if (part.renderableDescriptors.length === 0) {
     return;
   }
 
@@ -491,6 +525,63 @@ function appendPlacementPart(
   }
 }
 
+export function materializeSymbolCollections(
+  handle: {
+    materializationCursor: number;
+    placements: BucketSymbolPlacementHandle[];
+  },
+  visible: boolean,
+  placementBudget: number = Number.POSITIVE_INFINITY,
+): number {
+  if (handle.materializationCursor >= handle.placements.length || placementBudget <= 0) {
+    return 0;
+  }
+
+  const maxPlacements = Number.isFinite(placementBudget)
+    ? Math.max(0, Math.trunc(placementBudget))
+    : handle.placements.length - handle.materializationCursor;
+  let processedCount = 0;
+
+  while (
+    handle.materializationCursor < handle.placements.length
+    && processedCount < maxPlacements
+  ) {
+    const placement = handle.placements[handle.materializationCursor];
+    if (!placement) {
+      handle.materializationCursor += 1;
+      continue;
+    }
+
+    for (const part of placement.collisionParts) {
+      if (part.renderableDescriptors.length === 0) {
+        continue;
+      }
+
+      for (const descriptor of part.renderableDescriptors) {
+        const itemIndex = descriptor.collectionHandle.itemCount;
+        const item = descriptor.collection.add({
+          ...descriptor.options,
+          show: visible,
+        } as never);
+        const renderable: BucketSymbolRenderableHandle = {
+          collection: descriptor.collection,
+          item,
+          index: itemIndex,
+          visible,
+        };
+        descriptor.collectionHandle.itemCount += 1;
+        part.renderables.push(renderable);
+        placement.renderables.push(renderable);
+      }
+    }
+
+    handle.materializationCursor += 1;
+    processedCount += 1;
+  }
+
+  return processedCount;
+}
+
 function createSymbolPlacementGroupKey(
   sourceId: string,
   level: number,
@@ -500,6 +591,67 @@ function createSymbolPlacementGroupKey(
   sourceIndex: number,
 ): string {
   return `${sourceId}/${level}/${tileX}/${tileY}|${layerId}|${sourceIndex}`;
+}
+
+function createSymbolLayoutCacheKey(
+  layerId: string,
+  symbolStyle: SymbolLayerStyle,
+  symbolText: ReturnType<typeof resolveSymbolTextContent>,
+): string {
+  const sections = symbolText.sections?.map(section => [
+    section.image?.name ?? '',
+    section.scale,
+    section.fontStack?.join(',') ?? '',
+    section.text,
+    section.textColor ?? '',
+    section.verticalAlign,
+  ].join(':')).join('\u0001') ?? '';
+
+  return [
+    layerId,
+    symbolText.key,
+    symbolText.text,
+    sections,
+    symbolStyle.iconImage ? resolveStyleImageName(symbolStyle.iconImage) ?? '' : '',
+    symbolStyle.iconPadding ?? '',
+    symbolStyle.iconSize ?? '',
+    symbolStyle.iconTextFit ?? '',
+    symbolStyle.iconTextFitPadding?.join(',') ?? '',
+    symbolStyle.textLetterSpacing ?? '',
+    symbolStyle.textLineHeight ?? '',
+    symbolStyle.textMaxWidth ?? '',
+    symbolStyle.textPadding ?? '',
+    symbolStyle.textSize ?? '',
+    symbolStyle.textTransform ?? '',
+  ].join('\u0001');
+}
+
+function getSymbolLayoutCacheEntry(
+  style: StyleSpecification,
+  styleEpoch: number,
+  cacheKey: string,
+  factory: () => SymbolLayoutCacheEntry,
+): SymbolLayoutCacheEntry {
+  let styleCache = symbolLayoutCacheByStyle.get(style);
+  if (!styleCache) {
+    styleCache = new Map<number, Map<string, SymbolLayoutCacheEntry>>();
+    symbolLayoutCacheByStyle.set(style, styleCache);
+  }
+
+  let epochCache = styleCache.get(styleEpoch);
+  if (!epochCache) {
+    epochCache = new Map<string, SymbolLayoutCacheEntry>();
+    styleCache.set(styleEpoch, epochCache);
+  }
+
+  const cached = epochCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const created = factory();
+  epochCache.set(cacheKey, created);
+  return created;
 }
 
 export function compareSymbolPlacements(

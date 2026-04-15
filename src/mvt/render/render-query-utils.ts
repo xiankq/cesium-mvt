@@ -16,7 +16,11 @@ export interface RenderedSymbolRenderable {
       show?: boolean;
     };
   };
+  item?: {
+    show?: boolean;
+  };
   index: number;
+  visible?: boolean;
 }
 
 export interface RenderedTileCoordinate {
@@ -106,5 +110,15 @@ export function getVisibleSymbolSourceIndexes(
 }
 
 export function isSymbolPlacementVisible(placement: RenderedSymbolPlacement): boolean {
-  return placement.renderables.some(renderable => renderable.collection.get(renderable.index).show !== false);
+  return placement.renderables.some((renderable) => {
+    if (renderable.visible !== undefined) {
+      return renderable.visible;
+    }
+
+    if (renderable.item) {
+      return renderable.item.show !== false;
+    }
+
+    return renderable.collection.get(renderable.index).show !== false;
+  });
 }

@@ -26,6 +26,8 @@ import { isAbortError } from './utils/common';
 import { TileBudget } from './utils/tile-budget';
 
 const DEFAULT_SHARED_CACHE_SIZE = 320 * 1024 * 1024;
+const DEFAULT_SYMBOL_MATERIALIZATION_CHUNK_SIZE = 16;
+const DEFAULT_SYMBOL_MATERIALIZATION_BUDGET_MS = 4;
 
 interface RequestSchedulerRuntime {
   update: () => void;
@@ -92,6 +94,8 @@ export class CesiumVectorTileCoordinator {
     this.renderManager = new RenderManager({
       crossSourceCollisions: options.crossSourceCollisions,
       root: options.root,
+      symbolMaterializationChunkSize: DEFAULT_SYMBOL_MATERIALIZATION_CHUNK_SIZE,
+      symbolMaterializationBudgetMs: DEFAULT_SYMBOL_MATERIALIZATION_BUDGET_MS,
       tileWidth: options.tileWidth,
     });
     this.cacheManager.setOnEvict((key: string) => {
@@ -126,12 +130,15 @@ export class CesiumVectorTileCoordinator {
         frameState.viewportWidth,
       );
 
-      if (!tileSelection || !this.scheduler.shouldUpdate(tileSelection)) {
-        return;
+      if (tileSelection && this.scheduler.shouldUpdate(tileSelection)) {
+        this.scheduler.commit(tileSelection);
+        this.processTileSelection(tileSelection.coordinates);
       }
 
-      this.scheduler.commit(tileSelection);
-      this.processTileSelection(tileSelection.coordinates);
+      const symbolDrainResult = this.renderManager.drainPendingSymbolTasks(DEFAULT_SYMBOL_MATERIALIZATION_BUDGET_MS);
+      if (symbolDrainResult.processedCount > 0 || symbolDrainResult.remainingCount > 0) {
+        this.renderRequested = true;
+      }
     }
     finally {
       (RequestScheduler as unknown as RequestSchedulerRuntime).update();
@@ -213,23 +220,28 @@ export class CesiumVectorTileCoordinator {
 
     const styleIndex = this.styleManager.getStyleIndex();
 
-    if (target.sourceLayer) {
-      this.renderManager.refreshSourceLayer(
-        target.sourceId,
-        target.sourceLayer,
-        key => this.cacheManager.get(key),
-        style,
-        styleIndex,
-      );
-    }
-    else {
-      this.renderManager.refreshSource(
-        target.sourceId,
-        key => this.cacheManager.get(key),
-        style,
-        styleIndex,
-      );
-    }
+    this.renderManager.runBatchedMutations(() => {
+      if (target.sourceLayer) {
+        this.renderManager.refreshSourceLayer(
+          target.sourceId,
+          target.sourceLayer,
+          key => this.cacheManager.get(key),
+          style,
+          styleIndex,
+          this.styleManager.getStyleEpoch(),
+        );
+      }
+      else {
+        this.renderManager.refreshSource(
+          target.sourceId,
+          key => this.cacheManager.get(key),
+          style,
+          styleIndex,
+          this.styleManager.getStyleEpoch(),
+        );
+      }
+    });
+    this.renderManager.drainPendingSymbolTasks(Number.POSITIVE_INFINITY);
     this.renderRequested = true;
   }
 
@@ -272,105 +284,107 @@ export class CesiumVectorTileCoordinator {
       return;
     }
 
-    const availableSourceIds = this.sourceManager.getSourceIds();
-    const visibleKeys = new Set<string>();
-    const nextRequestedKeys = new Set<string>();
-    const nextRequestedSourceIds = new Set<string>();
-    const nextRequestCandidateKeys = new Set<string>();
-    const requestCandidates: Array<{
-      coordinate: TileCoordinate;
-      priorityScore: number;
-      sourceId: string;
-    }> = [];
-    const selectionCenter = computeTileSelectionCenter(coordinates);
-    const now = Date.now();
+    this.renderManager.runBatchedMutations(() => {
+      const availableSourceIds = this.sourceManager.getSourceIds();
+      const visibleKeys = new Set<string>();
+      const nextRequestedKeys = new Set<string>();
+      const nextRequestedSourceIds = new Set<string>();
+      const nextRequestCandidateKeys = new Set<string>();
+      const requestCandidates: Array<{
+        coordinate: TileCoordinate;
+        priorityScore: number;
+        sourceId: string;
+      }> = [];
+      const selectionCenter = computeTileSelectionCenter(coordinates);
+      const now = Date.now();
 
-    for (const sourceId of availableSourceIds) {
-      const constraints = this.sourceManager.getSourceConstraints(sourceId);
-      const sourceSelection = this.scheduler.resolveSourceTiles(
-        coordinates,
-        sourceId,
-        (sid: string, level: number, x: number, y: number) =>
-          this.getTileAvailability(sid, level, x, y),
-        constraints,
-      );
-      const sourceRetryAt = this.sourceManager.getNextRetryAt(sourceId);
-
-      for (const coord of sourceSelection.readyCoordinates) {
-        const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
-        visibleKeys.add(key);
-        this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
-      }
-
-      for (const coord of sourceSelection.fallbackCoordinates) {
-        const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
-        visibleKeys.add(key);
-        this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
-      }
-
-      for (const coord of sourceSelection.requestCoordinates) {
-        const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
-        const lifecycle = computeTileLifecycle({
-          coordinate: coord,
-          isCached: this.cacheManager.has(key),
-          isPending: this.cacheManager.hasPending(key),
-          isVisible: true,
-          sourceConstraints: constraints,
-        });
-
-        if (lifecycle === 'show') {
-          this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
-          continue;
-        }
-
-        nextRequestedKeys.add(key);
-        nextRequestedSourceIds.add(sourceId);
-        if (nextRequestCandidateKeys.has(key)) {
-          continue;
-        }
-        nextRequestCandidateKeys.add(key);
-        requestCandidates.push({
-          coordinate: coord,
-          priorityScore: computeRequestPriorityScore(
-            coord,
-            selectionCenter,
-            sourceRetryAt,
-            now,
-          ),
+      for (const sourceId of availableSourceIds) {
+        const constraints = this.sourceManager.getSourceConstraints(sourceId);
+        const sourceSelection = this.scheduler.resolveSourceTiles(
+          coordinates,
           sourceId,
-        });
+          (sid: string, level: number, x: number, y: number) =>
+            this.getTileAvailability(sid, level, x, y),
+          constraints,
+        );
+        const sourceRetryAt = this.sourceManager.getNextRetryAt(sourceId);
+
+        for (const coord of sourceSelection.readyCoordinates) {
+          const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
+          visibleKeys.add(key);
+          this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
+        }
+
+        for (const coord of sourceSelection.fallbackCoordinates) {
+          const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
+          visibleKeys.add(key);
+          this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
+        }
+
+        for (const coord of sourceSelection.requestCoordinates) {
+          const key = this.resolveRenderTileKey(sourceId, coord.level, coord.x, coord.y);
+          const lifecycle = computeTileLifecycle({
+            coordinate: coord,
+            isCached: this.cacheManager.has(key),
+            isPending: this.cacheManager.hasPending(key),
+            isVisible: true,
+            sourceConstraints: constraints,
+          });
+
+          if (lifecycle === 'show') {
+            this.showResolvedTile(sourceId, coord.level, coord.x, coord.y);
+            continue;
+          }
+
+          nextRequestedKeys.add(key);
+          nextRequestedSourceIds.add(sourceId);
+          if (nextRequestCandidateKeys.has(key)) {
+            continue;
+          }
+          nextRequestCandidateKeys.add(key);
+          requestCandidates.push({
+            coordinate: coord,
+            priorityScore: computeRequestPriorityScore(
+              coord,
+              selectionCenter,
+              sourceRetryAt,
+              now,
+            ),
+            sourceId,
+          });
+        }
       }
-    }
 
-    requestCandidates.sort(compareRequestCandidates);
+      requestCandidates.sort(compareRequestCandidates);
 
-    let nextPriority = 0;
-    for (const candidate of requestCandidates) {
-      void this.requestTile(
-        candidate.sourceId,
-        candidate.coordinate.level,
-        candidate.coordinate.x,
-        candidate.coordinate.y,
-        nextPriority,
-      );
-      nextPriority++;
-    }
-
-    for (const key of this.requestedTileKeys) {
-      if (!nextRequestedKeys.has(key)) {
-        this.sourceManager.abort(key);
+      let nextPriority = 0;
+      for (const candidate of requestCandidates) {
+        void this.requestTile(
+          candidate.sourceId,
+          candidate.coordinate.level,
+          candidate.coordinate.x,
+          candidate.coordinate.y,
+          nextPriority,
+        );
+        nextPriority++;
       }
-    }
-    this.requestedTileKeys.clear();
-    for (const key of nextRequestedKeys) {
-      this.requestedTileKeys.add(key);
-    }
-    this.requestedSourceIds.clear();
-    for (const sourceId of nextRequestedSourceIds) {
-      this.requestedSourceIds.add(sourceId);
-    }
 
-    this.hideInvisibleTiles(visibleKeys);
+      for (const key of this.requestedTileKeys) {
+        if (!nextRequestedKeys.has(key)) {
+          this.sourceManager.abort(key);
+        }
+      }
+      this.requestedTileKeys.clear();
+      for (const key of nextRequestedKeys) {
+        this.requestedTileKeys.add(key);
+      }
+      this.requestedSourceIds.clear();
+      for (const sourceId of nextRequestedSourceIds) {
+        this.requestedSourceIds.add(sourceId);
+      }
+
+      this.hideInvisibleTiles(visibleKeys);
+    });
   }
 
   private hideInvisibleTiles(visibleKeys: Set<string>): void {
@@ -432,7 +446,14 @@ export class CesiumVectorTileCoordinator {
     if (this.cacheManager.has(key)) {
       const tile = this.cacheManager.get(key)!;
       if (style) {
-        this.renderManager.mount(key, tile, style, styleIndex);
+        this.renderManager.mount(
+          key,
+          tile,
+          style,
+          styleIndex,
+          priority,
+          this.styleManager.getStyleEpoch(),
+        );
         this.cacheManager.setVisibility(key, true);
       }
       return;
@@ -481,7 +502,14 @@ export class CesiumVectorTileCoordinator {
         return;
       }
 
-      this.renderManager.mount(key, tile, style, styleIndex);
+      this.renderManager.mount(
+        key,
+        tile,
+        style,
+        styleIndex,
+        priority,
+        this.styleManager.getStyleEpoch(),
+      );
       this.cacheManager.set(key, tile);
       this.renderRequested = true;
     }

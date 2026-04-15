@@ -11,16 +11,20 @@ import type {
 } from './bucket-symbol-types';
 import { WebMercatorTilingScheme } from 'cesium';
 import { parseRenderTileCoordinateFromKey } from '../render-tile';
-import { createSymbolCollections } from './bucket-symbol-collection-builder';
+import {
+  createSymbolCollections,
+  materializeSymbolCollections,
+} from './bucket-symbol-collection-builder';
 import { createSymbolPlacementGrid } from './symbol-placement-grid';
 
 export { resolveSymbolRenderDecision } from './symbol-render-utils';
 
 const WEB_MERCATOR_TILING_SCHEME = new WebMercatorTilingScheme();
 
-export function createBucketSymbolTileHandle({
+export function createBucketSymbolTileHandlePlan({
   bucketTile,
   featureStateResolver,
+  styleEpoch = 0,
   tileWidth = 256,
   styleIndex,
   style,
@@ -56,6 +60,7 @@ export function createBucketSymbolTileHandle({
         sourceId,
         zoom,
         coordinate,
+        styleEpoch,
         tileWidth,
         tileRectangle,
         placementGrid,
@@ -77,9 +82,34 @@ export function createBucketSymbolTileHandle({
       0,
     ),
     collections,
+    materializationCursor: 0,
     placements,
     key: bucketTile.key,
   };
+}
+
+export function createBucketSymbolTileHandle({
+  bucketTile,
+  featureStateResolver,
+  styleEpoch = 0,
+  tileWidth = 256,
+  styleIndex,
+  style,
+}: CreateBucketSymbolTileHandleOptions): BucketSymbolTileHandle | undefined {
+  const handle = createBucketSymbolTileHandlePlan({
+    bucketTile,
+    featureStateResolver,
+    styleEpoch,
+    tileWidth,
+    styleIndex,
+    style,
+  });
+  if (!handle) {
+    return undefined;
+  }
+
+  materializeSymbolCollections(handle, true, Number.POSITIVE_INFINITY);
+  return handle;
 }
 
 function isSymbolBucket(bucket: Bucket): bucket is Bucket & {

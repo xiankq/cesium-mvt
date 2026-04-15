@@ -69,6 +69,27 @@ const EMPTY_STYLE_CONTEXT: StylePropertyContext = {
   zoom: 0,
 };
 
+export interface MaterialCacheMetrics {
+  hitCount: number;
+  missCount: number;
+}
+
+const materialCacheMetrics: MaterialCacheMetrics = {
+  hitCount: 0,
+  missCount: 0,
+};
+
+export function getMaterialCacheMetrics(): MaterialCacheMetrics {
+  return {
+    ...materialCacheMetrics,
+  };
+}
+
+export function resetMaterialCacheMetrics(): void {
+  materialCacheMetrics.hitCount = 0;
+  materialCacheMetrics.missCount = 0;
+}
+
 const circleResolvers = new WeakMap<
   StyleSpecification,
   WeakMap<CircleLayerSpecification, CircleLayerStyleResolver>
@@ -159,6 +180,7 @@ export function getCircleMaterial(
         size: resolvedStyle.radius * 2,
       });
     },
+    createCircleMaterialCacheKey,
   );
 }
 
@@ -178,6 +200,7 @@ export function getLineMaterial(
       color: toColor(resolvedStyle.color, resolvedStyle.opacity, DEFAULT_LINE_COLOR),
       width: resolvedStyle.width,
     }),
+    createLineMaterialCacheKey,
   );
 }
 
@@ -229,6 +252,7 @@ export function getLineCollectionMaterial(
         color,
       });
     },
+    createLineCollectionMaterialCacheKey,
   );
 }
 
@@ -256,6 +280,7 @@ export function getFillMaterial(
         outlineWidth: resolvedStyle.outlineColor ? 1 : 0,
       });
     },
+    createFillMaterialCacheKey,
   );
 }
 
@@ -291,12 +316,7 @@ export function getFillPatternMaterial(
         repeat: new Cartesian2(repeatX, repeatY),
       });
     },
-    resolvedStyle => JSON.stringify({
-      pattern: resolvedStyle.pattern,
-      color: resolvedStyle.color,
-      opacity: resolvedStyle.opacity,
-      tileWidth,
-    }),
+    resolvedStyle => createFillPatternMaterialCacheKey(resolvedStyle, tileWidth),
   );
 }
 
@@ -332,12 +352,7 @@ export function getFillExtrusionMaterial(
         repeat: new Cartesian2(repeatX, repeatY),
       });
     },
-    resolvedStyle => JSON.stringify({
-      color: resolvedStyle.color,
-      opacity: resolvedStyle.opacity,
-      pattern: resolvedStyle.pattern,
-      tileWidth,
-    }),
+    resolvedStyle => createFillExtrusionMaterialCacheKey(resolvedStyle, tileWidth),
   );
 }
 
@@ -349,7 +364,7 @@ function getResolvedMaterial<TLayer extends object, TResolved, TMaterial>(
   context: StylePropertyContext,
   createResolver: () => LayerStyleResolver<TResolved>,
   createMaterial: (resolved: TResolved) => TMaterial,
-  createCacheKey: (resolved: TResolved) => string = resolved => JSON.stringify(resolved),
+  createCacheKey: (resolved: TResolved) => string,
 ): TMaterial {
   const resolver = getOrCreateResolver(
     resolverCacheByStyle,
@@ -368,11 +383,13 @@ function getResolvedMaterial<TLayer extends object, TResolved, TMaterial>(
 
   const cachedMaterial = cacheByLayer.get(materialKey);
   if (cachedMaterial) {
+    materialCacheMetrics.hitCount += 1;
     return cachedMaterial;
   }
 
   const material = createMaterial(resolved);
   cacheByLayer.set(materialKey, material);
+  materialCacheMetrics.missCount += 1;
   return material;
 }
 
@@ -416,6 +433,81 @@ function getOrCreateLayerMaterialCache<TLayer extends object, TMaterial>(
   }
 
   return cache;
+}
+
+function createCircleMaterialCacheKey(resolvedStyle: {
+  color: string;
+  opacity: number;
+  radius: number;
+}): string {
+  return `circle|${resolvedStyle.color}|${resolvedStyle.opacity}|${resolvedStyle.radius}`;
+}
+
+function createLineMaterialCacheKey(resolvedStyle: {
+  color: string;
+  opacity: number;
+  width: number;
+}): string {
+  return `line|${resolvedStyle.color}|${resolvedStyle.opacity}|${resolvedStyle.width}`;
+}
+
+function createLineCollectionMaterialCacheKey(resolvedStyle: {
+  color: string;
+  dashArray?: readonly number[];
+  opacity: number;
+  pattern?: string;
+  width: number;
+}): string {
+  return [
+    'line-collection',
+    resolvedStyle.color,
+    resolvedStyle.opacity,
+    resolvedStyle.width,
+    resolvedStyle.pattern ?? '',
+    resolvedStyle.dashArray?.join(',') ?? '',
+  ].join('|');
+}
+
+function createFillMaterialCacheKey(resolvedStyle: {
+  color: string;
+  opacity: number;
+  outlineColor?: string;
+}): string {
+  return [
+    'fill',
+    resolvedStyle.color,
+    resolvedStyle.opacity,
+    resolvedStyle.outlineColor ?? '',
+    resolvedStyle.outlineColor ? 1 : 0,
+  ].join('|');
+}
+
+function createFillPatternMaterialCacheKey(resolvedStyle: {
+  color: string;
+  opacity: number;
+  pattern?: string;
+}, tileWidth: number): string {
+  return [
+    'fill-pattern',
+    resolvedStyle.color,
+    resolvedStyle.opacity,
+    resolvedStyle.pattern ?? '',
+    tileWidth,
+  ].join('|');
+}
+
+function createFillExtrusionMaterialCacheKey(resolvedStyle: {
+  color: string;
+  opacity: number;
+  pattern?: string;
+}, tileWidth: number): string {
+  return [
+    'fill-extrusion',
+    resolvedStyle.color,
+    resolvedStyle.opacity,
+    resolvedStyle.pattern ?? '',
+    tileWidth,
+  ].join('|');
 }
 
 function toColor(

@@ -15,13 +15,15 @@ import type { BucketCircleTileHandle } from './backend/bucket-circle-backend';
 import type { BucketFillTileHandle } from './backend/bucket-fill-backend';
 import type { BucketFillExtrusionTileHandle } from './backend/bucket-fill-extrusion-backend';
 import type { BucketLineTileHandle } from './backend/bucket-line-backend';
-import type { BucketSymbolTileHandle } from './backend/bucket-symbol-types';
+import type {
+  BucketSymbolTileHandle,
+  CreateBucketSymbolTileHandleOptions,
+} from './backend/bucket-symbol-types';
 import { PrimitiveCollection } from 'cesium';
 import { createBucketCircleTileHandle } from './backend/bucket-circle-backend';
 import { createBucketFillTileHandle } from './backend/bucket-fill-backend';
 import { createBucketFillExtrusionTileHandle } from './backend/bucket-fill-extrusion-backend';
 import { createBucketLineTileHandle } from './backend/bucket-line-backend';
-import { createBucketSymbolTileHandle } from './backend/bucket-symbol-backend';
 
 type MountedCollection
   = | BufferPointCollection
@@ -45,6 +47,8 @@ export interface BucketRenderedTileHandle {
   key: string;
   lines?: BucketLineTileHandle;
   sourceLayers: string[];
+  symbolRequest?: CreateBucketSymbolTileHandleOptions;
+  symbolPriority?: number;
   symbols?: BucketSymbolTileHandle;
   tileCollection: PrimitiveCollection;
   visible: boolean;
@@ -53,6 +57,8 @@ export interface BucketRenderedTileHandle {
 export interface CreateBucketRenderedTileHandleOptions {
   bucketTile: ParsedTileResult;
   featureStateResolver?: FeatureStateResolver;
+  symbolPriority?: number;
+  styleEpoch?: number;
   style: StyleSpecification;
   styleIndex?: StyleIndex;
   tileWidth?: number;
@@ -63,6 +69,8 @@ export function createBucketRenderedTileHandle({
   featureStateResolver,
   tileWidth,
   styleIndex,
+  symbolPriority,
+  styleEpoch,
   style,
 }: CreateBucketRenderedTileHandleOptions): BucketRenderedTileHandle {
   const circles = createBucketCircleTileHandle({
@@ -91,13 +99,6 @@ export function createBucketRenderedTileHandle({
     style,
     styleIndex,
   });
-  const symbols = createBucketSymbolTileHandle({
-    bucketTile,
-    featureStateResolver,
-    tileWidth,
-    style,
-    styleIndex,
-  });
 
   const collections = createOrderedCollectionEntries({
     circles,
@@ -106,14 +107,13 @@ export function createBucketRenderedTileHandle({
     lines,
     style,
     styleIndex,
-    symbols,
   });
   const byteLength
     = (circles?.byteLength ?? 0)
       + (lines?.byteLength ?? 0)
       + (fills?.byteLength ?? 0)
       + (fillExtrusions?.byteLength ?? 0)
-      + (symbols?.byteLength ?? 0);
+      + getSymbolBucketByteLength(bucketTile);
   const tileCollection = new PrimitiveCollection();
 
   return {
@@ -125,7 +125,18 @@ export function createBucketRenderedTileHandle({
     key: bucketTile.key,
     lines,
     sourceLayers: collectSourceLayers(bucketTile),
-    symbols,
+    symbolRequest: hasSymbolBuckets(bucketTile)
+      ? {
+          bucketTile,
+          featureStateResolver,
+          priority: symbolPriority,
+          styleEpoch,
+          style,
+          styleIndex,
+          tileWidth,
+        }
+      : undefined,
+    symbolPriority,
     tileCollection,
     visible: byteLength > 0,
   };
@@ -155,11 +166,37 @@ export function setBucketRenderedTileVisibility(
   return true;
 }
 
+export function attachBucketRenderedTileSymbols(
+  handle: BucketRenderedTileHandle,
+  symbols: BucketSymbolTileHandle,
+): boolean {
+  if (handle.symbols) {
+    return false;
+  }
+
+  if (handle.tileCollection.isDestroyed()) {
+    return false;
+  }
+
+  handle.symbols = symbols;
+
+  const symbolCollections = symbols.collections.map(entry => ({
+    collection: entry.collection,
+  }));
+  handle.collections.push(...symbolCollections);
+  mountRenderedCollections(handle.tileCollection, symbolCollections);
+  setRenderedCollectionsVisibility(symbolCollections, handle.visible);
+  return true;
+}
+
 export function destroyBucketRenderedTileHandle(
   root: PrimitiveCollection,
   handle: BucketRenderedTileHandle,
 ) {
   destroyRenderedCollection(root, handle.tileCollection);
+  handle.symbolRequest = undefined;
+  handle.symbolPriority = undefined;
+  handle.symbols = undefined;
   handle.visible = false;
 }
 
@@ -170,7 +207,6 @@ function createOrderedCollectionEntries({
   lines,
   style,
   styleIndex,
-  symbols,
 }: {
   circles: BucketCircleTileHandle | undefined;
   fills: BucketFillTileHandle | undefined;
@@ -178,7 +214,6 @@ function createOrderedCollectionEntries({
   lines: BucketLineTileHandle | undefined;
   style: StyleSpecification;
   styleIndex?: StyleIndex;
-  symbols: BucketSymbolTileHandle | undefined;
 }): MountedCollectionEntry[] {
   const layerOrder = styleIndex?.layerOrderById ?? new Map(
     style.layers.map((layer, index) => [layer.id, index]),
@@ -188,7 +223,6 @@ function createOrderedCollectionEntries({
     ...(lines?.collections ?? []),
     ...(fills?.collections ?? []),
     ...(fillExtrusions?.collections ?? []),
-    ...(symbols?.collections ?? []),
   ].map((entry, index) => ({
     collection: entry.collection,
     index,
@@ -206,6 +240,24 @@ function createOrderedCollectionEntries({
   return entries.map(({ collection }) => ({
     collection,
   }));
+}
+
+function hasSymbolBuckets(bucketTile: ParsedTileResult): boolean {
+  return bucketTile.buckets.some(bucket => bucket.type === 'symbol');
+}
+
+function getSymbolBucketByteLength(bucketTile: ParsedTileResult): number {
+  let byteLength = 0;
+
+  for (const bucket of bucketTile.buckets) {
+    if (bucket.type !== 'symbol') {
+      continue;
+    }
+
+    byteLength += bucket.stats.byteLength;
+  }
+
+  return byteLength;
 }
 
 function mountRenderedCollections(

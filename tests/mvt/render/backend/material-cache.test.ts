@@ -4,7 +4,12 @@ import type {
   LineLayerSpecification,
   StyleSpecification,
 } from '@maplibre/maplibre-gl-style-spec';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+
+afterEach(async () => {
+  const { resetMaterialCacheMetrics } = await import('@/mvt/render/backend/material-cache');
+  resetMaterialCacheMetrics();
+});
 
 describe('material-cache', () => {
   it('reuses circle materials for the same style layer', async () => {
@@ -148,6 +153,26 @@ describe('material-cache', () => {
     const material = getFillMaterial(style, layer);
 
     expect(material.outlineWidth).toBe(1);
+  });
+
+  it('应该统计材质缓存命中和未命中次数', async () => {
+    const { getCircleMaterial, getMaterialCacheMetrics, resetMaterialCacheMetrics } = await import('@/mvt/render/backend/material-cache');
+    resetMaterialCacheMetrics();
+    const style = createStyle();
+    const layer = style.layers[0] as CircleLayerSpecification;
+
+    expect(getMaterialCacheMetrics()).toMatchObject({
+      hitCount: 0,
+      missCount: 0,
+    });
+
+    getCircleMaterial(style, layer);
+    getCircleMaterial(style, layer);
+
+    expect(getMaterialCacheMetrics()).toMatchObject({
+      hitCount: 1,
+      missCount: 1,
+    });
   });
 });
 
