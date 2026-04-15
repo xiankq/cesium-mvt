@@ -2,6 +2,10 @@
 
 一个基于 Cesium 的实验性 MVT 渲染项目。实现上大量参考了 MapLibre GL JS 的相关代码和设计，当前实现依赖 Cesium `1.140.0` 中 `Buffer*Collection` 相关能力。
 
+## 在线预览
+
+https://xiankq.github.io/cesium-mvt/
+
 ## 现在能做什么
 
 - 加载并渲染常见的 MVT 和 GeoJSON 场景
